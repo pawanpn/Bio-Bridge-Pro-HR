@@ -3,6 +3,7 @@ use serde_json::Value;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::errors::AppError;
 
 #[derive(Serialize)]
 struct GoogleClaims {
@@ -21,7 +22,7 @@ struct TokenResponse {
 }
 
 /// Generates an OAuth bearer token for Google Drive API
-async fn generate_bearer_token() -> Result<String, String> {
+async fn generate_bearer_token() -> Result<String, AppError> {
     // In production, this JSON would be read from the filesystem or securely passed by the user
     // We mock the credentials layout here.
     let private_key_pem = "-----BEGIN PRIVATE KEY-----\nMOCK_KEY\n-----END PRIVATE KEY-----";
@@ -46,10 +47,10 @@ async fn generate_bearer_token() -> Result<String, String> {
     header.typ = Some("JWT".to_string());
     
     let encoding_key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
-        .map_err(|e| format!("Invalid RSA key: {}", e))?;
+        .map_err(|e| AppError::AuthError(format!("Invalid RSA key: {}", e)))?;
     
     let jwt = encode(&header, &claims, &encoding_key)
-        .map_err(|e| format!("JWT generation failed: {}", e))?;
+        .map_err(|e| AppError::AuthError(format!("JWT generation failed: {}", e)))?;
 
     // Simulate token retrieval network call since mock keys will fail real endpoints
     println!("Mock generated JWT: {}", jwt);
@@ -64,7 +65,7 @@ pub async fn sync_logs_to_drive(
     year: i32,
     month: u32,
     logs: &Value,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let token = generate_bearer_token().await?;
     let path = format!("{}/{}/{}/{}/Logs.json", org, branch, year, month);
     

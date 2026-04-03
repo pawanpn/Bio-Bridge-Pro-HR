@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
+import { AppConfig } from '../config/appConfig';
+import { PrimaryButton } from './common/PrimaryButton';
+import { StandardInput } from './common/StandardInput';
 
 export const SetupWizard: React.FC = () => {
   const [step, setStep] = useState(1);
@@ -52,7 +55,7 @@ export const SetupWizard: React.FC = () => {
     <div style={styles.overlay}>
       <div style={styles.modal}>
         <div style={styles.header}>
-          <h2>Bio Bridge Pro HR - Setup</h2>
+          <h2>{AppConfig.appName} - Setup</h2>
           <div style={{ color: 'var(--text-muted)' }}>Step {step} of 4</div>
         </div>
 
@@ -64,27 +67,27 @@ export const SetupWizard: React.FC = () => {
         {step === 1 && (
           <div>
             <h3>Enterprise Registration</h3>
-            <input 
+            <StandardInput 
               placeholder="Authorization Key" 
               value={formData.authKey} 
               onChange={e => setFormData({ ...formData, authKey: e.target.value})} 
             />
-            <input 
+            <StandardInput 
               placeholder="Company Name" 
               value={formData.companyName} 
               onChange={e => setFormData({ ...formData, companyName: e.target.value})} 
             />
-            <input 
+            <StandardInput 
               placeholder="Address" 
               value={formData.address} 
               onChange={e => setFormData({ ...formData, address: e.target.value})} 
             />
-            <input 
+            <StandardInput 
               placeholder="Contact Info" 
               value={formData.contactInfo} 
               onChange={e => setFormData({ ...formData, contactInfo: e.target.value})} 
             />
-            <button className="accent" onClick={handleVerify} style={{ marginTop: '16px', width: '100%' }}>Verify License & Next</button>
+            <PrimaryButton isAccent style={{ marginTop: '16px', width: '100%' }} onClick={handleVerify} label="Verify License & Next" />
           </div>
         )}
 
@@ -96,8 +99,8 @@ export const SetupWizard: React.FC = () => {
                Expiry Date: <strong>{formData.licenseExpiry}</strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <button onClick={prevStep}>Back</button>
-              <button className="accent" onClick={nextStep}>Next</button>
+              <PrimaryButton onClick={prevStep} label="Back" />
+              <PrimaryButton isAccent onClick={nextStep} label="Next" />
             </div>
           </div>
         )}
@@ -106,10 +109,10 @@ export const SetupWizard: React.FC = () => {
           <div>
             <h3>Multi-Branch Configuration</h3>
             <p>Define your primary branch. Sub-branches can be added later via Settings.</p>
-            <input value="Head Office" disabled />
+            <StandardInput value="Head Office" disabled />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '16px' }}>
-              <button onClick={prevStep}>Back</button>
-              <button className="accent" onClick={nextStep}>Next</button>
+              <PrimaryButton onClick={prevStep} label="Back" />
+              <PrimaryButton isAccent onClick={nextStep} label="Next" />
             </div>
           </div>
         )}
@@ -136,8 +139,8 @@ export const SetupWizard: React.FC = () => {
             </select>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '24px' }}>
-              <button onClick={prevStep}>Back</button>
-              <button className="accent" onClick={handleFinish}>Complete Setup</button>
+              <PrimaryButton onClick={prevStep} label="Back" />
+              <PrimaryButton isAccent onClick={handleFinish} label="Complete Setup" />
             </div>
           </div>
         )}

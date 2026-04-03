@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { AttendanceConsole } from '../components/AttendanceConsole';
 import { useShortcuts } from '../hooks/useShortcuts';
+import { AppConfig } from '../config/appConfig';
 import { Calendar, Search, LayoutDashboard, Monitor, Users, FileText, Settings } from 'lucide-react';
 
 export const MainLayout: React.FC = () => {
@@ -21,7 +22,7 @@ export const MainLayout: React.FC = () => {
       {/* Sidebar */}
       <div style={{ width: '250px', backgroundColor: 'var(--sidebar-bg)', color: 'white', display: 'flex', flexDirection: 'column' }}>
         <div style={{ padding: '24px', fontSize: '20px', fontWeight: 'bold', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-          Bio Bridge Pro HR
+          {AppConfig.appName}
         </div>
         <div style={{ flex: 1, padding: '16px 0' }}>
           <SidebarItem icon={<LayoutDashboard />} label="Dashboard Overview" active={activeTab === 'Overview'} onClick={() => {setActiveTab('Overview'); navigate('/dashboard');}} />
