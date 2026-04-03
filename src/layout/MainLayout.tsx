@@ -26,7 +26,7 @@ export const MainLayout: React.FC = () => {
         </div>
         <div style={{ flex: 1, padding: '16px 0' }}>
           <SidebarItem icon={<LayoutDashboard />} label="Dashboard Overview" active={activeTab === 'Overview'} onClick={() => {setActiveTab('Overview'); navigate('/dashboard');}} />
-          <SidebarItem icon={<Monitor />} label="Device Management" active={activeTab === 'Devices'} onClick={() => setActiveTab('Devices')} />
+          <SidebarItem icon={<Monitor />} label="Device Management" active={activeTab === 'Devices'} onClick={() => {setActiveTab('Devices'); navigate('/device-settings');}} />
           <SidebarItem icon={<Users />} label="Master Settings" active={activeTab === 'Masters'} onClick={() => setActiveTab('Masters')} />
           <SidebarItem icon={<FileText />} label="Reports" active={activeTab === 'Reports'} onClick={() => setActiveTab('Reports')} />
         </div>
