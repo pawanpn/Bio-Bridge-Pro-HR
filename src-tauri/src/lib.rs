@@ -17,7 +17,7 @@ use aes_gcm::{
     Aes256Gcm, Nonce
 };
 use rand::Rng;
-use sha2::{Sha256, Digest};
+use sha2::Digest;
 
 // ── Global App State ───────────────────────────────────────────────────────
 
@@ -46,8 +46,7 @@ fn save_cloud_credentials(
     root_folder_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), AppError> {
-    let key: ServiceAccountKey = serde_json::from_str(&json_content)
-        .map_err(|e: serde_json::Error| AppError::SerializationError(
+        .map_err(|e: serde_json::Error| crate::errors::AppError::SerializationError(
             format!("Invalid Service Account JSON: {}", e)
         ))?;
 
@@ -65,9 +64,9 @@ fn save_cloud_credentials(
 }
 
 #[tauri::command]
-fn get_cloud_config(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
-    let key_guard = state.service_account_key.lock().map_err(lock_err)?;
-    let root_guard = state.root_folder_id.lock().map_err(lock_err)?;
+fn get_cloud_config(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, crate::errors::AppError> {
+    let key_guard = state.service_account_key.lock().map_err(|_| lock_err(()))?;
+    let root_guard = state.root_folder_id.lock().map_err(|_| lock_err(()))?;
     
     if let Some(key) = key_guard.as_ref() {
         Ok(serde_json::json!({
@@ -92,10 +91,10 @@ fn get_hardware_id() -> String {
 async fn activate_license_key(
     key: String,
     json_key: String,
-    app: AppHandle,
-) -> Result<String, AppError> {
-    let sa_key: ServiceAccountKey = serde_json::from_str(&json_key)
-        .map_err(|e| AppError::SerializationError(format!("Invalid Service Account JSON: {}", e)))?;
+    app: tauri::AppHandle,
+) -> Result<String, crate::errors::AppError> {
+    let sa_key: crate::cloud::gdrive::ServiceAccountKey = serde_json::from_str(&json_key)
+        .map_err(|e: serde_json::Error| crate::errors::AppError::SerializationError(format!("Invalid Service Account JSON: {}", e)))?;
     
     // 1. Fetch current License Database from Drive
     let folder_id = "1jwryWTPbvvBc39EVBeZp-JJgF-WDC_Ps";
@@ -321,9 +320,9 @@ async fn sync_device_logs(
 }
 
 #[tauri::command]
-async fn scan_network(base_ip: String, app: AppHandle) -> Result<String, AppError> {
+async fn scan_network(base_ip: String, app: tauri::AppHandle) -> Result<String, crate::errors::AppError> {
     tauri::async_runtime::spawn(async move {
-        hardware::scanner::scan_network(app, base_ip).await;
+        crate::hardware::scanner::scan_network(app, base_ip).await;
     });
     Ok("Network scan started".to_string())
 }
@@ -356,11 +355,11 @@ fn save_device_config(
 
 #[tauri::command]
 async fn start_realtime_sync(
-    app: AppHandle,
-    state: State<'_, AppState>,
-) -> Result<(), AppError> {
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), crate::errors::AppError> {
     // 1. Stop existing listener if any
-    let mut cancel_guard = state.realtime_cancel.lock().map_err(lock_err)?;
+    let mut cancel_guard = state.realtime_cancel.lock().map_err(|_| lock_err(()))?;
     if let Some(prev_cancel) = cancel_guard.as_ref() {
         prev_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
     }
@@ -406,14 +405,14 @@ async fn process_log_and_sync(
     employee_id: i32,
     device_id: i32,
     timestamp: String,
-    app: AppHandle,
-) -> Result<(), AppError> {
-    let state = app.state::<AppState>();
-    let org_name    = state.organization_name.lock().map_err(lock_err)?.clone().unwrap_or_else(|| "HeadOffice".to_string());
-    let branch_name = state.active_branch_name.lock().map_err(lock_err)?.clone().unwrap_or_else(|| "Main".to_string());
-    let branch_id   = state.active_branch_id.lock().map_err(lock_err)?.unwrap_or(1);
-    let key_opt     = state.service_account_key.lock().map_err(lock_err)?.clone();
-    let root_id_opt = state.root_folder_id.lock().map_err(lock_err)?.clone();
+    app: tauri::AppHandle,
+) -> Result<(), crate::errors::AppError> {
+    let state: tauri::State<AppState> = app.state::<AppState>();
+    let org_name    = state.organization_name.lock().map_err(|_| lock_err(()))?.clone().unwrap_or_else(|| "HeadOffice".to_string());
+    let branch_name = state.active_branch_name.lock().map_err(|_| lock_err(()))?.clone().unwrap_or_else(|| "Main".to_string());
+    let branch_id   = state.active_branch_id.lock().map_err(|_| lock_err(()))?.unwrap_or(1);
+    let key_opt     = state.service_account_key.lock().map_err(|_| lock_err(()))?.clone();
+    let root_id_opt = state.root_folder_id.lock().map_err(|_| lock_err(()))?.clone();
 
     // 1. Save locally with is_synced = 0
     {
@@ -645,27 +644,27 @@ fn save_offline_token(app: &AppHandle, hw_id: &str, expiry: &str) -> Result<(), 
     Ok(())
 }
 
-fn check_offline_token(app: &AppHandle) -> Result<String, AppError> {
+fn check_offline_token(app: &tauri::AppHandle) -> Result<String, crate::errors::AppError> {
     let path = app.path().app_data_dir().unwrap().join("license.token");
     if !path.exists() {
-        return Err(AppError::LicenseError("No license found. Please activate online.".to_string()));
+        return Err(crate::errors::AppError::LicenseError("No license found. Please activate online.".to_string()));
     }
     
-    let encrypted = fs::read(path).map_err(|_| AppError::LicenseError("Failed to read license token".to_string()))?;
+    let encrypted = fs::read(path).map_err(|_| crate::errors::AppError::LicenseError("Failed to read license token".to_string()))?;
     let decrypted = decrypt_data(&encrypted)?;
     let data: serde_json::Value = serde_json::from_slice(&decrypted)?;
     
-    let hw_id = hardware::id::get_hardware_fingerprint();
+    let hw_id = crate::hardware::id::get_hardware_fingerprint();
     if data["hw"].as_str() != Some(&hw_id) {
-        return Err(AppError::LicenseError("License mismatch: This software is activated for a different computer.".to_string()));
+        return Err(crate::errors::AppError::LicenseError("License mismatch: This software is activated for a different computer.".to_string()));
     }
     
-    let expiry = data["exp"].as_str().ok_or_else(|| AppError::LicenseError("Invalid token format".to_string()))?;
+    let expiry = data["exp"].as_str().ok_or_else(|| crate::errors::AppError::LicenseError("Invalid token format".to_string()))?;
     let expiry_date = chrono::NaiveDate::parse_from_str(expiry, "%Y-%m-%d")
-        .map_err(|_| AppError::LicenseError("Invalid expiry date in token".to_string()))?;
+        .map_err(|_| crate::errors::AppError::LicenseError("Invalid expiry date in token".to_string()))?;
     
     if expiry_date < chrono::Utc::now().date_naive() {
-        return Err(AppError::LicenseError(format!("License expired on {}", expiry)));
+        return Err(crate::errors::AppError::LicenseError(format!("License expired on {}", expiry)));
     }
     
     Ok(expiry.to_string())
