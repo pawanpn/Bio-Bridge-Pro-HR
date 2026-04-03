@@ -17,6 +17,8 @@ const RETRY_DELAY_SECS: u64 = 1;
 #[async_trait]
 pub trait DeviceDriver: Send + Sync {
     async fn sync_logs(&self, ip: &str, device_id: i32) -> Result<Vec<AttendanceLog>, AppError>;
+    async fn test_connectivity(&self, ip: &str, port: u16) -> Result<(), AppError>;
+    async fn listen_realtime(&self, ip: &str, port: u16, device_id: i32, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError>;
     fn brand_name(&self) -> &'static str;
 }
 
@@ -27,6 +29,15 @@ pub fn get_driver(brand: &DeviceBrand) -> Result<Arc<dyn DeviceDriver>, AppError
         DeviceBrand::Hikvision => Ok(Arc::new(hikvision::HikvisionDriver)),
         DeviceBrand::Unknown   => Err(AppError::UnknownDriver("Unknown brand selected".to_string())),
     }
+}
+
+/// Quick connectivity check facade.
+pub async fn test_device(ip: &str, port: u16, brand: DeviceBrand) -> Result<(), AppError> {
+    let driver = get_driver(&brand)?;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        driver.test_connectivity(ip, port)
+    ).await.map_err(|_| AppError::TimeoutError(5, 1))?
 }
 
 /// Retry wrapper: up to MAX_RETRIES attempts, each with CONNECT_TIMEOUT_SECS hard cap.
@@ -77,4 +88,10 @@ async fn with_retry(
 pub async fn sync_device(ip: &str, device_id: i32, brand: DeviceBrand) -> Result<Vec<AttendanceLog>, AppError> {
     let driver = get_driver(&brand)?;
     with_retry(driver, ip.to_string(), device_id).await
+}
+
+/// Start a real-time event listener for a device.
+pub async fn listen_device(ip: &str, port: u16, device_id: i32, brand: DeviceBrand, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError> {
+    let driver = get_driver(&brand)?;
+    driver.listen_realtime(ip, port, device_id, app_handle, cancel).await
 }

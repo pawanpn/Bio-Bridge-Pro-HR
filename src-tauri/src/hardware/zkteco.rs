@@ -78,6 +78,59 @@ impl DeviceDriver for ZKTecoDriver {
 
         Ok(attendance_logs)
     }
+
+    async fn test_connectivity(&self, ip: &str, port: u16) -> Result<(), AppError> {
+        let _stream = connect_device(ip, port).await?;
+        Ok(())
+    }
+
+    async fn listen_realtime(&self, ip: &str, port: u16, device_id: i32, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError> {
+        let mut stream = connect_device(ip, port).await?;
+
+        // 1. Connect
+        let connect_packet = assemble_zk_packet(ZKCommand::Connect, 0, 0, &[]);
+        stream.write_all(&connect_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+        let mut buf = [0u8; 1024];
+        let n = stream.read(&mut buf).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+        if n < 8 { return Err(AppError::ConnectionError("Invalid response".to_string())); }
+        let session_id = u16::from_le_bytes([buf[8+4], buf[8+5]]);
+
+        // 2. Register for Attendance Events (0x01)
+        let reg_packet = assemble_zk_packet(ZKCommand::RegEvent, session_id, 1, &[0x01, 0x00, 0x00, 0x00]);
+        stream.write_all(&reg_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+
+        // 3. Listen Loop
+        let mut event_buf = [0u8; 1024];
+        loop {
+            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                 let _ = stream.write_all(&assemble_zk_packet(ZKCommand::Exit, session_id, 2, &[])).await;
+                 break; 
+            }
+            match stream.read(&mut event_buf).await {
+                Ok(0) => break, // Connection closed
+                Ok(bytes) if bytes >= 8 => {
+                    // Check for attendance event (simplified)
+                    // In real ZK protocol, we check for CMD_REG_EVENT responses or 
+                    // spontaneous packets with attendance payload.
+                    let cmd_reply = u16::from_le_bytes([event_buf[8], event_buf[9]]);
+                    if cmd_reply == 0x0500 { // Real-time event magic
+                         let employee_id = u32::from_le_bytes([event_buf[16], event_buf[17], event_buf[18], event_buf[19]]) as i32;
+                         let now = chrono::Utc::now().to_rfc3339();
+                         
+                         let _ = app_handle.emit("realtime-punch", serde_json::json!({
+                             "device_id": device_id,
+                             "employee_id": employee_id,
+                             "timestamp": now,
+                             "brand": "ZKTeco"
+                         }));
+                    }
+                }
+                _ => {}
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Ok(())
+    }
 }
 
 #[repr(u16)]
@@ -88,6 +141,7 @@ pub enum ZKCommand {
     EnableClock  = 0x0039, 
     DisableClock = 0x003a, 
     AttLogRrq  = 0x000d, 
+    RegEvent   = 0x0041,
 }
 
 fn create_checksum(data: &[u8]) -> u16 {

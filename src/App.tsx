@@ -3,6 +3,7 @@ import { SetupWizard } from './components/SetupWizard';
 import { MainLayout } from './layout/MainLayout';
 import { Dashboard } from './pages/Dashboard';
 import { CloudSettings } from './pages/CloudSettings';
+import { DeviceSettings } from './pages/DeviceSettings';
 import './styles/global.css';
 
 function App() {
@@ -18,6 +19,7 @@ function App() {
         <Route path="/" element={<MainLayout />}>
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="cloud-settings" element={<CloudSettings />} />
+          <Route path="device-settings" element={<DeviceSettings />} />
         </Route>
       </Routes>
     </BrowserRouter>

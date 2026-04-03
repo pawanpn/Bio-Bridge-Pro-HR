@@ -50,6 +50,8 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         "CREATE TABLE IF NOT EXISTS Devices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             branch_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            brand TEXT NOT NULL,
             ip_address TEXT NOT NULL,
             port INTEGER DEFAULT 4370,
             status TEXT DEFAULT 'offline',
