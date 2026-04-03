@@ -2,6 +2,7 @@ use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use async_trait::async_trait;
 use std::time::Duration;
+use tauri::Emitter;
 use crate::models::AttendanceLog;
 use crate::errors::AppError;
 use super::DeviceDriver;

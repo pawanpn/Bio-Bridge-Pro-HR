@@ -117,6 +117,34 @@ async fn find_folder(
         .map(|s| s.to_string()))
 }
 
+async fn find_file(
+    client: &Client,
+    token: &str,
+    name: &str,
+    parent_id: &str,
+) -> Result<Option<String>, AppError> {
+    let q = format!(
+        "name='{}' and '{}' in parents and trashed=false",
+        name, parent_id
+    );
+
+    let resp = client
+        .get("https://www.googleapis.com/drive/v3/files")
+        .bearer_auth(token)
+        .query(&[("q", q.as_str()), ("fields", "files(id,name)")])
+        .send()
+        .await?;
+
+    let json = resp.json::<Value>().await
+        .map_err(|e| AppError::SerializationError(e.to_string()))?;
+
+    Ok(json["files"]
+        .as_array()
+        .and_then(|arr| arr.first())
+        .and_then(|f| f["id"].as_str())
+        .map(|s| s.to_string()))
+}
+
 async fn ensure_folder(
     client: &Client,
     token: &str,
@@ -231,5 +259,73 @@ pub async fn sync_logs_to_drive(
     }
 
     println!("Drive sync complete: Root({})/{}/{}/{}/{}/attendance_logs.json", root_id, org, branch, year, month);
+    Ok(())
+}
+
+// ── Licensing Support ──────────────────────────────────────────────────────
+
+pub async fn fetch_license_database(key: &ServiceAccountKey, folder_id: &str) -> Result<Value, AppError> {
+    let token = generate_bearer_token(key).await?;
+    let client = Client::new();
+
+    let file_id = find_file(&client, &token, "license_keys.json", folder_id).await?
+        .ok_or_else(|| AppError::LicenseError("license_keys.json not found on Drive. Verify Folder ID.".to_string()))?;
+
+    let resp = client
+        .get(format!("https://www.googleapis.com/drive/v3/files/{}?alt=media", file_id))
+        .bearer_auth(&token)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+         return Err(AppError::LicenseError(format!("Failed to download license DB: {}", resp.status())));
+    }
+
+    Ok(resp.json::<Value>().await?)
+}
+
+pub async fn update_license_database(key: &ServiceAccountKey, folder_id: &str, data: Value) -> Result<(), AppError> {
+    let token = generate_bearer_token(key).await?;
+    let client = Client::new();
+
+    let file_id = find_file(&client, &token, "license_keys.json", folder_id).await?;
+    let content = serde_json::to_string_pretty(&data)?;
+
+    if let Some(id) = file_id {
+        // Update existing via PATCH
+        let resp = client
+            .patch(format!("https://www.googleapis.com/upload/drive/v3/files/{}?uploadType=media", id))
+            .bearer_auth(&token)
+            .body(content)
+            .send()
+            .await?;
+        
+        if !resp.status().is_success() {
+             return Err(AppError::LicenseError(format!("Failed to update license DB: {}", resp.status())));
+        }
+    } else {
+        // Create new via POST (multipart)
+        let file_metadata = json!({
+            "name": "license_keys.json",
+            "parents": [folder_id],
+            "mimeType": "application/json"
+        });
+
+        let form = reqwest::multipart::Form::new()
+            .part("metadata", reqwest::multipart::Part::text(file_metadata.to_string()).mime_str("application/json").unwrap())
+            .part("media", reqwest::multipart::Part::text(content).mime_str("application/json").unwrap());
+
+        let resp = client
+            .post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart")
+            .bearer_auth(&token)
+            .multipart(form)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+             return Err(AppError::LicenseError(format!("Failed to create license DB: {}", resp.status())));
+        }
+    }
+
     Ok(())
 }
