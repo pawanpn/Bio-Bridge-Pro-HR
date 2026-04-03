@@ -31,7 +31,7 @@ export const MainLayout: React.FC = () => {
           <SidebarItem icon={<FileText />} label="Reports" active={activeTab === 'Reports'} onClick={() => setActiveTab('Reports')} />
         </div>
         <div style={{ padding: '16px 0', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-          <SidebarItem icon={<Settings />} label="System Settings" active={activeTab === 'Settings'} onClick={() => setActiveTab('Settings')} />
+          <SidebarItem icon={<Settings />} label="System Settings" active={activeTab === 'Settings'} onClick={() => {setActiveTab('Settings'); navigate('/cloud-settings');}} />
         </div>
       </div>
 

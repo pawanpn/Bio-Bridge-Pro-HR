@@ -94,5 +94,15 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS CloudConfig (
+            id INTEGER PRIMARY KEY,
+            client_email TEXT NOT NULL,
+            private_key TEXT NOT NULL,
+            project_id TEXT NOT NULL
+        )",
+        [],
+    )?;
+
     Ok(conn)
 }

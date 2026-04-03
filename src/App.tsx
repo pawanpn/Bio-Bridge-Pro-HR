@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { SetupWizard } from './components/SetupWizard';
 import { MainLayout } from './layout/MainLayout';
 import { Dashboard } from './pages/Dashboard';
+import { CloudSettings } from './pages/CloudSettings';
 import './styles/global.css';
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
         />
         <Route path="/" element={<MainLayout />}>
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="cloud-settings" element={<CloudSettings />} />
         </Route>
       </Routes>
     </BrowserRouter>
