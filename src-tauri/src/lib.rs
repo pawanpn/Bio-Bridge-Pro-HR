@@ -21,8 +21,8 @@ pub struct AppState {
     pub active_branch_name:  Mutex<Option<String>>,
     pub calendar_mode:       Mutex<String>,
     pub license_expiry:      Mutex<Option<String>>,
-    /// Dynamically loaded Service Account credentials
     pub service_account_key: Mutex<Option<ServiceAccountKey>>,
+    pub root_folder_id:      Mutex<Option<String>>,
 }
 
 fn lock_err<T>(_: T) -> AppError {
@@ -31,11 +31,10 @@ fn lock_err<T>(_: T) -> AppError {
 
 // ── Cloud Settings Commands ────────────────────────────────────────────────
 
-/// Admin uploads the raw JSON content of a GCP Service Account key file.
-/// The backend parses and stores it in AppState (never touches disk in plaintext).
 #[tauri::command]
 fn save_cloud_credentials(
     json_content: String,
+    root_folder_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), AppError> {
     let key: ServiceAccountKey = serde_json::from_str(&json_content)
@@ -43,29 +42,30 @@ fn save_cloud_credentials(
             format!("Invalid Service Account JSON: {}", e)
         ))?;
 
-    // Persist to SQLite for loading on restart
     let db_guard = state.db.lock().map_err(lock_err)?;
     if let Some(conn) = db_guard.as_ref() {
         conn.execute(
-            "INSERT OR REPLACE INTO CloudConfig (id, client_email, private_key, project_id) VALUES (1, ?1, ?2, ?3)",
-            (&key.client_email, &key.private_key, &key.project_id),
+            "INSERT OR REPLACE INTO CloudConfig (id, client_email, private_key, project_id, root_folder_id) VALUES (1, ?1, ?2, ?3, ?4)",
+            (&key.client_email, &key.private_key, &key.project_id, &root_folder_id),
         )?;
     }
 
-    // Load into memory
     *state.service_account_key.lock().map_err(lock_err)? = Some(key);
+    *state.root_folder_id.lock().map_err(lock_err)?      = Some(root_folder_id);
     Ok(())
 }
 
-/// Returns the currently loaded service account email (safe to expose)
 #[tauri::command]
 fn get_cloud_config(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
     let key_guard = state.service_account_key.lock().map_err(lock_err)?;
+    let root_guard = state.root_folder_id.lock().map_err(lock_err)?;
+    
     if let Some(key) = key_guard.as_ref() {
         Ok(serde_json::json!({
             "configured": true,
             "clientEmail": key.client_email,
             "projectId": key.project_id,
+            "rootFolderId": root_guard.clone().unwrap_or_else(|| "".to_string()),
         }))
     } else {
         Ok(serde_json::json!({ "configured": false }))
@@ -137,8 +137,9 @@ async fn sync_device_logs(
     let branch_name = state.active_branch_name.lock().map_err(lock_err)?
                           .clone().unwrap_or_else(|| "Main".to_string());
     let key_opt     = state.service_account_key.lock().map_err(lock_err)?.clone();
+    let root_id_opt = state.root_folder_id.lock().map_err(lock_err)?.clone();
 
-    // 1. Pull logs via hardware driver (10s timeout, 3 retries)
+    // 1. Pull logs via hardware driver
     let logs = hardware::sync_device(&ip, device_id, parsed_brand).await?;
 
     let _ = app.emit("console-log", format!(
@@ -146,7 +147,7 @@ async fn sync_device_logs(
         chrono::Utc::now().format("%H:%M"), logs.len(), ip, brand
     ));
 
-    // 2. Normalize logs (brand-agnostic format)
+    // 2. Normalize logs
     let now = chrono::Utc::now();
     let normalized: Vec<NormalizedLog> = logs.iter().map(|l| NormalizedLog {
         log_id:         format!("{}_{}", l.device_id, l.timestamp),
@@ -157,24 +158,38 @@ async fn sync_device_logs(
         organization:   org_name.clone(),
     }).collect();
 
-    // 3. Sync to Drive (only if a key is configured)
-    if let Some(key) = key_opt {
-        cloud::gdrive::sync_logs_to_drive(
-            &key, &org_name, &branch_name,
-            now.format("%Y").to_string().parse::<i32>().unwrap_or(2026),
-            now.format("%m").to_string().parse::<u32>().unwrap_or(1),
-            &normalized,
-        ).await?;
+    // 3. Sync to Drive
+    if let (Some(key), Some(root_id)) = (key_opt.clone(), root_id_opt.clone()) {
+        let year  = now.format("%Y").to_string();
+        let month = now.format("%m").to_string();
 
-        let _ = app.emit("console-log", format!(
-            "[{} UTC] Synced to Drive: Bio Bridge Pro HR/{}/{}/{}/{}.",
-            chrono::Utc::now().format("%H:%M"),
-            org_name, branch_name,
-            now.format("%Y"), now.format("%m")
-        ));
+        let sync_result = cloud::gdrive::sync_logs_to_drive(
+            &key, 
+            &root_id,
+            &org_name, 
+            &branch_name,
+            &year,
+            &month,
+            &normalized,
+        ).await;
+
+        match sync_result {
+            Ok(_) => {
+                let _ = app.emit("console-log", format!(
+                    "[{} UTC] Synced to Drive: Targeted ID: {} > {} > {} > {} > {}.",
+                    chrono::Utc::now().format("%H:%M"), root_id, org_name, branch_name, year, month
+                ));
+            },
+            Err(AppError::PermissionDenied(rid)) => {
+                let err_msg = format!("Error: Service Account lacks Editor access to Folder ID: {}. Please share the folder with {}.", rid, key.client_email);
+                let _ = app.emit("console-log", format!("[ERROR] {}", err_msg));
+                return Err(AppError::PermissionDenied(err_msg));
+            },
+            Err(e) => return Err(e),
+        }
     } else {
         let _ = app.emit("console-log",
-            "[WARN] No Service Account configured. Drive sync skipped. Configure in Cloud Settings.");
+            "[WARN] No Service Account or Root ID configured. Drive sync skipped.");
     }
 
     Ok(format!("Synced {} logs from {}", logs.len(), ip))
@@ -208,25 +223,31 @@ pub fn run() {
             calendar_mode:       Mutex::new("BS".to_string()),
             license_expiry:      Mutex::new(None),
             service_account_key: Mutex::new(None),
+            root_folder_id:      Mutex::new(None),
         })
         .setup(|app| {
             let app_dir = app.path().app_data_dir().expect("Failed to resolve app data dir");
             let conn = db::init_db(&app_dir).expect("Failed to initialize SQLite");
 
-            // Load stored cloud credentials from SQLite on startup
-            let key_opt: Option<ServiceAccountKey> = conn.query_row(
-                "SELECT client_email, private_key, project_id FROM CloudConfig WHERE id = 1",
+            // Load stored cloud credentials and root folder ID on startup
+            let config: Option<(String, String, String, Option<String>)> = conn.query_row(
+                "SELECT client_email, private_key, project_id, root_folder_id FROM CloudConfig WHERE id = 1",
                 [],
-                |row| Ok(ServiceAccountKey {
-                    client_email: row.get(0)?,
-                    private_key:  row.get(1)?,
-                    project_id:   row.get(2)?,
-                }),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             ).ok();
 
             let state = app.state::<AppState>();
             *state.db.lock().unwrap() = Some(conn);
-            *state.service_account_key.lock().unwrap() = key_opt;
+
+            if let Some((email, pkey, pid, rid)) = config {
+                *state.service_account_key.lock().unwrap() = Some(ServiceAccountKey {
+                    client_email: email,
+                    private_key:  pkey,
+                    project_id:   pid,
+                });
+                *state.root_folder_id.lock().unwrap() = rid;
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
