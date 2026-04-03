@@ -1,10 +1,11 @@
 use reqwest::Client;
 use serde_json::Value;
 
-use super::AttendanceLog;
+use crate::models::AttendanceLog;
+use crate::errors::AppError;
 
 /// Simulates Hikvision ISAPI Authentication and Log Fetching over REST
-pub async fn sync_logs(ip: &str, device_id: i32) -> Result<Vec<AttendanceLog>, String> {
+pub async fn sync_logs(ip: &str, device_id: i32) -> Result<Vec<AttendanceLog>, AppError> {
     let _client = Client::new();
     let url = format!("http://{}/ISAPI/AccessControl/AcsEvent", ip);
     

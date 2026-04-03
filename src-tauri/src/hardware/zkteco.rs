@@ -1,7 +1,8 @@
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use serde::{Serialize, Deserialize};
-use super::AttendanceLog;
+use crate::models::AttendanceLog;
+use crate::errors::AppError;
 
 #[repr(u16)]
 #[derive(Clone, Copy)]
@@ -63,24 +64,24 @@ pub fn assemble_zk_packet(cmd: ZKCommand, session_id: u16, reply_id: u16, data: 
 }
 
 /// Connect to a ZKTeco device over TCP port 4370
-pub async fn connect_device(ip: &str, port: u16) -> Result<TcpStream, String> {
+pub async fn connect_device(ip: &str, port: u16) -> Result<TcpStream, AppError> {
     let addr = format!("{}:{}", ip, port);
     match TcpStream::connect(&addr).await {
         Ok(stream) => Ok(stream),
-        Err(e) => Err(format!("Failed to connect to device {}: {}", addr, e)),
+        Err(e) => Err(AppError::ConnectionError(format!("Failed to connect to device {}: {}", addr, e))),
     }
 }
 
 /// Fetches logs from the connected device.
-pub async fn sync_logs(ip: &str, device_id: i32) -> Result<Vec<AttendanceLog>, String> {
+pub async fn sync_logs(ip: &str, device_id: i32) -> Result<Vec<AttendanceLog>, AppError> {
     let mut stream = connect_device(ip, 4370).await?;
     
     // Attempt standard connection packet
     let connect_packet = assemble_zk_packet(ZKCommand::Connect, 0, 0, &[]);
-    stream.write_all(&connect_packet).await.map_err(|e| e.to_string())?;
+    stream.write_all(&connect_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
     
     let mut buf = [0; 1024];
-    let _n = stream.read(&mut buf).await.map_err(|e| e.to_string())?;
+    let _n = stream.read(&mut buf).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
     // We would parse Session ID and Reply ID from `buf[8..=11]` here.
     
     // Simulate reading real logs
