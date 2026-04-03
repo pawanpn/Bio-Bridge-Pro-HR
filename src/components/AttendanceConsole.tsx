@@ -42,7 +42,7 @@ export const AttendanceConsole: React.FC = () => {
 };
 
 const styles = {
-  container: (expanded: boolean) => ({
+  container: (_expanded: boolean) => ({
     position: 'fixed' as const,
     bottom: 0,
     left: '250px', // width of sidebar
