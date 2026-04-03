@@ -1,5 +1,6 @@
 use reqwest::Client;
 use async_trait::async_trait;
+use tauri::Emitter;
 use std::time::Duration;
 use serde_json::Value;
 use crate::models::AttendanceLog;
@@ -12,6 +13,8 @@ pub struct HikvisionDriver;
 
 #[async_trait]
 impl DeviceDriver for HikvisionDriver {
+    fn brand_name(&self) -> &'static str { "Hikvision" }
+
     async fn sync_logs(&self, ip: &str, device_id: i32) -> Result<Vec<AttendanceLog>, AppError> {
         let url = format!("http://{}/ISAPI/AccessControl/AcsEvent?format=json", ip);
         let client = Client::builder()
@@ -50,12 +53,13 @@ impl DeviceDriver for HikvisionDriver {
         Ok(())
     }
 
-    async fn listen_realtime(&self, ip: &str, port: u16, device_id: i32, app_handle: tauri::AppHandle) -> Result<(), AppError> {
+    async fn listen_realtime(&self, ip: &str, port: u16, device_id: i32, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError> {
         let url = format!("http://{}:{}/ISAPI/Event/notification/alertStream", ip, port);
         let client = Client::builder().timeout(Duration::from_secs(3600)).build().map_err(|e| AppError::ConnectionError(e.to_string()))?;
         let mut response = client.get(&url).send().await.map_err(|e| AppError::ConnectionError(format!("AlertStream failed: {}", e)))?;
 
         while let Ok(Some(chunk)) = response.chunk().await {
+            if cancel.load(std::sync::atomic::Ordering::SeqCst) { break; }
             let chunk_str = String::from_utf8_lossy(&chunk);
             if chunk_str.contains("AccessControlEvent") {
                 if let Some(id_start) = chunk_str.find("<employeeNoString>") {

@@ -1,0 +1,440 @@
+﻿cargo :     Checking tauri-app 
+v0.1.0 
+(C:\Users\Admin\Desktop\BioBridge 
+Pro HR\src-tauri)
+At line:1 char:1
++ cargo check > build_errors_2.txt 
+2>&1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~
+    + CategoryInfo          : NotSp 
+   ecified: (    Checking ta...o H  
+  R\src-tauri):String) [], Remote   
+ Exception
+    + FullyQualifiedErrorId : Nativ 
+   eCommandError
+ 
+error[E0597]: `inner_app` does not 
+live long enough
+   --> src\lib.rs:474:39
+    |
+473 |                       let 
+inner_app = app_handle.clone();
+    |                           
+--------- binding `inner_app` 
+declared here
+474 |                       let 
+inner_state = 
+inner_app.state::<AppState>();
+    |                               
+          ^^^^^^^^^ borrowed value 
+does not live long enough
+475 | /                     
+tauri::async_runtime::spawn(async 
+move {
+476 | |                         let 
+_ = 
+process_log_and_sync(employee_id, 
+device_id, timestamp, inner_app, 
+inner_state).await;
+477 | |                     });
+    | |______________________- 
+argument requires that `inner_app` 
+is borrowed for `'static`
+478 |                   }
+    |                   - 
+`inner_app` dropped here while 
+still borrowed
+    |
+note: requirement that the value 
+outlives `'static` introduced here
+   --> C:\Users\Admin\.cargo\registr
+y\src\index.crates.io-1949cf8c6b5b55
+7f\tauri-2.10.3\src\async_runtime.rs
+:270:22
+    |
+270 |   F: Future + Send + 'static,
+    |                      ^^^^^^^
+
+error[E0505]: cannot move out of 
+`inner_app` because it is borrowed
+   --> src\lib.rs:475:49
+    |
+473 |                       let 
+inner_app = app_handle.clone();
+    |                           
+--------- binding `inner_app` 
+declared here
+474 |                       let 
+inner_state = 
+inner_app.state::<AppState>();
+    |                               
+          --------- borrow of 
+`inner_app` occurs here
+475 |                       
+tauri::async_runtime::spawn(async 
+move {
+    |                       -       
+                    ^^^^^^^^^^ move 
+out of `inner_app` occurs here
+    |  _____________________|
+    | |
+476 | |                         let 
+_ = 
+process_log_and_sync(employee_id, 
+device_id, timestamp, inner_app, 
+inner_state).await;
+    | |                             
+                                    
+                        --------- 
+move occurs due to use in coroutine
+477 | |                     });
+    | |______________________- 
+argument requires that `inner_app` 
+is borrowed for `'static`
+    |
+note: requirement that the value 
+outlives `'static` introduced here
+   --> C:\Users\Admin\.cargo\registr
+y\src\index.crates.io-1949cf8c6b5b55
+7f\tauri-2.10.3\src\async_runtime.rs
+:270:22
+    |
+270 |   F: Future + Send + 'static,
+    |                      ^^^^^^^
+help: consider cloning the value 
+before moving it into the closure
+    |
+475 ~                     let value 
+= inner_app.clone();
+476 ~                     
+tauri::async_runtime::spawn(async 
+move {
+477 ~                         let _ 
+= process_log_and_sync(employee_id, 
+device_id, timestamp, value, 
+inner_state).await;
+    |
+
+error[E0505]: cannot move out of 
+`db_guard` because it is borrowed
+   --> src\lib.rs:494:30
+    |
+487 |                     let 
+db_guard = state.db.lock().unwrap();
+    |                         
+-------- binding `db_guard` 
+declared here
+488 |                     if let 
+Some(conn) = db_guard.as_ref() {
+    |                               
+          -------- borrow of 
+`db_guard` occurs here
+...
+494 |                         
+drop(db_guard); // Release early
+    |                              
+^^^^^^^^ move out of `db_guard` 
+occurs here
+...
+499 |                     }
+    |                     - borrow 
+might be used here, when `stmt` is 
+dropped and runs the `Drop` code 
+for type `Statement`
+
+error[E0505]: cannot move out of 
+`app_handle` because it is borrowed
+   --> src\lib.rs:467:49
+    |
+466 |             let app_handle = 
+app.handle().clone();
+    |                 ---------- 
+binding `app_handle` declared here
+467 |             
+app_handle.listen("realtime-punch", 
+move |event| {
+    |             ---------- ------ 
+                  ^^^^^^^^^^^^ move 
+out of `app_handle` occurs here
+    |             |          |
+    |             |          borrow 
+later used by call
+    |             borrow of 
+`app_handle` occurs here
+...
+473 |                     let 
+inner_app = app_handle.clone();
+    |                               
+      ---------- move occurs due to 
+use in closure
+    |
+help: consider cloning the value if 
+the performance cost is acceptable
+    |
+467 |             app_handle.clone()
+.listen("realtime-punch", move 
+|event| {
+    |                       ++++++++
+
+error: future cannot be sent 
+between threads safely
+   --> src\lib.rs:483:13
+    |
+483 | /             
+tauri::async_runtime::spawn(async 
+move {
+484 | |                 loop {
+485 | |                     tokio::t
+ime::sleep(tokio::time::Duration::fr
+om_secs(10)).await;
+486 | |                     let 
+state = 
+retry_app.state::<AppState>();
+...   |
+501 | |             });
+    | |______________^ future 
+created by async block is not `Send`
+    |
+    = help: within `{async 
+block@src\lib.rs:483:41: 483:51}`, 
+the trait `Send` is not implemented 
+for `std::sync::MutexGuard<'_, 
+std::option::Option<Connection>>`
+note: future is not `Send` as this 
+value is used across an await
+   --> src\lib.rs:497:113
+    |
+487 |                     let 
+db_guard = state.db.lock().unwrap();
+    |                         
+-------- has type 
+`std::sync::MutexGuard<'_, 
+std::option::Option<Connection>>` 
+which is not `Send`
+...
+497 |                              
+let _ = 
+process_log_and_sync(emp_id, 
+dev_id, ts, retry_app.clone(), 
+state.clone()).await;
+    |                               
+                                    
+                                    
+          ^^^^^ await occurs here, 
+with `db_guard` maybe used later
+note: required by a bound in 
+`tauri::async_runtime::spawn`
+   --> C:\Users\Admin\.cargo\registr
+y\src\index.crates.io-1949cf8c6b5b55
+7f\tauri-2.10.3\src\async_runtime.rs
+:270:15
+    |
+268 | pub fn spawn<F>(task: F) -> 
+JoinHandle<F::Output>
+    |        ----- required by a 
+bound in this function
+269 | where
+270 |   F: Future + Send + 'static,
+    |               ^^^^ required 
+by this bound in `spawn`
+
+error: future cannot be sent 
+between threads safely
+   --> src\lib.rs:483:13
+    |
+483 | /             
+tauri::async_runtime::spawn(async 
+move {
+484 | |                 loop {
+485 | |                     tokio::t
+ime::sleep(tokio::time::Duration::fr
+om_secs(10)).await;
+486 | |                     let 
+state = 
+retry_app.state::<AppState>();
+...   |
+501 | |             });
+    | |______________^ future 
+created by async block is not `Send`
+    |
+    = help: within `{async 
+block@src\lib.rs:483:41: 483:51}`, 
+the trait `Send` is not implemented 
+for `*mut sqlite3_stmt`
+note: future is not `Send` as this 
+value is used across an await
+   --> src\lib.rs:497:113
+    |
+489 | ...           let mut stmt = 
+conn.prepare("SELECT employee_id, 
+device_id, timestamp FROM 
+AttendanceLogs WHERE is_synced = 0 
+LIMIT 5...
+    |                   -------- 
+has type `Statement<'_>` which is 
+not `Send`
+...
+497 | ...                let _ = 
+process_log_and_sync(emp_id, 
+dev_id, ts, retry_app.clone(), 
+state.clone()).await;
+    |                               
+                                    
+                                    
+^^^^^ await occurs here, with `mut 
+stmt` maybe used later
+note: required by a bound in 
+`tauri::async_runtime::spawn`
+   --> C:\Users\Admin\.cargo\registr
+y\src\index.crates.io-1949cf8c6b5b55
+7f\tauri-2.10.3\src\async_runtime.rs
+:270:15
+    |
+268 | pub fn spawn<F>(task: F) -> 
+JoinHandle<F::Output>
+    |        ----- required by a 
+bound in this function
+269 | where
+270 |   F: Future + Send + 'static,
+    |               ^^^^ required 
+by this bound in `spawn`
+
+error: future cannot be sent 
+between threads safely
+   --> src\lib.rs:483:13
+    |
+483 | /             
+tauri::async_runtime::spawn(async 
+move {
+484 | |                 loop {
+485 | |                     tokio::t
+ime::sleep(tokio::time::Duration::fr
+om_secs(10)).await;
+486 | |                     let 
+state = 
+retry_app.state::<AppState>();
+...   |
+501 | |             });
+    | |______________^ future 
+created by async block is not `Send`
+    |
+    = help: within `Connection`, 
+the trait `Sync` is not implemented 
+for `RefCell<rusqlite::inner_connect
+ion::InnerConnection>`
+    = note: if you want to do 
+aliasing and mutation between 
+multiple threads, use 
+`std::sync::RwLock` instead
+note: future is not `Send` as this 
+value is used across an await
+   --> src\lib.rs:497:113
+    |
+489 | ...           let mut stmt = 
+conn.prepare("SELECT employee_id, 
+device_id, timestamp FROM 
+AttendanceLogs WHERE is_synced = 0 
+LIMIT 5...
+    |                   -------- 
+has type `Statement<'_>` which is 
+not `Send`
+...
+497 | ...                let _ = 
+process_log_and_sync(emp_id, 
+dev_id, ts, retry_app.clone(), 
+state.clone()).await;
+    |                               
+                                    
+                                    
+^^^^^ await occurs here, with `mut 
+stmt` maybe used later
+note: required by a bound in 
+`tauri::async_runtime::spawn`
+   --> C:\Users\Admin\.cargo\registr
+y\src\index.crates.io-1949cf8c6b5b55
+7f\tauri-2.10.3\src\async_runtime.rs
+:270:15
+    |
+268 | pub fn spawn<F>(task: F) -> 
+JoinHandle<F::Output>
+    |        ----- required by a 
+bound in this function
+269 | where
+270 |   F: Future + Send + 'static,
+    |               ^^^^ required 
+by this bound in `spawn`
+
+error: future cannot be sent 
+between threads safely
+   --> src\lib.rs:483:13
+    |
+483 | /             
+tauri::async_runtime::spawn(async 
+move {
+484 | |                 loop {
+485 | |                     tokio::t
+ime::sleep(tokio::time::Duration::fr
+om_secs(10)).await;
+486 | |                     let 
+state = 
+retry_app.state::<AppState>();
+...   |
+501 | |             });
+    | |______________^ future 
+created by async block is not `Send`
+    |
+    = help: within `Connection`, 
+the trait `Sync` is not implemented 
+for `RefCell<hashlink::lru_cache::Lr
+uCache<Arc<str>, rusqlite::raw_state
+ment::RawStatement>>`
+    = note: if you want to do 
+aliasing and mutation between 
+multiple threads, use 
+`std::sync::RwLock` instead
+note: future is not `Send` as this 
+value is used across an await
+   --> src\lib.rs:497:113
+    |
+489 | ...           let mut stmt = 
+conn.prepare("SELECT employee_id, 
+device_id, timestamp FROM 
+AttendanceLogs WHERE is_synced = 0 
+LIMIT 5...
+    |                   -------- 
+has type `Statement<'_>` which is 
+not `Send`
+...
+497 | ...                let _ = 
+process_log_and_sync(emp_id, 
+dev_id, ts, retry_app.clone(), 
+state.clone()).await;
+    |                               
+                                    
+                                    
+^^^^^ await occurs here, with `mut 
+stmt` maybe used later
+note: required by a bound in 
+`tauri::async_runtime::spawn`
+   --> C:\Users\Admin\.cargo\registr
+y\src\index.crates.io-1949cf8c6b5b55
+7f\tauri-2.10.3\src\async_runtime.rs
+:270:15
+    |
+268 | pub fn spawn<F>(task: F) -> 
+JoinHandle<F::Output>
+    |        ----- required by a 
+bound in this function
+269 | where
+270 |   F: Future + Send + 'static,
+    |               ^^^^ required 
+by this bound in `spawn`
+
+Some errors have detailed 
+explanations: E0505, E0597.
+For more information about an 
+error, try `rustc --explain E0505`.
+error: could not compile 
+`tauri-app` (lib) due to 8 previous 
+errors

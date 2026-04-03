@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter};
 use tokio::net::TcpStream;
 use std::time::Duration;
 use serde::Serialize;

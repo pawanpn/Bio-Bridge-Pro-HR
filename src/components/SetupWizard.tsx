@@ -22,18 +22,56 @@ export const SetupWizard: React.FC = () => {
     rootFolderId: AppConfig.defaultRootFolderId,
     serviceAccountEmail: '',
     jsonKeyText: '',
+    hardwareId: 'Loading...',
   });
 
   const nextStep = () => setStep((s) => Math.min(s + 1, 5));
   const prevStep = () => setStep((s) => Math.max(s - 1, 1));
 
-  const handleVerify = async () => {
+  const fetchHardwareId = async () => {
     try {
-      const expiry = await invoke<string>('get_license_info');
+      const id = await invoke<string>('get_hardware_id');
+      setFormData(prev => ({ ...prev, hardwareId: id }));
+    } catch (e) {
+      console.error("Failed to fetch Hardware ID", e);
+    }
+  };
+
+  React.useEffect(() => {
+    fetchHardwareId();
+  }, []);
+
+  const handleVerify = async () => {
+    if (!formData.jsonKeyText) {
+      alert("Please upload your Service Account JSON key first.");
+      return;
+    }
+    try {
+      const expiry = await invoke<string>('activate_license_key', {
+        key: formData.authKey,
+        jsonKey: formData.jsonKeyText
+      });
       setFormData({ ...formData, licenseExpiry: expiry });
       nextStep();
     } catch (e) {
-      alert("Verification failed: " + e);
+      alert("Activation failed: " + e);
+    }
+  };
+
+  const handleAdminGenerate = async () => {
+    if (!formData.jsonKeyText) {
+       alert("Upload JSON first to use Admin Tool.");
+       return;
+    }
+    try {
+      const keys = await invoke<string[]>('admin_generate_keys', {
+        count: 5,
+        expiry: '2027-12-31',
+        jsonKey: formData.jsonKeyText
+      });
+      alert("Successfully generated 5 keys on Drive:\n\n" + keys.join('\n'));
+    } catch (e) {
+      alert("Admin failed: " + e);
     }
   };
 
@@ -98,15 +136,36 @@ export const SetupWizard: React.FC = () => {
           <div style={{ width: `${(step / 5) * 100}%`, height: '100%', backgroundColor: 'var(--accent-color)', transition: 'width 0.3s ease' }} />
         </div>
 
-        {step === 1 && (
+         {step === 1 && (
           <div>
-            <h3>Enterprise Registration</h3>
-            <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '20px' }}>Enter your organization details to continue.</p>
-            <StandardInput placeholder="Authorization Key" value={formData.authKey} onChange={e => setFormData({ ...formData, authKey: e.target.value})} />
-            <StandardInput placeholder="Company Name" value={formData.companyName} onChange={e => setFormData({ ...formData, companyName: e.target.value})} />
-            <StandardInput placeholder="Address" value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value})} />
-            <StandardInput placeholder="Contact Info" value={formData.contactInfo} onChange={e => setFormData({ ...formData, contactInfo: e.target.value})} />
-            <PrimaryButton isAccent style={{ marginTop: '16px', width: '100%' }} onClick={handleVerify} label="Verify License & Next" />
+            <h3>Software Activation</h3>
+            <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '20px' }}>
+              Upload your cloud credentials and enter your license key to activate.
+            </p>
+            
+            <div style={{ marginBottom: '20px', padding: '12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', border: '1px dashed var(--border-color)' }}>
+              <span style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Computer ID</span>
+              <code style={{ display: 'block', fontSize: '12px', wordBreak: 'break-all', marginTop: '4px' }}>{formData.hardwareId}</code>
+            </div>
+
+            <label style={styles.label}>1. Cloud Credentials (.json)</label>
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px' }}>
+              <PrimaryButton label="Choose JSON Key" onClick={() => fileInputRef.current?.click()} />
+              <input type="file" accept=".json" ref={fileInputRef} hidden onChange={handleFileUpload} />
+              <span style={{ fontSize: '12px' }}>{formData.jsonKeyText ? '✅ Loaded' : '❌ Not Loaded'}</span>
+            </div>
+
+            <label style={styles.label}>2. License Key</label>
+            <StandardInput placeholder="BIO-XXXX-XXXX-XXXX" value={formData.authKey} onChange={e => setFormData({ ...formData, authKey: e.target.value})} />
+            
+            <PrimaryButton isAccent style={{ marginTop: '24px', width: '100%' }} onClick={handleVerify} label="Activate License" />
+            
+            <button 
+              onClick={handleAdminGenerate}
+              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '11px', marginTop: '12px', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              [Admin] Generate 5 Stock Keys on Drive
+            </button>
           </div>
         )}
 
@@ -165,25 +224,10 @@ export const SetupWizard: React.FC = () => {
               Configure Google Drive to automatically push employee attendance logs.
             </p>
 
-            <label style={styles.label}>Target Root Folder ID</label>
-            <StandardInput 
-              value={formData.rootFolderId} 
-              onChange={e => setFormData({...formData, rootFolderId: e.target.value})} 
-            />
-
-            <label style={styles.label}>Service Account (.json)</label>
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '24px' }}>
-              <PrimaryButton label="Choose JSON Key" onClick={() => fileInputRef.current?.click()} />
-              <input type="file" accept=".json" ref={fileInputRef} hidden onChange={handleFileUpload} />
-              <span style={{ fontSize: '13px', color: formData.serviceAccountEmail ? 'var(--success)' : 'var(--text-muted)' }}>
-                 {formData.serviceAccountEmail ? '✅ Key Loaded' : 'No key selected'}
-              </span>
-            </div>
-
             {formData.serviceAccountEmail && (
               <div style={{ padding: '12px', backgroundColor: 'rgba(16,185,129,0.1)', borderRadius: '6px', marginBottom: '24px', border: '1px solid var(--success)' }}>
-                <span style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>Robot Email (Invite to Drive)</span>
-                <code style={{ fontSize: '13px', fontWeight: 'bold', color: 'var(--primary-color)', wordBreak: 'break-all' }}>{formData.serviceAccountEmail}</code>
+                <span style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>Drive Sync Status</span>
+                <p style={{ margin: 0, fontSize: '13px' }}>✅ Credentials verified during activation.</p>
               </div>
             )}
 

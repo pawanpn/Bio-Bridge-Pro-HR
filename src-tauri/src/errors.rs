@@ -29,6 +29,9 @@ pub enum AppError {
 
     #[error("Unmapped backend error: {0}")]
     Unknown(String),
+
+    #[error("Licensing Error: {0}")]
+    LicenseError(String),
 }
 
 // Serialize AppError as a plain string for Tauri IPC transport

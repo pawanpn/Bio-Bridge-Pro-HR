@@ -1,6 +1,7 @@
 pub mod zkteco;
 pub mod hikvision;
 pub mod scanner;
+pub mod id;
 
 use async_trait::async_trait;
 use std::sync::Arc;

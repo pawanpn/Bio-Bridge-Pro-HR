@@ -1,0 +1,55 @@
+﻿cargo :     Checking tauri-app 
+v0.1.0 
+(C:\Users\Admin\Desktop\BioBridge 
+Pro HR\src-tauri)
+At line:1 char:1
++ cargo check > build_errors_3.txt 
+2>&1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~
+    + CategoryInfo          : NotSp 
+   ecified: (    Checking ta...o H  
+  R\src-tauri):String) [], Remote   
+ Exception
+    + FullyQualifiedErrorId : Nativ 
+   eCommandError
+ 
+error[E0505]: cannot move out of 
+`inner_app` because it is borrowed
+   --> src\lib.rs:476:89
+    |
+473 |                     let 
+inner_app = app_handle.clone();
+    |                         
+--------- binding `inner_app` 
+declared here
+474 |                     
+tauri::async_runtime::spawn(async 
+move {
+475 |                         let 
+inner_state = 
+inner_app.state::<AppState>();
+    |                               
+            --------- borrow of 
+`inner_app` occurs here
+476 |                         let _ 
+= process_log_and_sync(employee_id, 
+device_id, timestamp, inner_app, 
+inner_state).await;
+    |                               
+                                    
+                      ^^^^^^^^^  
+----------- borrow later used here
+    |                               
+                                    
+                      |
+    |                               
+                                    
+                      move out of 
+`inner_app` occurs here
+
+For more information about this 
+error, try `rustc --explain E0505`.
+error: could not compile 
+`tauri-app` (lib) due to 1 previous 
+error
