@@ -66,6 +66,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             device_id INTEGER NOT NULL,
             timestamp TEXT NOT NULL,
             log_type TEXT,
+            is_synced INTEGER DEFAULT 0,
             FOREIGN KEY(employee_id) REFERENCES Employees(id),
             FOREIGN KEY(branch_id) REFERENCES Branches(id),
             FOREIGN KEY(device_id) REFERENCES Devices(id)
