@@ -17,39 +17,77 @@ impl DeviceDriver for ZKTecoDriver {
     async fn sync_logs(&self, ip: &str, device_id: i32) -> Result<Vec<AttendanceLog>, AppError> {
         let mut stream = connect_device(ip, 4370).await?;
 
+        // 1. Send Connect CMD (0x03e8)
         let connect_packet = assemble_zk_packet(ZKCommand::Connect, 0, 0, &[]);
-        stream
-            .write_all(&connect_packet)
-            .await
-            .map_err(|e| AppError::ConnectionError(e.to_string()))?;
+        stream.write_all(&connect_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
 
         let mut buf = [0u8; 1024];
-        stream
-            .read(&mut buf)
-            .await
-            .map_err(|e| AppError::ConnectionError(e.to_string()))?;
+        let n = stream.read(&mut buf).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+        if n < 8 { return Err(AppError::ConnectionError("Invalid response from device".to_string())); }
 
-        // Parse session_id from response bytes[8..10]
-        let _session_id = u16::from_le_bytes([buf[8], buf[9]]);
+        // 2. Clear Session ID
+        let session_id = u16::from_le_bytes([buf[8+4], buf[8+5]]);
 
-        // Mock attendance log — real impl would iterate buf for CMD_ATTLOG records
-        let now = chrono::Utc::now();
-        Ok(vec![AttendanceLog {
-            device_id,
-            employee_id: 104,
-            timestamp: now.to_rfc3339(),
-        }])
+        // 3. Request Attendance Logs (0x000d)
+        let log_packet = assemble_zk_packet(ZKCommand::AttLogRrq, session_id, 1, &[]);
+        stream.write_all(&log_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+
+        let mut log_buf = vec![0u8; 8192]; // Large buffer for logs
+        let bytes_read = stream.read(&mut log_buf).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+
+        // 4. Parse Logs
+        // ZKTeco Attendance logs in the binary buffer start after the 8-byte header.
+        // Each record is typically 12 bytes: UserID(4), Type(1), Timestamp(4), etc.
+        let mut attendance_logs = Vec::new();
+        let mut offset = 8; // skip header
+        
+        while offset + 12 <= bytes_read {
+            let employee_id = u32::from_le_bytes([log_buf[offset], log_buf[offset+1], log_buf[offset+2], log_buf[offset+3]]) as i32;
+            // Simplified timestamp extraction (in a real scenario, this is a bit-packed 32-bit int)
+            // For now, we use a placeholder or convert correctly if possible.
+            let raw_ts = u32::from_le_bytes([log_buf[offset+6], log_buf[offset+7], log_buf[offset+8], log_buf[offset+9]]);
+            
+            // Decoded ZK Timestamp logic:
+            // Year: ((ts >> 26) & 0x3f) + 2000
+            // Month: (ts >> 22) & 0x0f
+            // Day: (ts >> 17) & 0x1f
+            // Hour: (ts >> 12) & 0x1f
+            // Min: (ts >> 6) & 0x3f
+            // Sec: ts & 0x3f
+            let year  = ((raw_ts >> 26) & 0x3f) + 2000;
+            let month = (raw_ts >> 22) & 0x0f;
+            let day   = (raw_ts >> 17) & 0x1f;
+            let hour  = (raw_ts >> 12) & 0x1f;
+            let min   = (raw_ts >> 6) & 0x3f;
+            let sec   = raw_ts & 0x3f;
+
+            let timestamp = format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hour, min, sec);
+
+            if employee_id > 0 {
+                attendance_logs.push(AttendanceLog {
+                    device_id,
+                    employee_id,
+                    timestamp,
+                });
+            }
+            offset += 12;
+        }
+
+        // 5. Cleanup session (Disconnect)
+        let _ = stream.write_all(&assemble_zk_packet(ZKCommand::Exit, session_id, 2, &[])).await;
+
+        Ok(attendance_logs)
     }
 }
 
 #[repr(u16)]
 #[derive(Clone, Copy)]
 pub enum ZKCommand {
-    Connect    = 0x03e8, // 1000
-    Exit       = 0x000b, // 11
-    EnableClock  = 0x0039, // 57
-    DisableClock = 0x003a, // 58
-    AttLogRrq  = 0x000d, // 13
+    Connect    = 0x03e8, 
+    Exit       = 0x000b, 
+    EnableClock  = 0x0039, 
+    DisableClock = 0x003a, 
+    AttLogRrq  = 0x000d, 
 }
 
 fn create_checksum(data: &[u8]) -> u16 {
@@ -80,7 +118,6 @@ pub fn assemble_zk_packet(cmd: ZKCommand, session_id: u16, reply_id: u16, data: 
     payload[2] = cs[0];
     payload[3] = cs[1];
 
-    // TCP magic header: 0x5050827d + 4-byte payload length
     let size = payload.len() as u32;
     let mut pkt = vec![0x50, 0x50, 0x82, 0x7d];
     pkt.extend_from_slice(&size.to_le_bytes());
@@ -88,7 +125,6 @@ pub fn assemble_zk_packet(cmd: ZKCommand, session_id: u16, reply_id: u16, data: 
     pkt
 }
 
-/// Opens a TCP connection with a hard 10-second timeout
 pub async fn connect_device(ip: &str, port: u16) -> Result<TcpStream, AppError> {
     let addr = format!("{}:{}", ip, port);
     match tokio::time::timeout(

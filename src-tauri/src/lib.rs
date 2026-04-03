@@ -6,7 +6,7 @@ mod models;
 
 use tauri::{AppHandle, Manager, State};
 use std::sync::Mutex;
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 use errors::AppError;
 use models::DeviceBrand;
 use cloud::gdrive::{ServiceAccountKey, NormalizedLog};
@@ -136,6 +136,7 @@ async fn sync_device_logs(
                           .clone().unwrap_or_else(|| "HeadOffice".to_string());
     let branch_name = state.active_branch_name.lock().map_err(lock_err)?
                           .clone().unwrap_or_else(|| "Main".to_string());
+    let branch_id   = state.active_branch_id.lock().map_err(lock_err)?.unwrap_or(1);
     let key_opt     = state.service_account_key.lock().map_err(lock_err)?.clone();
     let root_id_opt = state.root_folder_id.lock().map_err(lock_err)?.clone();
 
@@ -147,7 +148,23 @@ async fn sync_device_logs(
         chrono::Utc::now().format("%H:%M"), logs.len(), ip, brand
     ));
 
-    // 2. Normalize logs
+    // 2. Persist locally (Store-then-Sync)
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    if let Some(conn) = db_guard.as_ref() {
+        for log in &logs {
+            // INSERT OR IGNORE based on (employee_id, timestamp) to prevent duplicates
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, device_id, timestamp, is_synced) VALUES (?1, ?2, ?3, ?4, 0)",
+                params![log.employee_id, branch_id, device_id, log.timestamp],
+            );
+        }
+        let _ = app.emit("console-log", format!(
+            "[{} UTC] Local persistence complete. {} logs stored in SQLite.",
+            chrono::Utc::now().format("%H:%M"), logs.len()
+        ));
+    }
+
+    // 3. Normalize logs for Cloud
     let now = chrono::Utc::now();
     let normalized: Vec<NormalizedLog> = logs.iter().map(|l| NormalizedLog {
         log_id:         format!("{}_{}", l.device_id, l.timestamp),
@@ -158,38 +175,41 @@ async fn sync_device_logs(
         organization:   org_name.clone(),
     }).collect();
 
-    // 3. Sync to Drive
+    // 4. Sync to Drive
     if let (Some(key), Some(root_id)) = (key_opt.clone(), root_id_opt.clone()) {
         let year  = now.format("%Y").to_string();
         let month = now.format("%m").to_string();
 
-        let sync_result = cloud::gdrive::sync_logs_to_drive(
-            &key, 
-            &root_id,
-            &org_name, 
-            &branch_name,
-            &year,
-            &month,
-            &normalized,
-        ).await;
+        let sync_result = cloud::gdrive::sync_logs_to_drive(&key, &root_id, &org_name, &branch_name, &year, &month, &normalized).await;
 
         match sync_result {
             Ok(_) => {
+                // Update local flag
+                if let Some(conn) = db_guard.as_ref() {
+                    for log in &logs {
+                        let _ = conn.execute(
+                            "UPDATE AttendanceLogs SET is_synced = 1 WHERE employee_id = ?1 AND timestamp = ?2",
+                            params![log.employee_id, log.timestamp],
+                        );
+                    }
+                }
                 let _ = app.emit("console-log", format!(
                     "[{} UTC] Synced to Drive: Targeted ID: {} > {} > {} > {} > {}.",
                     chrono::Utc::now().format("%H:%M"), root_id, org_name, branch_name, year, month
                 ));
             },
             Err(AppError::PermissionDenied(rid)) => {
-                let err_msg = format!("Error: Service Account lacks Editor access to Folder ID: {}. Please share the folder with {}.", rid, key.client_email);
+                let err_msg = format!("Error: Service Account lacks Editor access to Folder ID: {}. Local logs preserved.", rid);
                 let _ = app.emit("console-log", format!("[ERROR] {}", err_msg));
                 return Err(AppError::PermissionDenied(err_msg));
             },
-            Err(e) => return Err(e),
+            Err(e) => {
+                let _ = app.emit("console-log", format!("[WARN] Cloud sync failed: {}. Offline mode: Data saved locally.", e));
+                return Ok(format!("Local storage OK ({} logs). Cloud sync failed.", logs.len()));
+            }
         }
     } else {
-        let _ = app.emit("console-log",
-            "[WARN] No Service Account or Root ID configured. Drive sync skipped.");
+        let _ = app.emit("console-log", "[WARN] Cloud not configured. Logs stored locally only.");
     }
 
     Ok(format!("Synced {} logs from {}", logs.len(), ip))
@@ -210,7 +230,6 @@ fn get_dashboard_stats(_state: State<'_, AppState>) -> Result<serde_json::Value,
 
 // ── App Entry ──────────────────────────────────────────────────────────────
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

@@ -1,6 +1,7 @@
 use reqwest::Client;
 use async_trait::async_trait;
 use std::time::Duration;
+use serde_json::Value;
 use crate::models::AttendanceLog;
 use crate::errors::AppError;
 use super::DeviceDriver;
@@ -21,22 +22,44 @@ impl DeviceDriver for HikvisionDriver {
             .build()
             .map_err(|e| AppError::ConnectionError(e.to_string()))?;
 
-        // In production: use HTTP Digest Auth via reqwest_digest or similar.
-        // For now we simulate a successful response without authentication.
-        let _response = client
+        // 1. Fetch Logs
+        let response = client
             .post(&url)
             .header("Content-Type", "application/json")
-            .body(r#"{"AcsEventCond":{"searchID":"1","searchResultPosition":0,"maxResults":50}}"#)
+            .body(r#"{"AcsEventCond":{"searchID":"1","searchResultPosition":0,"maxResults":100}}"#)
             .send()
             .await
             .map_err(|e| AppError::ConnectionError(format!("ISAPI request failed on {}: {}", ip, e)))?;
 
-        // Production: parse _response.json() mapping to AttendanceLog structs.
-        let now = chrono::Utc::now();
-        Ok(vec![AttendanceLog {
-            device_id,
-            employee_id: 205,
-            timestamp: now.to_rfc3339(),
-        }])
+        // 2. Parse Response
+        let json: Value = response.json().await
+            .map_err(|e| AppError::SerializationError(format!("Invalid ISAPI response: {}", e)))?;
+
+        let mut attendance_logs = Vec::new();
+
+        if let Some(events) = json["AcsEvent"]["InfoList"].as_array() {
+            for event in events {
+                // Hikvision ISAPI: employeeNoString is the user ID. time is the timestamp.
+                let employee_id = event["employeeNoString"]
+                    .as_str()
+                    .and_then(|s| s.parse::<i32>().ok())
+                    .unwrap_or(0);
+                
+                let timestamp = event["time"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string();
+
+                if employee_id > 0 {
+                    attendance_logs.push(AttendanceLog {
+                        device_id,
+                        employee_id,
+                        timestamp,
+                    });
+                }
+            }
+        }
+
+        Ok(attendance_logs)
     }
 }
