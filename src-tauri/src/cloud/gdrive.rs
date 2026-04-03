@@ -21,7 +21,7 @@ struct TokenResponse {
     access_token: String,
 }
 
-// ── Service Account Key Structure (matches GCP JSON format) ───────────────
+// ── Service Account Key Structure ──────────────────────────────────────────
 
 #[derive(Deserialize, Clone, Serialize)]
 pub struct ServiceAccountKey {
@@ -30,7 +30,7 @@ pub struct ServiceAccountKey {
     pub project_id: String,
 }
 
-// ── Normalized Log Format (brand-agnostic) ─────────────────────────────────
+// ── Normalized Log Format ──────────────────────────────────────────────────
 
 #[derive(Serialize)]
 pub struct NormalizedLog {
@@ -44,7 +44,6 @@ pub struct NormalizedLog {
 
 // ── Token Generation ───────────────────────────────────────────────────────
 
-/// Generates an OAuth2 Bearer token from a Service Account private key (RS256 JWT).
 pub async fn generate_bearer_token(key: &ServiceAccountKey) -> Result<String, AppError> {
     let iat = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -68,7 +67,6 @@ pub async fn generate_bearer_token(key: &ServiceAccountKey) -> Result<String, Ap
     let jwt = encode(&header, &claims, &encoding_key)
         .map_err(|e| AppError::AuthError(format!("JWT signing failed: {}", e)))?;
 
-    // Exchange JWT for Bearer token
     let client = Client::new();
     let resp = client
         .post("https://oauth2.googleapis.com/token")
@@ -87,20 +85,15 @@ pub async fn generate_bearer_token(key: &ServiceAccountKey) -> Result<String, Ap
 
 // ── Folder Helpers ─────────────────────────────────────────────────────────
 
-/// Find a folder by name under a parent ID. Returns the folder ID if found.
 async fn find_folder(
     client: &Client,
     token: &str,
     name: &str,
-    parent_id: Option<&str>,
+    parent_id: &str,
 ) -> Result<Option<String>, AppError> {
-    let parent_clause = parent_id
-        .map(|p| format!(" and '{}' in parents", p))
-        .unwrap_or_default();
-
     let q = format!(
-        "mimeType='application/vnd.google-apps.folder' and name='{}' and trashed=false{}",
-        name, parent_clause
+        "mimeType='application/vnd.google-apps.folder' and name='{}' and '{}' in parents and trashed=false",
+        name, parent_id
     );
 
     let resp = client
@@ -108,88 +101,114 @@ async fn find_folder(
         .bearer_auth(token)
         .query(&[("q", q.as_str()), ("fields", "files(id,name)")])
         .send()
-        .await?
-        .json::<Value>()
-        .await
+        .await?;
+
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        return Err(AppError::PermissionDenied(format!("Access denied to folder ID: {}", parent_id)));
+    }
+
+    let json = resp.json::<Value>().await
         .map_err(|e| AppError::SerializationError(e.to_string()))?;
 
-    Ok(resp["files"]
+    Ok(json["files"]
         .as_array()
         .and_then(|arr| arr.first())
         .and_then(|f| f["id"].as_str())
         .map(|s| s.to_string()))
 }
 
-/// Find or create a folder under parent_id. Returns the folder ID.
 async fn ensure_folder(
     client: &Client,
     token: &str,
     name: &str,
-    parent_id: Option<&str>,
+    parent_id: &str,
 ) -> Result<String, AppError> {
     if let Some(id) = find_folder(client, token, name, parent_id).await? {
         return Ok(id);
     }
 
-    // Create folder
-    let mut metadata = json!({
+    let metadata = json!({
         "name": name,
-        "mimeType": "application/vnd.google-apps.folder"
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [parent_id]
     });
-    if let Some(p) = parent_id {
-        metadata["parents"] = json!([p]);
-    }
 
     let resp = client
         .post("https://www.googleapis.com/drive/v3/files")
         .bearer_auth(token)
         .json(&metadata)
         .send()
-        .await?
-        .json::<Value>()
-        .await
+        .await?;
+
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        return Err(AppError::PermissionDenied(format!("Cannot create folder '{}' in parent ID: {}", name, parent_id)));
+    }
+
+    let json = resp.json::<Value>().await
         .map_err(|e| AppError::SerializationError(e.to_string()))?;
 
-    resp["id"]
+    json["id"]
         .as_str()
         .map(|s| s.to_string())
         .ok_or_else(|| AppError::Unknown("Folder creation returned no ID".to_string()))
 }
 
+// ── Access Verification ───────────────────────────────────────────────────
+
+/// Verifies that the service account has "Editor" (write) access to the root folder.
+pub async fn verify_access(client: &Client, token: &str, root_id: &str) -> Result<(), AppError> {
+    let resp = client
+        .get(format!("https://www.googleapis.com/drive/v3/files/{}", root_id))
+        .bearer_auth(token)
+        .query(&[("fields", "capabilities(canEdit)")])
+        .send()
+        .await?;
+
+    if resp.status() == reqwest::StatusCode::FORBIDDEN || resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(AppError::PermissionDenied(root_id.to_string()));
+    }
+
+    let json = resp.json::<Value>().await
+        .map_err(|e| AppError::SerializationError(e.to_string()))?;
+
+    let can_edit = json["capabilities"]["canEdit"].as_bool().unwrap_or(false);
+    if !can_edit {
+        return Err(AppError::PermissionDenied(root_id.to_string()));
+    }
+
+    Ok(())
+}
+
 // ── Main Sync ──────────────────────────────────────────────────────────────
 
-/// Full dynamic Drive sync.
-///
-/// Path: Bio Bridge Pro HR → [Org] → [Branch] → [Year] → [Month] → logs.json
-///
-/// - Searches for each folder level, creates if missing.
-/// - Uploads a brand-agnostic normalized JSON payload.
-/// - Uses the Service Account key stored dynamically by the Admin.
 pub async fn sync_logs_to_drive(
     key: &ServiceAccountKey,
+    root_id: &str,
     org: &str,
     branch: &str,
-    year: i32,
-    month: u32,
+    year: &str,
+    month: &str,
     logs: &[NormalizedLog],
 ) -> Result<(), AppError> {
     let token  = generate_bearer_token(key).await?;
     let client = Client::new();
 
-    // Build folder hierarchy
-    let root_id   = ensure_folder(&client, &token, "Bio Bridge Pro HR", None).await?;
-    let org_id    = ensure_folder(&client, &token, org,                  Some(&root_id)).await?;
-    let branch_id = ensure_folder(&client, &token, branch,               Some(&org_id)).await?;
-    let year_id   = ensure_folder(&client, &token, &year.to_string(),    Some(&branch_id)).await?;
-    let month_id  = ensure_folder(&client, &token, &month.to_string(),   Some(&year_id)).await?;
+    // 1. Verify Access to Root
+    verify_access(&client, &token, root_id).await?;
 
-    // Serialize normalized logs
+    // 2. Build folder hierarchy: Root -> [Org] -> [Branch] -> [Year] -> [Month]
+    let org_id    = ensure_folder(&client, &token, org,    root_id).await?;
+    let branch_id = ensure_folder(&client, &token, branch, &org_id).await?;
+    let year_id   = ensure_folder(&client, &token, year,   &branch_id).await?;
+    let month_id  = ensure_folder(&client, &token, month,  &year_id).await?;
+
+    // 3. Serialize logs
     let content = serde_json::to_string_pretty(logs)
         .map_err(|e| AppError::SerializationError(e.to_string()))?;
 
-    // Upload logs.json (multipart: metadata + media)
+    // 4. Upload attendance_logs.json
     let file_metadata = json!({
-        "name":    "logs.json",
+        "name":    "attendance_logs.json",
         "parents": [month_id],
         "mimeType": "application/json"
     });
@@ -200,14 +219,17 @@ pub async fn sync_logs_to_drive(
         .part("media", reqwest::multipart::Part::text(content)
             .mime_str("application/json").unwrap());
 
-    client
+    let resp = client
         .post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart")
         .bearer_auth(&token)
         .multipart(form)
         .send()
-        .await
-        .map_err(|e| AppError::ConnectionError(format!("Drive upload failed: {}", e)))?;
+        .await?;
 
-    println!("Drive sync complete: Bio Bridge Pro HR/{}/{}/{}/{}/logs.json", org, branch, year, month);
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        return Err(AppError::PermissionDenied(format!("Cannot upload file to folder ID: {}", month_id)));
+    }
+
+    println!("Drive sync complete: Root({})/{}/{}/{}/{}/attendance_logs.json", root_id, org, branch, year, month);
     Ok(())
 }

@@ -24,6 +24,9 @@ pub enum AppError {
     #[error("Driver not registered for brand: {0}")]
     UnknownDriver(String),
 
+    #[error("Permission Denied: {0}")]
+    PermissionDenied(String),
+
     #[error("Unmapped backend error: {0}")]
     Unknown(String),
 }

@@ -99,7 +99,8 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             id INTEGER PRIMARY KEY,
             client_email TEXT NOT NULL,
             private_key TEXT NOT NULL,
-            project_id TEXT NOT NULL
+            project_id TEXT NOT NULL,
+            root_folder_id TEXT
         )",
         [],
     )?;
