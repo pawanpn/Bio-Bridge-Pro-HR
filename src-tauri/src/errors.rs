@@ -5,21 +5,30 @@ use thiserror::Error;
 pub enum AppError {
     #[error("Database constraint failed: {0}")]
     DatabaseError(String),
-    
-    #[error("Hardware connection timeout: {0}")]
+
+    #[error("Hardware connection timeout after {0}s on attempt {1}")]
+    TimeoutError(u64, u32),
+
+    #[error("Hardware connection refused: {0}")]
     ConnectionError(String),
-    
-    #[error("Cloud Payload formatting error: {0}")]
+
+    #[error("Hardware sync failed after {0} retries: {1}")]
+    RetryExhausted(u32, String),
+
+    #[error("Cloud payload formatting error: {0}")]
     SerializationError(String),
-    
-    #[error("Cloud Authentication failure: {0}")]
+
+    #[error("Cloud authentication failure: {0}")]
     AuthError(String),
 
-    #[error("Unmapped Backend Error: {0}")]
-    Unknown(String)
+    #[error("Driver not registered for brand: {0}")]
+    UnknownDriver(String),
+
+    #[error("Unmapped backend error: {0}")]
+    Unknown(String),
 }
 
-// Ensure the Error handles can be wrapped directly back over Tauri channels mapping to IPC JSON
+// Serialize AppError as a plain string for Tauri IPC transport
 impl Serialize for AppError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -29,7 +38,7 @@ impl Serialize for AppError {
     }
 }
 
-// From mappings allowing ? bubbles.
+// Automatic From mappings to allow `?` bubbling
 impl From<rusqlite::Error> for AppError {
     fn from(err: rusqlite::Error) -> Self {
         AppError::DatabaseError(err.to_string())
