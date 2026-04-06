@@ -636,47 +636,76 @@ fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, 
         (r, b)
     };
 
-    let (filter_branch, _total_staff_query, present_query, leave_query) = if u_role == Some("ADMIN".to_string()) && u_branch.is_some() {
-        (u_branch, 
-         "SELECT COUNT(*) FROM Employees WHERE branch_id = ?1",
-         "SELECT COUNT(DISTINCT employee_id) FROM AttendanceLogs WHERE timestamp LIKE ?2 AND branch_id = ?1",
-         "SELECT COUNT(DISTINCT employee_id) FROM LeaveRequests lr JOIN Employees e ON lr.employee_id = e.id WHERE ?2 BETWEEN start_date AND end_date AND status != 'rejected' AND e.branch_id = ?1")
+    let filter_branch = if u_role == Some("ADMIN".to_string()) && u_branch.is_some() { u_branch } else { None };
+
+    // Present & Late Staff
+    let mut present_stmt = if filter_branch.is_some() {
+        conn.prepare("SELECT e.id, e.name, MIN(al.timestamp) FROM Employees e JOIN AttendanceLogs al ON e.id = al.employee_id WHERE al.timestamp LIKE ?2 AND e.branch_id = ?1 GROUP BY e.id")?
     } else {
-        (None,
-         "SELECT COUNT(*) FROM Employees",
-         "SELECT COUNT(DISTINCT employee_id) FROM AttendanceLogs WHERE timestamp LIKE ?1",
-         "SELECT COUNT(DISTINCT employee_id) FROM LeaveRequests WHERE ?1 BETWEEN start_date AND end_date AND status != 'rejected'")
+        conn.prepare("SELECT e.id, e.name, MIN(al.timestamp) FROM Employees e JOIN AttendanceLogs al ON e.id = al.employee_id WHERE al.timestamp LIKE ?1 GROUP BY e.id")?
     };
 
-    // 1. Total Staff (Any employee in system)
-    let total_staff: i32 = if filter_branch.is_some() {
-        conn.query_row("SELECT COUNT(*) FROM Employees WHERE branch_id = ?1", [filter_branch.unwrap()], |row| row.get(0)).unwrap_or(0)
+    let mut present_staff = Vec::new();
+    let mut late_staff = Vec::new();
+
+    let present_rows: Vec<(i32, String, String)> = if filter_branch.is_some() {
+        present_stmt.query_map(params![filter_branch.unwrap(), today_pattern], |row| Ok((row.get::<_, i32>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))?.filter_map(|r| r.ok()).collect()
     } else {
-        conn.query_row("SELECT COUNT(*) FROM Employees", [], |row| row.get(0)).unwrap_or(0)
+        present_stmt.query_map(params![today_pattern], |row| Ok((row.get::<_, i32>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))?.filter_map(|r| r.ok()).collect()
     };
 
-    // 2. Present Today
-    let present_today: i32 = if filter_branch.is_some() {
-        conn.query_row(present_query, params![filter_branch.unwrap(), today_pattern], |row| row.get(0)).unwrap_or(0)
+    for (id, name, in_time_full) in present_rows {
+        let time_only = if in_time_full.len() >= 16 { &in_time_full[11..16] } else { "" };
+        let is_late = time_only > "09:15";
+        
+        present_staff.push(serde_json::json!({ "id": id, "name": name.clone(), "time": time_only }));
+        if is_late {
+            late_staff.push(serde_json::json!({ "id": id, "name": name, "time": time_only }));
+        }
+    }
+
+    // Absent Staff
+    let mut absent_stmt = if filter_branch.is_some() {
+        conn.prepare("SELECT id, name FROM Employees WHERE branch_id = ?1 AND id NOT IN (SELECT employee_id FROM AttendanceLogs WHERE timestamp LIKE ?2) AND id NOT IN (SELECT employee_id FROM LeaveRequests WHERE ?3 BETWEEN start_date AND end_date AND status != 'rejected')")?
     } else {
-        conn.query_row(present_query, params![today_pattern], |row| row.get(0)).unwrap_or(0)
+        conn.prepare("SELECT id, name FROM Employees WHERE id NOT IN (SELECT employee_id FROM AttendanceLogs WHERE timestamp LIKE ?1) AND id NOT IN (SELECT employee_id FROM LeaveRequests WHERE ?2 BETWEEN start_date AND end_date AND status != 'rejected')")?
     };
 
-    // 3. On Leave
-    let on_leave: i32 = if filter_branch.is_some() {
-        conn.query_row(leave_query, params![filter_branch.unwrap(), today], |row| row.get(0)).unwrap_or(0)
+    let absent_rows: Vec<(i32, String)> = if filter_branch.is_some() {
+        absent_stmt.query_map(params![filter_branch.unwrap(), today_pattern, today], |row| Ok((row.get::<_, i32>(0)?, row.get::<_, String>(1)?)))?.filter_map(|r| r.ok()).collect()
     } else {
-        conn.query_row(leave_query, params![today], |row| row.get(0)).unwrap_or(0)
+        absent_stmt.query_map(params![today_pattern, today], |row| Ok((row.get::<_, i32>(0)?, row.get::<_, String>(1)?)))?.filter_map(|r| r.ok()).collect()
     };
 
-    // 4. Absent (Total - Present - OnLeave)
-    let absent = (total_staff - present_today - on_leave).max(0);
+    let absent_staff: Vec<serde_json::Value> = absent_rows.into_iter().map(|(id, name)| serde_json::json!({ "id": id, "name": name })).collect();
+
+    // On Leave
+    let mut leave_stmt = if filter_branch.is_some() {
+        conn.prepare("SELECT e.id, e.name FROM LeaveRequests lr JOIN Employees e ON lr.employee_id = e.id WHERE ?2 BETWEEN lr.start_date AND lr.end_date AND lr.status != 'rejected' AND e.branch_id = ?1")?
+    } else {
+        conn.prepare("SELECT e.id, e.name FROM LeaveRequests lr JOIN Employees e ON lr.employee_id = e.id WHERE ?1 BETWEEN lr.start_date AND lr.end_date AND lr.status != 'rejected'")?
+    };
+
+    let leave_rows: Vec<(i32, String)> = if filter_branch.is_some() {
+        leave_stmt.query_map(params![filter_branch.unwrap(), today], |row| Ok((row.get::<_, i32>(0)?, row.get::<_, String>(1)?)))?.filter_map(|r| r.ok()).collect()
+    } else {
+        leave_stmt.query_map(params![today], |row| Ok((row.get::<_, i32>(0)?, row.get::<_, String>(1)?)))?.filter_map(|r| r.ok()).collect()
+    };
+
+    let leave_staff: Vec<serde_json::Value> = leave_rows.into_iter().map(|(id, name)| serde_json::json!({ "id": id, "name": name })).collect();
+
+    let total_staff = present_staff.len() + absent_staff.len() + leave_staff.len();
 
     Ok(serde_json::json!({
         "totalStaff": total_staff,
-        "presentToday": present_today,
-        "onLeave": on_leave,
-        "absent": absent,
+        "presentToday": present_staff.len(),
+        "onLeave": leave_staff.len(),
+        "absent": absent_staff.len(),
+        "lateToday": late_staff.len(),
+        "presentStaff": present_staff,
+        "absentStaff": absent_staff,
+        "lateStaff": late_staff,
+        "leaveStaff": leave_staff,
         "lastUpdated": chrono::Local::now().format("%H:%M").to_string(),
     }))
 }
