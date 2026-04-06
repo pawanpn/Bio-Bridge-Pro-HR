@@ -33,6 +33,17 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     )?;
 
+    // LVL 3: Gates/Locations within a branch
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS Gates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            branch_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            FOREIGN KEY(branch_id) REFERENCES Branches(id)
+        )",
+        [],
+    )?;
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,12 +61,14 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         "CREATE TABLE IF NOT EXISTS Devices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             branch_id INTEGER NOT NULL,
+            gate_id INTEGER NOT NULL DEFAULT 1,
             name TEXT NOT NULL,
             brand TEXT NOT NULL,
             ip_address TEXT NOT NULL,
             port INTEGER DEFAULT 4370,
             status TEXT DEFAULT 'offline',
-            FOREIGN KEY(branch_id) REFERENCES Branches(id)
+            FOREIGN KEY(branch_id) REFERENCES Branches(id),
+            FOREIGN KEY(gate_id) REFERENCES Gates(id)
         )",
         [],
     )?;
@@ -65,12 +78,14 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             employee_id INTEGER NOT NULL,
             branch_id INTEGER NOT NULL,
+            gate_id INTEGER NOT NULL DEFAULT 1,
             device_id INTEGER NOT NULL,
             timestamp TEXT NOT NULL,
             log_type TEXT,
             is_synced INTEGER DEFAULT 0,
             FOREIGN KEY(employee_id) REFERENCES Employees(id),
             FOREIGN KEY(branch_id) REFERENCES Branches(id),
+            FOREIGN KEY(gate_id) REFERENCES Gates(id),
             FOREIGN KEY(device_id) REFERENCES Devices(id)
         )",
         [],
@@ -107,6 +122,15 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         )",
         [],
     )?;
+
+    // Seed default data
+    conn.execute("INSERT OR IGNORE INTO Organizations (id, name) VALUES (1, 'Default Organization')", [])?;
+    conn.execute("INSERT OR IGNORE INTO Branches (id, org_id, name) VALUES (1, 1, 'Head Office')", [])?;
+    conn.execute("INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')", [])?;
+
+    // Migration for existing tables (ensure columns exist)
+    let _ = conn.execute("ALTER TABLE Devices ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE AttendanceLogs ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1", []);
 
     Ok(conn)
 }

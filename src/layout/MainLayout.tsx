@@ -3,7 +3,7 @@ import { Outlet, useNavigate } from 'react-router-dom';
 import { AttendanceConsole } from '../components/AttendanceConsole';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { AppConfig } from '../config/appConfig';
-import { Calendar, Search, LayoutDashboard, Monitor, Users, FileText, Settings } from 'lucide-react';
+import { Calendar, Search, LayoutDashboard, Monitor, FileText, Settings } from 'lucide-react';
 
 export const MainLayout: React.FC = () => {
   useShortcuts();
@@ -17,6 +17,11 @@ export const MainLayout: React.FC = () => {
     localStorage.setItem('calendarMode', nextMode);
   };
 
+  const go = (tab: string, path: string) => {
+    setActiveTab(tab);
+    navigate(path);
+  };
+
   return (
     <div style={{ display: 'flex', height: '100vh', width: '100vw' }}>
       {/* Sidebar */}
@@ -24,14 +29,21 @@ export const MainLayout: React.FC = () => {
         <div style={{ padding: '24px', fontSize: '20px', fontWeight: 'bold', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
           {AppConfig.appName}
         </div>
+
         <div style={{ flex: 1, padding: '16px 0' }}>
-          <SidebarItem icon={<LayoutDashboard />} label="Dashboard Overview" active={activeTab === 'Overview'} onClick={() => {setActiveTab('Overview'); navigate('/dashboard');}} />
-          <SidebarItem icon={<Monitor />} label="Device Management" active={activeTab === 'Devices'} onClick={() => {setActiveTab('Devices'); navigate('/device-settings');}} />
-          <SidebarItem icon={<Users />} label="Master Settings" active={activeTab === 'Masters'} onClick={() => setActiveTab('Masters')} />
-          <SidebarItem icon={<FileText />} label="Reports" active={activeTab === 'Reports'} onClick={() => setActiveTab('Reports')} />
+          <SidebarItem icon={<LayoutDashboard size={18} />} label="Dashboard Overview" active={activeTab === 'Overview'} onClick={() => go('Overview', '/dashboard')} />
+          <SidebarItem icon={<Monitor size={18} />} label="Device Management" active={activeTab === 'Devices'} onClick={() => go('Devices', '/device-settings')} />
+          <SidebarItem icon={<FileText size={18} />} label="Reports" active={activeTab === 'Reports'} onClick={() => go('Reports', '/reports')} />
         </div>
+
+        {/* System Settings at bottom — contains Master Settings inside */}
         <div style={{ padding: '16px 0', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
-          <SidebarItem icon={<Settings />} label="System Settings" active={activeTab === 'Settings'} onClick={() => {setActiveTab('Settings'); navigate('/cloud-settings');}} />
+          <SidebarItem
+            icon={<Settings size={18} />}
+            label="System Settings"
+            active={activeTab === 'Settings'}
+            onClick={() => go('Settings', '/system-settings')}
+          />
         </div>
       </div>
 
@@ -45,13 +57,10 @@ export const MainLayout: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-            {/* Branch Selector */}
             <select style={{ marginBottom: 0, padding: '8px', minWidth: '150px' }}>
               <option>Head Office</option>
               <option>Kathmandu Branch</option>
             </select>
-
-            {/* Calendar Toggle */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={toggleCalendar}>
               <Calendar size={20} color="var(--primary-color)" />
               <span style={{ fontWeight: '500' }}>{calendarMode} Mode</span>
@@ -59,20 +68,19 @@ export const MainLayout: React.FC = () => {
           </div>
         </div>
 
-        {/* Content Outlet */}
+        {/* Page Content */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <Outlet />
         </div>
 
-        {/* Console Drawer */}
         <AttendanceConsole />
       </div>
     </div>
   );
 };
 
-const SidebarItem = ({ icon, label, active, onClick }: { icon: any, label: string, active: boolean, onClick: () => void }) => (
-  <div 
+const SidebarItem = ({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) => (
+  <div
     onClick={onClick}
     style={{
       padding: '12px 24px',
@@ -80,7 +88,7 @@ const SidebarItem = ({ icon, label, active, onClick }: { icon: any, label: strin
       cursor: 'pointer',
       backgroundColor: active ? 'var(--primary-light)' : 'transparent',
       transition: 'background-color 0.2s',
-      color: active ? 'white' : 'var(--text-muted)'
+      color: active ? 'white' : 'var(--text-muted)',
     }}
   >
     {icon}

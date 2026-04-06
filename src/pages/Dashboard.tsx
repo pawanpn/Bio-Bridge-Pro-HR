@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AnalyticalCard } from '../components/AnalyticalCard';
 import { DeviceScanner } from '../components/DeviceScanner';
 import { invoke } from '@tauri-apps/api/core';
-import { Users, UserCheck, AlertTriangle, UserMinus, Cloud, CloudOff, Info } from 'lucide-react';
+import { Users, UserCheck, AlertTriangle, UserMinus, Cloud, CloudOff } from 'lucide-react';
 
 interface Stats {
   totalStaff: number;
@@ -247,27 +247,7 @@ export const Dashboard: React.FC = () => {
       
       <p style={{ color: 'var(--text-muted)', marginBottom: '32px' }}>Real-time statistics for Head Office</p>
       
-      {cloud?.configured && (
-        <div style={{ 
-          marginBottom: '32px', padding: '16px', borderRadius: '12px', 
-          backgroundColor: 'var(--surface-color)', border: '1px solid var(--border-color)',
-          display: 'flex', alignItems: 'center', gap: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
-        }}>
-          <div style={{ padding: '10px', backgroundColor: 'var(--primary-light)', borderRadius: '50%', color: 'white' }}>
-            <Info size={20} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <span style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-              Service Account (Invite this to your Drive folder)
-            </span>
-            <code style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--primary-color)' }}>{cloud.clientEmail}</code>
-          </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-muted)', textAlign: 'right' }}>
-             Root Folder ID: <br />
-             <span style={{ fontWeight: '600', color: 'var(--text-color)' }}>1jwry...DC_Ps</span>
-          </div>
-        </div>
-      )}
+
 
       {stats && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '24px', marginBottom: '40px' }}>
