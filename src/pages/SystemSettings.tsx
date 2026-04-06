@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { PrimaryButton } from '../components/common/PrimaryButton';
 import { AppConfig } from '../config/appConfig';
-import { Shield, Lock, Eye, EyeOff, Settings, Key } from 'lucide-react';
+import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, Trash2, UserPlus } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -14,12 +15,14 @@ interface CloudConfig {
   rootFolderId?: string;
 }
 
-type Tab = 'general' | 'master';
+type Tab = 'general' | 'directory' | 'master' | 'users';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Page
 // ─────────────────────────────────────────────────────────────────────────────
 export const SystemSettings: React.FC = () => {
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const [activeTab, setActiveTab] = useState<Tab>('general');
   const [masterUnlocked, setMasterUnlocked] = useState(false);
 
@@ -53,16 +56,32 @@ export const SystemSettings: React.FC = () => {
           onClick={() => handleTabChange('general')}
         />
         <TabButton
+          label="Employee Directory"
+          icon={<UsersIcon size={15} />}
+          active={activeTab === 'directory'}
+          onClick={() => handleTabChange('directory')}
+        />
+        <TabButton
           label="Master Settings"
           icon={<Shield size={15} />}
           active={activeTab === 'master'}
           locked={!masterUnlocked}
           onClick={() => handleTabChange('master')}
         />
+        {isSuperAdmin && (
+          <TabButton
+            label="User Management"
+            icon={<Shield size={15} />}
+            active={activeTab === 'users'}
+            onClick={() => handleTabChange('users')}
+          />
+        )}
       </div>
 
       {/* Tab Content */}
       {activeTab === 'general' && <GeneralSettings />}
+      {activeTab === 'directory' && <EmployeeDirectory />}
+      {activeTab === 'users' && <UserManagement />}
       {activeTab === 'master' && (
         masterUnlocked
           ? <MasterSettingsContent onLock={() => setMasterUnlocked(false)} />
@@ -474,6 +493,313 @@ const MasterSettingsContent: React.FC<{ onLock: () => void }> = ({ onLock }) => 
             </button>
           </div>
         )}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Employee Directory (Modify Auto-Discovered Staff)
+// ─────────────────────────────────────────────────────────────────────────────
+const EmployeeDirectory: React.FC = () => {
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [editingEmp, setEditingEmp] = useState<any | null>(null);
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      const emps = await invoke<any[]>('list_employees');
+      const brs = await invoke<any[]>('list_branches');
+      setEmployees(emps);
+      setBranches(brs);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleUpdate = async () => {
+    if (!editingEmp) return;
+    try {
+      await invoke('update_employee', { 
+        id: editingEmp.id, 
+        name: editingEmp.name, 
+        department: editingEmp.department || '', 
+        branchId: editingEmp.branch_id || 1 
+      });
+      setStatus('✅ Profile updated!');
+      setTimeout(() => setStatus(''), 2000);
+      setEditingEmp(null);
+      loadData();
+    } catch (e) { setStatus('❌ ' + e); }
+  };
+
+  return (
+    <div>
+      <div style={cardStyle}>
+        <h3 style={{ marginTop: 0, marginBottom: 20 }}>Staff Directory</h3>
+        
+        {employees.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+             <p>No employees found. Start syncing devices to discover staff.</p>
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border-color)' }}>
+                <th style={{ padding: '12px 8px', fontSize: 11, color: 'var(--text-muted)' }}>BIO ID</th>
+                <th style={{ padding: '12px 8px', fontSize: 11, color: 'var(--text-muted)' }}>NAME</th>
+                <th style={{ padding: '12px 8px', fontSize: 11, color: 'var(--text-muted)' }}>DEPARTMENT</th>
+                <th style={{ padding: '12px 8px', fontSize: 11, color: 'var(--text-muted)' }}>BRANCH</th>
+                <th style={{ padding: '12px 8px', fontSize: 11, color: 'var(--text-muted)' }}>ACTION</th>
+              </tr>
+            </thead>
+            <tbody>
+              {employees.map(emp => (
+                <tr key={emp.id} style={{ borderBottom: '1px solid var(--bg-color)' }}>
+                  <td style={{ padding: '12px 8px', fontFamily: 'monospace' }}>#{emp.id}</td>
+                  <td style={{ padding: '12px 8px', fontWeight: 600 }}>{emp.name}</td>
+                  <td style={{ padding: '12px 8px', fontSize: 13 }}>{emp.department || '—'}</td>
+                  <td style={{ padding: '12px 8px', fontSize: 13 }}>
+                    {branches.find(b => b.id === emp.branch_id)?.name || 'Default'}
+                  </td>
+                  <td style={{ padding: '12px 8px' }}>
+                    <button 
+                      onClick={() => setEditingEmp(emp)}
+                      style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid var(--primary-color)', background: 'transparent', color: 'var(--primary-color)', cursor: 'pointer', fontSize: 12 }}
+                    >
+                      Edit
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {editingEmp && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
+        }}>
+          <div style={{ backgroundColor: 'white', padding: '32px', borderRadius: '12px', width: '400px', boxShadow: '0 20px 40px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ marginTop: 0 }}>Edit Employee #{editingEmp.id}</h3>
+            
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Full Name</label>
+              <input 
+                value={editingEmp.name} 
+                onChange={e => setEditingEmp({...editingEmp, name: e.target.value})} 
+                style={inputStyle} 
+              />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Department</label>
+              <input 
+                value={editingEmp.department || ''} 
+                onChange={e => setEditingEmp({...editingEmp, department: e.target.value})} 
+                style={inputStyle} 
+              />
+            </div>
+
+            <div style={{ marginBottom: 24 }}>
+              <label style={labelStyle}>Branch</label>
+              <select 
+                value={editingEmp.branch_id || ''} 
+                onChange={e => setEditingEmp({...editingEmp, branch_id: Number(e.target.value)})} 
+                style={inputStyle}
+              >
+                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+
+            {status && <p style={{ color: 'var(--success)', fontSize: 13, marginBottom: 12 }}>{status}</p>}
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <PrimaryButton label="Save Changes" isAccent onClick={handleUpdate} />
+              <button onClick={() => setEditingEmp(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>Discard</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// User Management
+// ─────────────────────────────────────────────────────────────────────────────
+const UserManagement: React.FC = () => {
+  const [users, setUsers] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  
+  // New User Form
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState('ADMIN');
+  const [branchId, setBranchId] = useState<number | null>(null);
+  
+  const [status, setStatus] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadUsers();
+    loadBranches();
+  }, []);
+
+  const loadUsers = async () => {
+    try {
+      const data = await invoke<any[]>('list_users');
+      setUsers(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const loadBranches = async () => {
+    try {
+      const data = await invoke<any[]>('list_branches');
+      setBranches(data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleAddUser = async () => {
+    if (!username || !password) {
+      setStatus('❌ Username and Password are required.');
+      return;
+    }
+    setLoading(true);
+    setStatus('');
+    try {
+      await invoke('add_user', { username, password, role, branchId: role === 'SUPER_ADMIN' ? null : branchId });
+      setStatus('✅ User created successfully!');
+      setUsername(''); setPassword(''); setRole('ADMIN'); setBranchId(null);
+      setShowAddForm(false);
+      loadUsers();
+    } catch (e) {
+      setStatus('❌ ' + e);
+    }
+    setLoading(false);
+  };
+
+  const handleDeleteUser = async (id: number) => {
+    if (!confirm('Are you sure you want to delete this user?')) return;
+    try {
+      await invoke('delete_user', { id });
+      loadUsers();
+    } catch (e) {
+      alert('Error deleting user: ' + e);
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h3 style={{ margin: 0 }}>Active Users</h3>
+        <button 
+          onClick={() => setShowAddForm(!showAddForm)}
+          style={{ 
+            display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', 
+            borderRadius: 8, border: 'none', background: 'var(--primary-color)', color: 'white', cursor: 'pointer', fontWeight: 600
+          }}
+        >
+          {showAddForm ? 'Cancel' : <><UserPlus size={16} /> Add User</>}
+        </button>
+      </div>
+
+      {showAddForm && (
+        <div style={{ ...cardStyle, marginBottom: 24, border: '1px dashed var(--primary-color)' }}>
+          <h4 style={{ marginTop: 0, marginBottom: 16 }}>Create New User</h4>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+            <div>
+              <label style={labelStyle}>Username</label>
+              <input type="text" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} placeholder="john_doe" />
+            </div>
+            <div>
+              <label style={labelStyle}>Temporary Password</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} placeholder="••••••" />
+            </div>
+            <div>
+              <label style={labelStyle}>Access Role</label>
+              <select value={role} onChange={e => setRole(e.target.value)} style={inputStyle}>
+                <option value="SUPER_ADMIN">Super Admin (Full Access)</option>
+                <option value="ADMIN">Admin (Branch Limited)</option>
+                <option value="OPERATOR">Operator (ReadOnly/Branch)</option>
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Assign Branch {role === 'SUPER_ADMIN' && '(Global)'}</label>
+              <select 
+                disabled={role === 'SUPER_ADMIN'}
+                value={branchId || ''} 
+                onChange={e => setBranchId(Number(e.target.value) || null)} 
+                style={inputStyle}
+              >
+                <option value="">No specific branch</option>
+                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+          </div>
+          
+          <PrimaryButton label={loading ? 'Creating...' : 'Create User'} isAccent onClick={handleAddUser} disabled={loading} />
+          {status && <p style={{ marginTop: 12, fontSize: 13, color: status.includes('❌') ? '#ef4444' : '#10b981' }}>{status}</p>}
+        </div>
+      )}
+
+      <div style={cardStyle}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border-color)' }}>
+              <th style={{ padding: '12px 8px', fontSize: 12, color: 'var(--text-muted)' }}>USERNAME</th>
+              <th style={{ padding: '12px 8px', fontSize: 12, color: 'var(--text-muted)' }}>ROLE</th>
+              <th style={{ padding: '12px 8px', fontSize: 12, color: 'var(--text-muted)' }}>BRANCH</th>
+              <th style={{ padding: '12px 8px', fontSize: 12, color: 'var(--text-muted)' }}>STATUS</th>
+              <th style={{ padding: '12px 8px', fontSize: 12, color: 'var(--text-muted)' }}>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map(u => (
+              <tr key={u.id} style={{ borderBottom: '1px solid var(--bg-color)' }}>
+                <td style={{ padding: '14px 8px', fontWeight: 600 }}>{u.username}</td>
+                <td style={{ padding: '14px 8px' }}>
+                   <span style={{ 
+                     fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 4,
+                     background: u.role === 'SUPER_ADMIN' ? 'rgba(79,70,229,0.1)' : 'rgba(100,116,139,0.1)',
+                     color: u.role === 'SUPER_ADMIN' ? 'var(--primary-color)' : 'var(--text-muted)'
+                   }}>
+                     {u.role}
+                   </span>
+                </td>
+                <td style={{ padding: '14px 8px', fontSize: 14 }}>
+                  {u.branchId ? branches.find(b => b.id === u.branchId)?.name || 'Branch '+u.branchId : 'Global'}
+                </td>
+                <td style={{ padding: '14px 8px' }}>
+                   <span style={{ color: u.isActive ? '#10b981' : '#ef4444', fontSize: 13 }}>
+                     {u.isActive ? '● Active' : '○ Inactive'}
+                   </span>
+                </td>
+                <td style={{ padding: '14px 8px' }}>
+                  {u.username !== 'admin' && (
+                    <button 
+                      onClick={() => handleDeleteUser(u.id)}
+                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}
+                      title="Delete User"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

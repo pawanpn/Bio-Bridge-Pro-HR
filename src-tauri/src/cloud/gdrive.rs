@@ -39,6 +39,7 @@ pub struct NormalizedLog {
     pub employee_id: i32,
     pub timestamp_utc: String,
     pub branch: String,
+    pub gate: String,
     pub organization: String,
 }
 
@@ -193,7 +194,7 @@ pub async fn verify_access(client: &Client, token: &str, root_id: &str) -> Resul
         .await?;
 
     if resp.status() == reqwest::StatusCode::FORBIDDEN || resp.status() == reqwest::StatusCode::NOT_FOUND {
-        return Err(AppError::PermissionDenied(root_id.to_string()));
+        return Err(AppError::PermissionDenied(format!("Lacks 'Editor' access or cannot find root Folder ({}).", root_id)));
     }
 
     let json = resp.json::<Value>().await
@@ -201,7 +202,7 @@ pub async fn verify_access(client: &Client, token: &str, root_id: &str) -> Resul
 
     let can_edit = json["capabilities"]["canEdit"].as_bool().unwrap_or(false);
     if !can_edit {
-        return Err(AppError::PermissionDenied(root_id.to_string()));
+        return Err(AppError::PermissionDenied(format!("Capabilities don't allow editing (canEdit: false) on root Folder ({}).", root_id)));
     }
 
     Ok(())
@@ -212,10 +213,9 @@ pub async fn verify_access(client: &Client, token: &str, root_id: &str) -> Resul
 pub async fn sync_logs_to_drive(
     key: &ServiceAccountKey,
     root_id: &str,
-    org: &str,
+    _org: &str,
     branch: &str,
-    year: &str,
-    month: &str,
+    gate: &str,
     logs: &[NormalizedLog],
 ) -> Result<(), AppError> {
     let token  = generate_bearer_token(key).await?;
@@ -224,20 +224,19 @@ pub async fn sync_logs_to_drive(
     // 1. Verify Access to Root
     verify_access(&client, &token, root_id).await?;
 
-    // 2. Build folder hierarchy: Root -> [Org] -> [Branch] -> [Year] -> [Month]
-    let org_id    = ensure_folder(&client, &token, org,    root_id).await?;
-    let branch_id = ensure_folder(&client, &token, branch, &org_id).await?;
-    let year_id   = ensure_folder(&client, &token, year,   &branch_id).await?;
-    let month_id  = ensure_folder(&client, &token, month,  &year_id).await?;
+    // 2. Build folder hierarchy: Root -> Branches -> [Branch] -> [Gate]
+    let branches_id = ensure_folder(&client, &token, "Branches", root_id).await?;
+    let branch_id   = ensure_folder(&client, &token, branch,     &branches_id).await?;
+    let gate_id     = ensure_folder(&client, &token, gate,       &branch_id).await?;
 
     // 3. Serialize logs
     let content = serde_json::to_string_pretty(logs)
         .map_err(|e| AppError::SerializationError(e.to_string()))?;
 
-    // 4. Upload attendance_logs.json
+    // 4. Upload logs.json
     let file_metadata = json!({
-        "name":    "attendance_logs.json",
-        "parents": [month_id],
+        "name":    "logs.json",
+        "parents": [gate_id],
         "mimeType": "application/json"
     });
 
@@ -255,10 +254,10 @@ pub async fn sync_logs_to_drive(
         .await?;
 
     if resp.status() == reqwest::StatusCode::FORBIDDEN {
-        return Err(AppError::PermissionDenied(format!("Cannot upload file to folder ID: {}", month_id)));
+        return Err(AppError::PermissionDenied(format!("Cannot upload file to folder ID: {}", gate_id)));
     }
 
-    println!("Drive sync complete: Root({})/{}/{}/{}/{}/attendance_logs.json", root_id, org, branch, year, month);
+    println!("Drive sync complete: Root({})/Branches/{}/{}/logs.json", root_id, branch, gate);
     Ok(())
 }
 

@@ -32,6 +32,9 @@ pub struct AppState {
     pub service_account_key: Mutex<Option<ServiceAccountKey>>,
     pub root_folder_id:      Mutex<Option<String>>,
     pub realtime_cancel:     Mutex<Option<std::sync::Arc<std::sync::atomic::AtomicBool>>>,
+    pub current_user_id:     Mutex<Option<i64>>,
+    pub current_user_role:   Mutex<Option<String>>,
+    pub current_user_branch_id: Mutex<Option<i64>>,
 }
 
 fn lock_err<T>(_: T) -> AppError {
@@ -234,11 +237,24 @@ async fn sync_device_logs(
 
     let org_name    = state.organization_name.lock().map_err(lock_err)?
                           .clone().unwrap_or_else(|| "HeadOffice".to_string());
-    let branch_name = state.active_branch_name.lock().map_err(lock_err)?
-                          .clone().unwrap_or_else(|| "Main".to_string());
-    let branch_id   = state.active_branch_id.lock().map_err(lock_err)?.unwrap_or(1);
+    
     let key_opt     = state.service_account_key.lock().map_err(lock_err)?.clone();
     let root_id_opt = state.root_folder_id.lock().map_err(lock_err)?.clone();
+
+    // 0. Lookup device's assigned branch and gate
+    let (branch_id, gate_id, branch_name, gate_name) = {
+        let db_guard = state.db.lock().map_err(lock_err)?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+        conn.query_row(
+            "SELECT d.branch_id, d.gate_id, b.name, g.name 
+             FROM Devices d
+             JOIN Branches b ON d.branch_id = b.id
+             JOIN Gates g ON d.gate_id = g.id
+             WHERE d.id = ?1",
+            params![device_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+        ).unwrap_or((1, 1, "Head Office".to_string(), "Main Gate".to_string()))
+    };
 
     // 1. Pull logs via hardware driver
     let logs: Vec<crate::models::AttendanceLog> = crate::hardware::sync_device(&ip, device_id, parsed_brand).await?;
@@ -253,36 +269,47 @@ async fn sync_device_logs(
         let db_guard = state.db.lock().map_err(lock_err)?;
         if let Some(conn) = db_guard.as_ref() {
             for log in &logs {
+                // Auto-Discovery of Employees
+                let _ = conn.execute(
+                    "INSERT OR IGNORE INTO Employees (id, name, branch_id) VALUES (?1, ?2, ?3)",
+                    params![log.employee_id, format!("New Employee {}", log.employee_id), branch_id]
+                );
+
                 // INSERT OR IGNORE based on (employee_id, timestamp) to prevent duplicates
                 let _ = conn.execute(
-                    "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, device_id, timestamp, is_synced) VALUES (?1, ?2, ?3, ?4, 0)",
-                    params![log.employee_id, branch_id, device_id, log.timestamp],
+                    "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, gate_id, device_id, timestamp, is_synced) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+                    params![log.employee_id, branch_id, gate_id, device_id, log.timestamp],
                 );
             }
             let _ = app.emit("console-log", format!(
-                "[{} UTC] Local persistence complete. {} logs stored in SQLite.",
+                "[{} UTC] Sync complete. Created missing employee profiles for {} logs.",
                 chrono::Utc::now().format("%H:%M"), logs.len()
             ));
         }
     }
 
+    // Refresh UI immediately after local save
+    let _ = app.emit("attendance-sync-complete", serde_json::json!({
+        "branch_id": branch_id,
+        "gate_id": gate_id,
+    }));
+
     // 3. Normalize logs for Cloud
-    let now: chrono::DateTime<chrono::Utc> = chrono::Utc::now();
     let normalized: Vec<NormalizedLog> = logs.iter().map(|l| NormalizedLog {
         log_id:         format!("{}_{}", l.device_id, l.timestamp),
         device_id:      l.device_id,
         employee_id:    l.employee_id,
         timestamp_utc:  l.timestamp.clone(),
         branch:         branch_name.clone(),
+        gate:           gate_name.clone(),
         organization:   org_name.clone(),
     }).collect();
 
     // 4. Sync to Drive
     if let (Some(key), Some(root_id)) = (key_opt.clone(), root_id_opt.clone()) {
-        let year  = now.format("%Y").to_string();
-        let month = now.format("%m").to_string();
-
-        let sync_result = crate::cloud::gdrive::sync_logs_to_drive(&key, &root_id, &org_name, &branch_name, &year, &month, &normalized).await;
+        let sync_result = crate::cloud::gdrive::sync_logs_to_drive(
+            &key, &root_id, &org_name, &branch_name, &gate_name, &normalized
+        ).await;
 
         match sync_result {
             Ok(_) => {
@@ -299,14 +326,15 @@ async fn sync_device_logs(
                     }
                 }
                 let _ = app.emit("console-log", format!(
-                    "[{} UTC] Synced to Drive: Targeted ID: {} > {} > {} > {} > {}.",
-                    chrono::Utc::now().format("%H:%M"), root_id, org_name, branch_name, year, month
+                    "[{} UTC] Synced to Drive: Branches/{} > {} > logs.json",
+                    chrono::Utc::now().format("%H:%M"), branch_name, gate_name
                 ));
             },
-            Err(AppError::PermissionDenied(rid)) => {
-                let err_msg = format!("Error: Service Account lacks Editor access to Folder ID: {}. Local logs preserved.", rid);
+            Err(AppError::PermissionDenied(_rid)) => {
+                let email = key_opt.clone().map(|k| k.client_email).unwrap_or_else(|| "N/A".into());
+                let err_msg = format!("Permission Denied for Google Drive ({})", email);
                 let _ = app.emit("console-log", format!("[ERROR] {}", err_msg));
-                return Err(AppError::PermissionDenied(err_msg));
+                return Ok(format!("Local storage OK ({} logs). Cloud sync failed: {}", logs.len(), err_msg));
             },
             Err(e) => {
                 let _ = app.emit("console-log", format!("[WARN] Cloud sync failed: {}. Offline mode: Data saved locally.", e));
@@ -433,10 +461,23 @@ async fn process_log_and_sync(
 ) -> Result<(), crate::errors::AppError> {
     let state: tauri::State<AppState> = app.state::<AppState>();
     let org_name    = state.organization_name.lock().map_err(|_| lock_err(()))?.clone().unwrap_or_else(|| "HeadOffice".to_string());
-    let branch_name = state.active_branch_name.lock().map_err(|_| lock_err(()))?.clone().unwrap_or_else(|| "Main".to_string());
-    let branch_id   = state.active_branch_id.lock().map_err(|_| lock_err(()))?.unwrap_or(1);
     let key_opt     = state.service_account_key.lock().map_err(|_| lock_err(()))?.clone();
     let root_id_opt = state.root_folder_id.lock().map_err(|_| lock_err(()))?.clone();
+
+    // 0. Lookup device's assigned branch and gate
+    let (branch_id, gate_id, branch_name, gate_name) = {
+        let db_guard = state.db.lock().map_err(lock_err)?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+        conn.query_row(
+            "SELECT d.branch_id, d.gate_id, b.name, g.name 
+             FROM Devices d
+             JOIN Branches b ON d.branch_id = b.id
+             JOIN Gates g ON d.gate_id = g.id
+             WHERE d.id = ?1",
+            params![device_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+        ).unwrap_or((1, 1, "Head Office".to_string(), "Main Gate".to_string()))
+    };
 
     // 1. Save locally with is_synced = 0
     {
@@ -448,6 +489,12 @@ async fn process_log_and_sync(
                 |row| row.get(0)
             ).unwrap_or(1);
             
+            // Auto-Discovery for real-time pulses
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO Employees (id, name, branch_id) VALUES (?1, ?2, ?3)",
+                params![employee_id, format!("New Employee {}", employee_id), branch_id]
+            );
+
             let _ = conn.execute(
                 "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, gate_id, device_id, timestamp, is_synced) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
                 params![employee_id, branch_id, gate_id, device_id, timestamp],
@@ -455,35 +502,38 @@ async fn process_log_and_sync(
         }
     }
 
+    // Refresh UI immediately after local save
+    let _ = app.emit("attendance-sync-complete", serde_json::json!({
+        "branch_id": branch_id,
+        "gate_id": gate_id,
+    }));
+    let _ = app.emit("realtime-pulse", ()); // Pulse UI
+
     // 2. Immediate Cloud Sync
     if let (Some(key), Some(root_id)) = (key_opt, root_id_opt) {
-        let now = chrono::Utc::now();
         let normalized = vec![NormalizedLog {
             log_id: format!("{}_{}", device_id, timestamp),
             device_id,
             employee_id,
             timestamp_utc: timestamp.clone(),
             branch: branch_name.clone(),
+            gate: gate_name.clone(),
             organization: org_name.clone(),
         }];
 
         let result = cloud::gdrive::sync_logs_to_drive(
-            &key, &root_id, &org_name, &branch_name,
-            &now.format("%Y").to_string(), &now.format("%m").to_string(),
+            &key, &root_id, &org_name, &branch_name, &gate_name,
             &normalized
         ).await;
 
         if result.is_ok() {
-            {
-                let db_guard = state.db.lock().map_err(lock_err)?;
-                if let Some(conn) = db_guard.as_ref() {
-                    let _ = conn.execute(
-                        "UPDATE AttendanceLogs SET is_synced = 1 WHERE employee_id = ?1 AND timestamp = ?2",
-                        params![employee_id, timestamp],
-                    );
-                }
+            let db_guard = state.db.lock().map_err(lock_err)?;
+            if let Some(conn) = db_guard.as_ref() {
+                let _ = conn.execute(
+                    "UPDATE AttendanceLogs SET is_synced = 1 WHERE employee_id = ?1 AND timestamp = ?2",
+                    params![employee_id, timestamp],
+                );
             }
-            let _ = app.emit("realtime-pulse", ()); // Pulse UI
         }
     }
     
@@ -579,26 +629,45 @@ fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, 
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let today_pattern = format!("{}%", today);
 
-    // 1. Total Staff
-    let total_staff: i32 = conn.query_row(
-        "SELECT COUNT(*) FROM Employees",
-        [],
-        |row| row.get(0),
-    ).unwrap_or(0);
+    // RBAC: If ADMIN, restrict to their branch
+    let (u_role, u_branch) = {
+        let r = state.current_user_role.lock().map_err(lock_err)?.clone();
+        let b = state.current_user_branch_id.lock().map_err(lock_err)?.clone();
+        (r, b)
+    };
 
-    // 2. Present Today (Unique employee IDs in AttendanceLogs for current date)
-    let present_today: i32 = conn.query_row(
-        "SELECT COUNT(DISTINCT employee_id) FROM AttendanceLogs WHERE timestamp LIKE ?1",
-        params![today_pattern],
-        |row| row.get(0),
-    ).unwrap_or(0);
+    let (filter_branch, _total_staff_query, present_query, leave_query) = if u_role == Some("ADMIN".to_string()) && u_branch.is_some() {
+        (u_branch, 
+         "SELECT COUNT(*) FROM Employees WHERE branch_id = ?1",
+         "SELECT COUNT(DISTINCT employee_id) FROM AttendanceLogs WHERE timestamp LIKE ?2 AND branch_id = ?1",
+         "SELECT COUNT(DISTINCT employee_id) FROM LeaveRequests lr JOIN Employees e ON lr.employee_id = e.id WHERE ?2 BETWEEN start_date AND end_date AND status != 'rejected' AND e.branch_id = ?1")
+    } else {
+        (None,
+         "SELECT COUNT(*) FROM Employees",
+         "SELECT COUNT(DISTINCT employee_id) FROM AttendanceLogs WHERE timestamp LIKE ?1",
+         "SELECT COUNT(DISTINCT employee_id) FROM LeaveRequests WHERE ?1 BETWEEN start_date AND end_date AND status != 'rejected'")
+    };
 
-    // 3. On Leave (Pending or Approved requests covering today)
-    let on_leave: i32 = conn.query_row(
-        "SELECT COUNT(DISTINCT employee_id) FROM LeaveRequests WHERE ?1 BETWEEN start_date AND end_date AND status != 'rejected'",
-        params![today],
-        |row| row.get(0),
-    ).unwrap_or(0);
+    // 1. Total Staff (Any employee in system)
+    let total_staff: i32 = if filter_branch.is_some() {
+        conn.query_row("SELECT COUNT(*) FROM Employees WHERE branch_id = ?1", [filter_branch.unwrap()], |row| row.get(0)).unwrap_or(0)
+    } else {
+        conn.query_row("SELECT COUNT(*) FROM Employees", [], |row| row.get(0)).unwrap_or(0)
+    };
+
+    // 2. Present Today
+    let present_today: i32 = if filter_branch.is_some() {
+        conn.query_row(present_query, params![filter_branch.unwrap(), today_pattern], |row| row.get(0)).unwrap_or(0)
+    } else {
+        conn.query_row(present_query, params![today_pattern], |row| row.get(0)).unwrap_or(0)
+    };
+
+    // 3. On Leave
+    let on_leave: i32 = if filter_branch.is_some() {
+        conn.query_row(leave_query, params![filter_branch.unwrap(), today], |row| row.get(0)).unwrap_or(0)
+    } else {
+        conn.query_row(leave_query, params![today], |row| row.get(0)).unwrap_or(0)
+    };
 
     // 4. Absent (Total - Present - OnLeave)
     let absent = (total_staff - present_today - on_leave).max(0);
@@ -619,9 +688,25 @@ fn get_daily_reports(
     to_date: String,
     dept: Option<String>,
     search: Option<String>,
+    branch_id: Option<i64>,
+    gate_id: Option<i64>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    // RBAC check
+    let (u_role, u_branch) = {
+        let r = state.current_user_role.lock().map_err(lock_err)?.clone();
+        let b = state.current_user_branch_id.lock().map_err(lock_err)?.clone();
+        (r, b)
+    };
+    
+    // If Admin, force branch_id filter
+    let active_branch_id = if u_role == Some("ADMIN".to_string()) || u_role == Some("OPERATOR".to_string()) {
+        if u_branch.is_some() { u_branch } else { branch_id }
+    } else {
+        branch_id
+    };
 
     let mut stmt = conn.prepare("
         SELECT 
@@ -640,6 +725,8 @@ fn get_daily_reports(
         WHERE SUBSTR(al.timestamp, 1, 10) BETWEEN ?1 AND ?2
         AND (?3 = 'All' OR e.department = ?3)
         AND (?4 = '' OR e.name LIKE ?4)
+        AND (?5 IS NULL OR al.branch_id = ?5)
+        AND (?6 IS NULL OR al.gate_id = ?6)
         GROUP BY e.id, date
         ORDER BY date DESC, e.name ASC
     ")?;
@@ -647,7 +734,7 @@ fn get_daily_reports(
     let dept_param = dept.unwrap_or_else(|| "All".to_string());
     let search_param = if let Some(s) = search { format!("%{}%", s) } else { "".to_string() };
 
-    let rows = stmt.query_map(params![from_date, to_date, dept_param, search_param], |row| {
+    let rows = stmt.query_map(params![from_date, to_date, dept_param, search_param, active_branch_id, gate_id], |row| {
         let check_in: String = row.get(4)?;
         let check_out: String = row.get(5)?;
         
@@ -699,6 +786,8 @@ fn get_raw_logs(
     from_date: String,
     to_date: String,
     search: Option<String>,
+    branch_id: Option<i64>,
+    gate_id: Option<i64>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
@@ -715,12 +804,14 @@ fn get_raw_logs(
         JOIN Devices d ON al.device_id = d.id
         WHERE SUBSTR(al.timestamp, 1, 10) BETWEEN ?1 AND ?2
         AND (?3 = '' OR e.name LIKE ?3)
+        AND (?4 IS NULL OR al.branch_id = ?4)
+        AND (?5 IS NULL OR al.gate_id = ?5)
         ORDER BY al.timestamp DESC
     ")?;
 
     let search_param = if let Some(s) = search { format!("%{}%", s) } else { "".to_string() };
 
-    let rows = stmt.query_map(params![from_date, to_date, search_param], |row| {
+    let rows = stmt.query_map(params![from_date, to_date, search_param, branch_id, gate_id], |row| {
         Ok(serde_json::json!({
             "id": row.get::<_, i64>(0)?,
             "name": row.get::<_, String>(1)?,
@@ -804,6 +895,7 @@ fn get_monthly_ledger(
     state: State<'_, AppState>,
     year_month: String,
     branch_id: Option<i64>,
+    gate_id: Option<i64>,
     dept: Option<String>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
@@ -826,8 +918,10 @@ fn get_monthly_ledger(
         let mut att_stmt = conn.prepare("
             SELECT DISTINCT SUBSTR(timestamp, 1, 10) FROM AttendanceLogs 
             WHERE employee_id = ?1 AND timestamp LIKE ?2
+            AND (?3 IS NULL OR branch_id = ?3)
+            AND (?4 IS NULL OR gate_id = ?4)
         ")?;
-        let att_dates = att_stmt.query_map(params![id, month_pattern], |row| row.get::<_, String>(0))?
+        let att_dates = att_stmt.query_map(params![id, month_pattern, branch_id, gate_id], |row| row.get::<_, String>(0))?
             .filter_map(|r| r.ok()).collect::<Vec<_>>();
 
         for date in att_dates {
@@ -849,6 +943,7 @@ fn get_salary_sheet(
     state: State<'_, AppState>,
     year_month: String,
     branch_id: Option<i64>,
+    gate_id: Option<i64>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
@@ -864,8 +959,10 @@ fn get_salary_sheet(
     for (id, name, dept) in employees {
         let present: i32 = conn.query_row(
             "SELECT COUNT(DISTINCT SUBSTR(timestamp, 1, 10)) FROM AttendanceLogs 
-             WHERE employee_id = ?1 AND timestamp LIKE ?2",
-            params![id, month_pattern],
+             WHERE employee_id = ?1 AND timestamp LIKE ?2
+             AND (?3 IS NULL OR branch_id = ?3)
+             AND (?4 IS NULL OR gate_id = ?4)",
+            params![id, month_pattern, branch_id, gate_id],
             |row| row.get(0)
         ).unwrap_or(0);
 
@@ -890,7 +987,7 @@ fn get_salary_sheet(
 }
 
 #[tauri::command]
-fn get_branches(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+fn list_branches(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
     let mut stmt = conn.prepare("SELECT id, name FROM Branches")?;
@@ -920,6 +1017,9 @@ pub fn run() {
             service_account_key: Mutex::new(None),
             root_folder_id:      Mutex::new(None),
             realtime_cancel:     Mutex::new(None),
+            current_user_id:     Mutex::new(None),
+            current_user_role:   Mutex::new(None),
+            current_user_branch_id: Mutex::new(None),
         })
         .setup(|app| {
             let app_dir = app.path().app_data_dir().expect("Failed to resolve app data dir");
@@ -1025,16 +1125,179 @@ pub fn run() {
             get_raw_logs,
             get_departments,
             get_monthly_summary,
-            get_branches,
             get_monthly_ledger,
             get_salary_sheet,
             add_branch,
             list_branches,
             add_gate,
             list_gates,
+            login,
+            logout,
+            list_users,
+            add_user,
+            delete_user,
+            change_password,
+            list_employees,
+            update_employee,
+            delete_employee,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Bio Bridge Pro HR");
+}
+
+#[tauri::command]
+fn list_employees(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+    
+    // RBAC: If ADMIN/OPERATOR, filter by branch
+    let u_role = state.current_user_role.lock().map_err(lock_err)?.clone();
+    let u_branch = state.current_user_branch_id.lock().map_err(lock_err)?.clone();
+    
+    let mut stmt = if u_role == Some("SUPER_ADMIN".to_string()) {
+        conn.prepare("SELECT id, name, department, branch_id, status FROM Employees")?
+    } else {
+        conn.prepare("SELECT id, name, department, branch_id, status FROM Employees WHERE branch_id = ?1")?
+    };
+
+    let employees: Vec<serde_json::Value> = if u_role == Some("SUPER_ADMIN".to_string()) {
+        stmt.query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i32>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "department": row.get::<_, Option<String>>(2)?,
+                "branch_id": row.get::<_, Option<i64>>(3)?,
+                "status": row.get::<_, String>(4)?
+            }))
+        })?.filter_map(|r| r.ok()).collect()
+    } else {
+        stmt.query_map([u_branch], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i32>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "department": row.get::<_, Option<String>>(2)?,
+                "branch_id": row.get::<_, Option<i64>>(3)?,
+                "status": row.get::<_, String>(4)?
+            }))
+        })?.filter_map(|r| r.ok()).collect()
+    };
+    
+    Ok(serde_json::to_value(employees).unwrap())
+}
+
+#[tauri::command]
+fn update_employee(id: i32, name: String, department: String, branch_id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+    
+    conn.execute(
+        "UPDATE Employees SET name = ?1, department = ?2, branch_id = ?3 WHERE id = ?4",
+        params![name, department, branch_id, id],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_employee(id: i32, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+    
+    conn.execute("DELETE FROM Employees WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+#[tauri::command]
+fn login(username: String, password: String, state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+    
+    let user_res: Result<(i64, String, String, Option<i64>, i32), _> = conn.query_row(
+        "SELECT id, password_hash, role, branch_id, must_change_password FROM Users WHERE username = ?1 AND is_active = 1",
+        [username],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+    );
+
+    match user_res {
+        Ok((id, hash, role, branch_id, must_change)) => {
+            if bcrypt::verify(&password, &hash).unwrap_or(false) {
+                *state.current_user_id.lock().map_err(lock_err)? = Some(id);
+                *state.current_user_role.lock().map_err(lock_err)? = Some(role.clone());
+                *state.current_user_branch_id.lock().map_err(lock_err)? = branch_id;
+                
+                Ok(serde_json::json!({
+                    "id": id,
+                    "role": role,
+                    "branchId": branch_id,
+                    "mustChangePassword": must_change == 1
+                }))
+            } else {
+                Err(AppError::Unknown("Invalid username or password".into()))
+            }
+        },
+        Err(_) => Err(AppError::Unknown("Invalid username or password".into()))
+    }
+}
+
+#[tauri::command]
+fn logout(state: State<'_, AppState>) -> Result<(), AppError> {
+    *state.current_user_id.lock().map_err(lock_err)? = None;
+    *state.current_user_role.lock().map_err(lock_err)? = None;
+    *state.current_user_branch_id.lock().map_err(lock_err)? = None;
+    Ok(())
+}
+
+#[tauri::command]
+fn list_users(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    // Only Super Admin can list users
+    if state.current_user_role.lock().map_err(lock_err)?.as_deref() != Some("SUPER_ADMIN") {
+        return Err(AppError::Unknown("Unauthorized".into()));
+    }
+    
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+    
+    let mut stmt = conn.prepare("
+        SELECT id, username, role, branch_id, is_active FROM Users
+    ")?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "username": row.get::<_, String>(1)?,
+            "role": row.get::<_, String>(2)?,
+            "branchId": row.get::<_, Option<i64>>(3)?,
+            "isActive": row.get::<_, i32>(4)? == 1
+        }))
+    })?;
+    
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[tauri::command]
+fn add_user(username: String, password: String, role: String, branch_id: Option<i64>, state: State<'_, AppState>) -> Result<(), AppError> {
+    if state.current_user_role.lock().map_err(lock_err)?.as_deref() != Some("SUPER_ADMIN") {
+        return Err(AppError::Unknown("Unauthorized".into()));
+    }
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+    
+    let hash = hash_password(&password);
+    conn.execute(
+        "INSERT INTO Users (username, password_hash, role, branch_id) VALUES (?1, ?2, ?3, ?4)",
+        params![username, hash, role, branch_id],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_user(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    if state.current_user_role.lock().map_err(lock_err)?.as_deref() != Some("SUPER_ADMIN") {
+        return Err(AppError::Unknown("Unauthorized".into()));
+    }
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+    
+    conn.execute("DELETE FROM Users WHERE id = ?1", [id])?;
+    Ok(())
 }
 
 // ── Master PIN Commands ────────────────────────────────────────────────────
@@ -1043,6 +1306,24 @@ fn pin_hash(pin: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(format!("BioBridgeMasterPIN::{}", pin).as_bytes());
     format!("{:x}", hasher.finalize())
+}
+
+fn hash_password(pass: &str) -> String {
+    bcrypt::hash(pass, bcrypt::DEFAULT_COST).unwrap_or_default()
+}
+
+#[tauri::command]
+fn change_password(new_password: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let user_id = state.current_user_id.lock().map_err(lock_err)?.ok_or_else(|| AppError::Unknown("Not logged in".into()))?;
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+    
+    let hash = hash_password(&new_password);
+    conn.execute(
+        "UPDATE Users SET password_hash = ?1, must_change_password = 0 WHERE id = ?2",
+        params![hash, user_id],
+    )?;
+    Ok(())
 }
 
 #[tauri::command]
