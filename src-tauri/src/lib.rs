@@ -17,7 +17,7 @@ use aes_gcm::{
     Aes256Gcm, Nonce
 };
 use rand::Rng;
-use sha2::Digest;
+use sha2::{Digest, Sha256};
 
 // ── Global App State ───────────────────────────────────────────────────────
 
@@ -46,6 +46,7 @@ fn save_cloud_credentials(
     root_folder_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), AppError> {
+    let key: ServiceAccountKey = serde_json::from_str(&json_content)
         .map_err(|e: serde_json::Error| crate::errors::AppError::SerializationError(
             format!("Invalid Service Account JSON: {}", e)
         ))?;
@@ -338,18 +339,41 @@ async fn test_device_connection(ip: String, port: u16, brand: String) -> Result<
 }
 
 #[tauri::command]
+fn add_device(
+    name: String, brand: String, ip: String, port: u16, branch_id: i64, gate_id: i64,
+    state: State<'_, AppState>,
+) -> Result<i64, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    conn.execute(
+        "INSERT INTO Devices (branch_id, gate_id, name, brand, ip_address, port, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'offline')",
+        (branch_id, gate_id, &name, &brand, &ip, port),
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
 fn save_device_config(
-    name: String, brand: String, ip: String, port: u16,
+    id: i64, name: String, brand: String, ip: String, port: u16, branch_id: i64, gate_id: i64,
     state: State<'_, AppState>,
 ) -> Result<(), AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    
-    // For now, we only support one active device per branch (id=1 for head office)
     conn.execute(
-        "INSERT OR REPLACE INTO Devices (id, branch_id, name, brand, ip_address, port, status) VALUES (1, 1, ?1, ?2, ?3, ?4, 'online')",
-        (name, brand, ip, port),
+        "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, branch_id=?5, gate_id=?6 WHERE id=?7",
+        (&name, &brand, &ip, port, branch_id, gate_id, id),
     )?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_device(
+    id: i64,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    conn.execute("DELETE FROM Devices WHERE id=?1", [id])?;
     Ok(())
 }
 
@@ -418,9 +442,15 @@ async fn process_log_and_sync(
     {
         let db_guard = state.db.lock().map_err(lock_err)?;
         if let Some(conn) = db_guard.as_ref() {
+            let gate_id: i64 = conn.query_row(
+                "SELECT gate_id FROM Devices WHERE id = ?1",
+                params![device_id],
+                |row| row.get(0)
+            ).unwrap_or(1);
+            
             let _ = conn.execute(
-                "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, device_id, timestamp, is_synced) VALUES (?1, ?2, ?3, ?4, 0)",
-                params![employee_id, branch_id, device_id, timestamp],
+                "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, gate_id, device_id, timestamp, is_synced) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+                params![employee_id, branch_id, gate_id, device_id, timestamp],
             );
         }
     }
@@ -468,19 +498,77 @@ fn get_active_devices(state: State<'_, AppState>) -> Result<serde_json::Value, A
 fn get_active_devices_internal(state: &AppState) -> Result<serde_json::Value, AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    
-    let mut stmt = conn.prepare("SELECT name, brand, ip_address, port, status FROM Devices WHERE branch_id = 1")?;
+    // Return the first device for real-time listener purposes
+    let mut stmt = conn.prepare("SELECT id, name, brand, ip_address, port, status FROM Devices WHERE branch_id = 1 LIMIT 1")?;
     let device = stmt.query_row([], |row| {
         Ok(serde_json::json!({
-            "name": row.get::<_, String>(0)?,
-            "brand": row.get::<_, String>(1)?,
-            "ip": row.get::<_, String>(2)?,
-            "port": row.get::<_, u16>(3)?,
-            "status": row.get::<_, String>(4)?,
+            "id":     row.get::<_, i64>(0)?,
+            "name":   row.get::<_, String>(1)?,
+            "brand":  row.get::<_, String>(2)?,
+            "ip":     row.get::<_, String>(3)?,
+            "port":   row.get::<_, u16>(4)?,
+            "status": row.get::<_, String>(5)?,
         }))
     }).ok();
-
     Ok(serde_json::json!(device))
+}
+
+#[tauri::command]
+fn list_all_devices(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let mut stmt = conn.prepare("
+        SELECT d.id, d.name, d.brand, d.ip_address, d.port, d.status, b.name as branch_name, g.name as gate_name, d.branch_id, d.gate_id
+        FROM Devices d
+        JOIN Branches b ON d.branch_id = b.id
+        JOIN Gates g ON d.gate_id = g.id
+        ORDER BY d.id
+    ")?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id":          row.get::<_, i64>(0)?,
+            "name":        row.get::<_, String>(1)?,
+            "brand":       row.get::<_, String>(2)?,
+            "ip":          row.get::<_, String>(3)?,
+            "port":        row.get::<_, u16>(4)?,
+            "status":      row.get::<_, String>(5)?,
+            "branch_name": row.get::<_, String>(6)?,
+            "gate_name":   row.get::<_, String>(7)?,
+            "branch_id":   row.get::<_, i64>(8)?,
+            "gate_id":     row.get::<_, i64>(9)?,
+        }))
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[tauri::command]
+fn add_branch(name: String, location: String, state: State<'_, AppState>) -> Result<i64, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    conn.execute("INSERT INTO Branches (org_id, name, location) VALUES (1, ?1, ?2)", [name, location])?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn add_gate(branch_id: i64, name: String, state: State<'_, AppState>) -> Result<i64, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    conn.execute("INSERT INTO Gates (branch_id, name) VALUES (?1, ?2)", params![branch_id, name])?;
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn list_gates(branch_id: i64, state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let mut stmt = conn.prepare("SELECT id, name FROM Gates WHERE branch_id = ?1")?;
+    let rows = stmt.query_map([branch_id], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+        }))
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 #[tauri::command]
@@ -524,6 +612,298 @@ fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, 
     }))
 }
 
+#[tauri::command]
+fn get_daily_reports(
+    state: State<'_, AppState>,
+    from_date: String,
+    to_date: String,
+    dept: Option<String>,
+    search: Option<String>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn.prepare("
+        SELECT 
+            e.id, 
+            e.name, 
+            e.department, 
+            SUBSTR(al.timestamp, 1, 10) as date,
+            MIN(al.timestamp) as check_in,
+            MAX(al.timestamp) as check_out,
+            b.name as branch_name,
+            g.name as gate_name
+        FROM AttendanceLogs al
+        JOIN Employees e ON al.employee_id = e.id
+        JOIN Branches b ON al.branch_id = b.id
+        JOIN Gates g ON al.gate_id = g.id
+        WHERE SUBSTR(al.timestamp, 1, 10) BETWEEN ?1 AND ?2
+        AND (?3 = 'All' OR e.department = ?3)
+        AND (?4 = '' OR e.name LIKE ?4)
+        GROUP BY e.id, date
+        ORDER BY date DESC, e.name ASC
+    ")?;
+
+    let dept_param = dept.unwrap_or_else(|| "All".to_string());
+    let search_param = if let Some(s) = search { format!("%{}%", s) } else { "".to_string() };
+
+    let rows = stmt.query_map(params![from_date, to_date, dept_param, search_param], |row| {
+        let check_in: String = row.get(4)?;
+        let check_out: String = row.get(5)?;
+        
+        let mut late = "No".to_string();
+        let mut early = "No".to_string();
+        let mut wh = "00:00".to_string();
+        
+        if check_in != check_out && check_in.len() >= 16 && check_out.len() >= 16 {
+            let start = chrono::NaiveDateTime::parse_from_str(&check_in, "%Y-%m-%d %H:%M:%S").ok();
+            let end = chrono::NaiveDateTime::parse_from_str(&check_out, "%Y-%m-%d %H:%M:%S").ok();
+            
+            if let (Some(s), Some(e)) = (start, end) {
+                let duration = e.signed_duration_since(s);
+                let h = duration.num_hours();
+                let m = duration.num_minutes() % 60;
+                wh = format!("{:02}:{:02}", h, m);
+                
+                let in_time = &check_in[11..16];
+                let out_time = &check_out[11..16];
+                if in_time > "09:15" { late = "Yes".into(); }
+                if out_time < "17:30" { early = "Yes".into(); }
+            }
+        }
+        
+        let status = if check_in == check_out { "Single" } else { 
+            if late == "Yes" { "Late" } else { "On-time" }
+        };
+        
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "department": row.get::<_, String>(2)?,
+            "date": row.get::<_, String>(3)?,
+            "check_in": check_in,
+            "check_out": check_out,
+            "status": status,
+            "late_entry": late,
+            "early_exit": early,
+            "working_hours": wh
+        }))
+    })?;
+
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[tauri::command]
+fn get_raw_logs(
+    state: State<'_, AppState>,
+    from_date: String,
+    to_date: String,
+    search: Option<String>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn.prepare("
+        SELECT 
+            al.id, 
+            e.name, 
+            al.timestamp, 
+            al.log_type, 
+            d.name as device
+        FROM AttendanceLogs al
+        JOIN Employees e ON al.employee_id = e.id
+        JOIN Devices d ON al.device_id = d.id
+        WHERE SUBSTR(al.timestamp, 1, 10) BETWEEN ?1 AND ?2
+        AND (?3 = '' OR e.name LIKE ?3)
+        ORDER BY al.timestamp DESC
+    ")?;
+
+    let search_param = if let Some(s) = search { format!("%{}%", s) } else { "".to_string() };
+
+    let rows = stmt.query_map(params![from_date, to_date, search_param], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "timestamp": row.get::<_, String>(2)?,
+            "type": row.get::<_, Option<String>>(3)?,
+            "device": row.get::<_, String>(4)?,
+        }))
+    })?;
+
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[tauri::command]
+fn get_departments(state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let mut stmt = conn.prepare("SELECT DISTINCT department FROM Employees WHERE department IS NOT NULL AND department != ''")?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    let mut depts: Vec<String> = rows.filter_map(|r| r.ok()).collect();
+    depts.insert(0, "All".to_string());
+    Ok(depts)
+}
+
+#[tauri::command]
+fn get_monthly_summary(
+    state: State<'_, AppState>,
+    year_month: String,
+    dept: Option<String>,
+    search: Option<String>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn.prepare("
+        SELECT id, name, department FROM Employees
+        WHERE (?1 = 'All' OR department = ?1)
+        AND (?2 = '' OR name LIKE ?2)
+    ")?;
+
+    let dept_param = dept.unwrap_or_else(|| "All".to_string());
+    let search_param = if let Some(s) = search { format!("%{}%", s) } else { "".to_string() };
+
+    let employees = stmt.query_map(params![dept_param, search_param], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+    })?;
+
+    let mut report = Vec::new();
+    let month_pattern = format!("{}%", year_month);
+
+    for emp in employees {
+        let (id, name, dept) = emp?;
+        
+        let present: i32 = conn.query_row(
+            "SELECT COUNT(DISTINCT SUBSTR(timestamp, 1, 10)) FROM AttendanceLogs 
+             WHERE employee_id = ?1 AND timestamp LIKE ?2",
+            params![id, month_pattern],
+            |row| row.get(0)
+        ).unwrap_or(0);
+
+        let leaves: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM LeaveRequests 
+             WHERE employee_id = ?1 AND (SUBSTR(start_date, 1, 7) = ?2 OR SUBSTR(end_date, 1, 7) = ?2) AND status = 'approved'",
+            params![id, year_month],
+            |row| row.get(0)
+        ).unwrap_or(0);
+        
+        report.push(serde_json::json!({
+            "id": id,
+            "name": name,
+            "department": dept,
+            "present": present,
+            "leaves": leaves,
+        }));
+    }
+
+    Ok(report)
+}
+
+#[tauri::command]
+fn get_monthly_ledger(
+    state: State<'_, AppState>,
+    year_month: String,
+    branch_id: Option<i64>,
+    dept: Option<String>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut emp_stmt = conn.prepare("
+        SELECT id, name FROM Employees 
+        WHERE (?1 IS NULL OR branch_id = ?1)
+        AND (?2 = 'All' OR department = ?2)
+    ")?;
+    let employees = emp_stmt.query_map(params![branch_id, dept.unwrap_or_else(|| "All".to_string())], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?.filter_map(|r| r.ok()).collect::<Vec<_>>();
+
+    let mut ledger = Vec::new();
+    let month_pattern = format!("{}%", year_month);
+
+    for (id, name) in employees {
+        let mut days = serde_json::Map::new();
+        let mut att_stmt = conn.prepare("
+            SELECT DISTINCT SUBSTR(timestamp, 1, 10) FROM AttendanceLogs 
+            WHERE employee_id = ?1 AND timestamp LIKE ?2
+        ")?;
+        let att_dates = att_stmt.query_map(params![id, month_pattern], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok()).collect::<Vec<_>>();
+
+        for date in att_dates {
+            days.insert(date[8..].to_string(), serde_json::json!("P"));
+        }
+        
+        ledger.push(serde_json::json!({
+            "id": id,
+            "name": name,
+            "attendance": days
+        }));
+    }
+
+    Ok(serde_json::json!(ledger))
+}
+
+#[tauri::command]
+fn get_salary_sheet(
+    state: State<'_, AppState>,
+    year_month: String,
+    branch_id: Option<i64>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut emp_stmt = conn.prepare("SELECT id, name, department FROM Employees WHERE (?1 IS NULL OR branch_id = ?1)")?;
+    let employees = emp_stmt.query_map(params![branch_id], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+    })?.filter_map(|r| r.ok()).collect::<Vec<_>>();
+
+    let mut report = Vec::new();
+    let month_pattern = format!("{}%", year_month);
+
+    for (id, name, dept) in employees {
+        let present: i32 = conn.query_row(
+            "SELECT COUNT(DISTINCT SUBSTR(timestamp, 1, 10)) FROM AttendanceLogs 
+             WHERE employee_id = ?1 AND timestamp LIKE ?2",
+            params![id, month_pattern],
+            |row| row.get(0)
+        ).unwrap_or(0);
+
+        let leaves: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM LeaveRequests 
+             WHERE employee_id = ?1 AND (SUBSTR(start_date, 1, 7) = ?2 OR SUBSTR(end_date, 1, 7) = ?2) AND status = 'approved'",
+            params![id, year_month],
+            |row| row.get(0)
+        ).unwrap_or(0);
+
+        report.push(serde_json::json!({
+            "id": id,
+            "name": name,
+            "department": dept,
+            "present_days": present,
+            "paid_leaves": leaves,
+            "payable_days": present + leaves
+        }));
+    }
+
+    Ok(report)
+}
+
+#[tauri::command]
+fn get_branches(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let mut stmt = conn.prepare("SELECT id, name FROM Branches")?;
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+        }))
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+
 // ── App Entry ──────────────────────────────────────────────────────────────
 
 pub fn run() {
@@ -562,6 +942,17 @@ pub fn run() {
                     project_id:   pid,
                 });
                 *state.root_folder_id.lock().unwrap() = rid;
+            }
+
+            // Seed default Master PIN ("admin123") on first run if not set
+            let pin_path = app_dir.join("master.pin");
+            if !pin_path.exists() {
+                let default_hash = {
+                    let mut h = sha2::Sha256::new();
+                    sha2::Digest::update(&mut h, b"BioBridgeMasterPIN::admin123");
+                    format!("{:x}", sha2::Digest::finalize(h))
+                };
+                let _ = fs::write(&pin_path, default_hash);
             }
 
             // Real-Time Event Listener & Retry Worker
@@ -620,13 +1011,68 @@ pub fn run() {
             scan_network,
             get_dashboard_stats,
             test_device_connection,
+            add_device,
             save_device_config,
+            delete_device,
             get_active_devices,
+            list_all_devices,
             start_realtime_sync,
             stop_realtime_sync,
+            set_master_pin,
+            verify_master_pin,
+            is_master_pin_set,
+            get_daily_reports,
+            get_raw_logs,
+            get_departments,
+            get_monthly_summary,
+            get_branches,
+            get_monthly_ledger,
+            get_salary_sheet,
+            add_branch,
+            list_branches,
+            add_gate,
+            list_gates,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Bio Bridge Pro HR");
+}
+
+// ── Master PIN Commands ────────────────────────────────────────────────────
+
+fn pin_hash(pin: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(format!("BioBridgeMasterPIN::{}", pin).as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+#[tauri::command]
+fn set_master_pin(app: AppHandle, current_pin: String, new_pin: String) -> Result<(), AppError> {
+    let pin_path = app.path().app_data_dir().unwrap().join("master.pin");
+    if pin_path.exists() {
+        // Validate current PIN before changing
+        let stored = fs::read_to_string(&pin_path)
+            .map_err(|e| AppError::Unknown(format!("Failed to read PIN: {}", e)))?.trim().to_string();
+        if stored != pin_hash(&current_pin) {
+            return Err(AppError::Unknown("Current PIN is incorrect.".to_string()));
+        }
+    }
+    fs::write(&pin_path, pin_hash(&new_pin))
+        .map_err(|e| AppError::Unknown(format!("Failed to save PIN: {}", e)))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn verify_master_pin(app: AppHandle, pin: String) -> Result<bool, AppError> {
+    let pin_path = app.path().app_data_dir().unwrap().join("master.pin");
+    if !pin_path.exists() { return Ok(false); }
+    let stored = fs::read_to_string(&pin_path)
+        .map_err(|e| AppError::Unknown(format!("Failed to read PIN: {}", e)))?.trim().to_string();
+    Ok(stored == pin_hash(&pin))
+}
+
+#[tauri::command]
+fn is_master_pin_set(app: AppHandle) -> bool {
+    app.path().app_data_dir().unwrap().join("master.pin").exists()
 }
 
 // ── Security Helpers ───────────────────────────────────────────────────────

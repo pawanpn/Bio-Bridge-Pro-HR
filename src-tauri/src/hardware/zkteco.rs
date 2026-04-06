@@ -136,11 +136,10 @@ impl DeviceDriver for ZKTecoDriver {
 
 #[repr(u16)]
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 pub enum ZKCommand {
     Connect    = 0x03e8, 
     Exit       = 0x000b, 
-    EnableClock  = 0x0039, 
-    DisableClock = 0x003a, 
     AttLogRrq  = 0x000d, 
     RegEvent   = 0x0041,
 }
