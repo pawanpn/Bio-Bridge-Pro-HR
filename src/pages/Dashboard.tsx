@@ -2,13 +2,25 @@ import React, { useEffect, useState } from 'react';
 import { AnalyticalCard } from '../components/AnalyticalCard';
 import { DeviceScanner } from '../components/DeviceScanner';
 import { invoke } from '@tauri-apps/api/core';
-import { Users, UserCheck, AlertTriangle, UserMinus, Cloud, CloudOff } from 'lucide-react';
+import { Users, UserCheck, AlertTriangle, UserMinus, Cloud, CloudOff, Clock } from 'lucide-react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+
+interface Staff {
+  id: number;
+  name: string;
+  time?: string;
+}
 
 interface Stats {
   totalStaff: number;
   presentToday: number;
   onLeave: number;
   absent: number;
+  lateToday: number;
+  presentStaff: Staff[];
+  absentStaff: Staff[];
+  lateStaff: Staff[];
+  leaveStaff: Staff[];
 }
 
 interface DeviceConfig {
@@ -258,12 +270,92 @@ export const Dashboard: React.FC = () => {
 
 
       {stats && stats.totalStaff > 0 ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '24px', marginBottom: '40px' }}>
-          <AnalyticalCard title="Total Employees" value={stats.totalStaff} icon={<Users size={32} />} />
-          <AnalyticalCard title="Present Today" value={stats.presentToday} icon={<UserCheck size={32} />} color="var(--success)" />
-          <AnalyticalCard title="On Leave" value={stats.onLeave} icon={<AlertTriangle size={32} />} color="var(--warning)" />
-          <AnalyticalCard title="Absent" value={stats.absent} icon={<UserMinus size={32} />} color="var(--error)" />
-        </div>
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '20px', marginBottom: '40px' }}>
+            <AnalyticalCard title="Total Employees" value={stats.totalStaff} icon={<Users size={32} />} />
+            <AnalyticalCard title="Present Today" value={stats.presentToday} icon={<UserCheck size={32} />} color="var(--success)" />
+            <AnalyticalCard title="Late Today" value={stats.lateToday} icon={<Clock size={32} />} color="var(--error)" />
+            <AnalyticalCard title="On Leave" value={stats.onLeave} icon={<AlertTriangle size={32} />} color="var(--warning)" />
+            <AnalyticalCard title="Absent" value={stats.absent} icon={<UserMinus size={32} />} color="var(--error)" />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr', gap: '32px', marginBottom: '40px' }}>
+            {/* Pie Chart Section */}
+            <div style={{ backgroundColor: 'var(--surface-color)', padding: '24px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+              <h3 style={{ margin: '0 0 24px' }}>Overview</h3>
+              <div style={{ height: '300px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: 'On-time', value: stats.presentToday - stats.lateToday, color: '#10b981' },
+                        { name: 'Late', value: stats.lateToday, color: '#f59e0b' },
+                        { name: 'Leave', value: stats.onLeave, color: '#3b82f6' },
+                        { name: 'Absent', value: stats.absent, color: '#ef4444' }
+                      ].filter(d => d.value > 0)}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {
+                        [
+                          { name: 'On-time', value: stats.presentToday - stats.lateToday, color: '#10b981' },
+                          { name: 'Late', value: stats.lateToday, color: '#f59e0b' },
+                          { name: 'Leave', value: stats.onLeave, color: '#3b82f6' },
+                          { name: 'Absent', value: stats.absent, color: '#ef4444' }
+                        ].filter(d => d.value > 0).map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))
+                      }
+                    </Pie>
+                    <Tooltip 
+                       contentStyle={{ borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-color)' }}
+                       itemStyle={{ color: 'var(--text-color)', fontWeight: 'bold' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* List Section */}
+            <div style={{ backgroundColor: 'var(--surface-color)', padding: '24px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '24px', overflowY: 'auto', maxHeight: '380px' }}>
+              <div>
+                <h3 style={{ margin: '0 0 12px', color: 'var(--text-color)', display: 'flex', justifyContent: 'space-between' }}>
+                  Present Today <span style={{ color: 'var(--success)', fontSize: '14px' }}>{stats.presentToday}</span>
+                </h3>
+                {stats.presentStaff.length === 0 ? <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No one present yet.</p> : (
+                  <div style={{ display: 'grid', gap: '8px' }}>
+                    {stats.presentStaff.map(s => (
+                      <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', transition: '0.2s', borderLeft: '3px solid var(--success)' }} className="hover-list-item">
+                        <span style={{ fontWeight: '600' }}>{s.name}</span>
+                        <span style={{ color: 'var(--text-muted)' }}>In: {s.time}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h3 style={{ margin: '0 0 12px', color: 'var(--text-color)', display: 'flex', justifyContent: 'space-between' }}>
+                  Absent <span style={{ color: 'var(--error)', fontSize: '14px' }}>{stats.absent}</span>
+                </h3>
+                {stats.absentStaff.length === 0 ? <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Everyone is present or on leave!</p> : (
+                  <div style={{ display: 'grid', gap: '8px' }}>
+                    {stats.absentStaff.map(s => (
+                      <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', transition: '0.2s', borderLeft: '3px solid var(--error)' }} className="hover-list-item">
+                        <span style={{ fontWeight: '600' }}>{s.name}</span>
+                        <span style={{ color: 'var(--error)' }}>Missing</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
       ) : (
         <div style={{ 
           padding: '40px', borderRadius: '12px', border: '1px dashed var(--border-color)', 
