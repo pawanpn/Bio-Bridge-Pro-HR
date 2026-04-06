@@ -33,7 +33,7 @@ impl DeviceDriver for ZKTecoDriver {
         let log_packet = assemble_zk_packet(ZKCommand::AttLogRrq, session_id, 1, &[]);
         stream.write_all(&log_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
 
-        let mut log_buf = vec![0u8; 8192]; // Large buffer for logs
+        let mut log_buf = vec![0u8; 512 * 1024]; // 512KB for massive history
         let bytes_read = stream.read(&mut log_buf).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
 
         // 4. Parse Logs

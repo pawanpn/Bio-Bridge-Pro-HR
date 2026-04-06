@@ -52,6 +52,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             rfid TEXT,
             pin TEXT,
             department TEXT,
+            status TEXT DEFAULT 'active',
             FOREIGN KEY(branch_id) REFERENCES Branches(id)
         )",
         [],
@@ -113,6 +114,20 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     )?;
 
     conn.execute(
+        "CREATE TABLE IF NOT EXISTS Users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('SUPER_ADMIN', 'ADMIN', 'OPERATOR')),
+            branch_id INTEGER,
+            is_active INTEGER DEFAULT 1,
+            must_change_password INTEGER DEFAULT 0,
+            FOREIGN KEY(branch_id) REFERENCES Branches(id)
+        )",
+        [],
+    )?;
+
+    conn.execute(
         "CREATE TABLE IF NOT EXISTS CloudConfig (
             id INTEGER PRIMARY KEY,
             client_email TEXT NOT NULL,
@@ -123,14 +138,36 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     )?;
 
+    // Migration for existing tables (ensure columns exist)
+    let _ = conn.execute("ALTER TABLE Devices ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE AttendanceLogs ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE Users ADD COLUMN must_change_password INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE Employees ADD COLUMN status TEXT DEFAULT 'active'", []);
+
     // Seed default data
     conn.execute("INSERT OR IGNORE INTO Organizations (id, name) VALUES (1, 'Default Organization')", [])?;
     conn.execute("INSERT OR IGNORE INTO Branches (id, org_id, name) VALUES (1, 1, 'Head Office')", [])?;
     conn.execute("INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')", [])?;
-
-    // Migration for existing tables (ensure columns exist)
-    let _ = conn.execute("ALTER TABLE Devices ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1", []);
-    let _ = conn.execute("ALTER TABLE AttendanceLogs ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1", []);
+    
+    // Seed test employee for hardware bio-id 1
+    conn.execute(
+        "INSERT OR IGNORE INTO Employees (id, name, department, branch_id, status) VALUES (1, 'Admin Staff', 'Operations', 1, 'active')",
+        []
+    )?;
+    
+    // Seed default Super Admin (admin / admin123)
+    // bcrypt hash for 'admin123'
+    let admin_pass_hash = "$2b$10$hmwXr.AU9waNfqdDwBPMwurCdtk5VT2mKSN4eqach.HlnACpNxv0y";
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO Users (username, password_hash, role, must_change_password) VALUES ('admin', ?1, 'SUPER_ADMIN', 1)",
+        [admin_pass_hash]
+    );
+    
+    // Fix existing database that might have the old master PIN hash instead of the user hash
+    let _ = conn.execute(
+        "UPDATE Users SET password_hash = ?1, must_change_password = 1 WHERE username = 'admin' AND (password_hash = '10d196f790ed847684074fcc319a3b6a964be7cd7b4618e7d23d8c4749f7ba34' OR password_hash = 'ec625a85dfd20986840d198b6097caf0da50e6cb2040bfb22b51cfdd5c6bb5a4')",
+        [admin_pass_hash]
+    );
 
     Ok(conn)
 }

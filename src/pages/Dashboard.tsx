@@ -55,19 +55,27 @@ export const Dashboard: React.FC = () => {
     }, 1000);
 
     // Subscribe to Real-Time Pulses
-    let unlisten: any;
-    const setupRealtime = async () => {
+    let unlisten: () => void = () => {};
+    const setupEvents = async () => {
       const { listen } = await import('@tauri-apps/api/event');
-      unlisten = await listen('realtime-pulse', () => {
-        setLastPulse(Date.now());
-        invoke<Stats>('get_dashboard_stats').then(setStats); // Refresh stats on punch
-      });
       
+      const un1 = await listen('realtime-pulse', () => {
+        setLastPulse(Date.now());
+        invoke<Stats>('get_dashboard_stats').then(setStats);
+      });
+
+      const un2 = await listen('attendance-sync-complete', () => {
+        console.log("Sync complete, refreshing stats...");
+        invoke<Stats>('get_dashboard_stats').then(setStats);
+      });
+
+      unlisten = () => { un1(); un2(); };
+
       if (isRealtimeEnabled && isDeviceOnline) {
         invoke('start_realtime_sync').catch(console.error);
       }
     };
-    setupRealtime();
+    setupEvents();
 
     return () => {
       clearInterval(syncTimer);
@@ -249,12 +257,21 @@ export const Dashboard: React.FC = () => {
       
 
 
-      {stats && (
+      {stats && stats.totalStaff > 0 ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '24px', marginBottom: '40px' }}>
-          <AnalyticalCard title="Total Staff" value={stats.totalStaff} icon={<Users size={32} />} />
+          <AnalyticalCard title="Total Employees" value={stats.totalStaff} icon={<Users size={32} />} />
           <AnalyticalCard title="Present Today" value={stats.presentToday} icon={<UserCheck size={32} />} color="var(--success)" />
           <AnalyticalCard title="On Leave" value={stats.onLeave} icon={<AlertTriangle size={32} />} color="var(--warning)" />
           <AnalyticalCard title="Absent" value={stats.absent} icon={<UserMinus size={32} />} color="var(--error)" />
+        </div>
+      ) : (
+        <div style={{ 
+          padding: '40px', borderRadius: '12px', border: '1px dashed var(--border-color)', 
+          textAlign: 'center', backgroundColor: 'var(--surface-color)', marginBottom: '40px' 
+        }}>
+           <div style={{ fontSize: '32px', marginBottom: '12px' }}>📊</div>
+           <h3 style={{ margin: 0 }}>No Data Available</h3>
+           <p style={{ color: 'var(--text-muted)', fontSize: '14px', margin: '8px 0 0' }}>Sync your device to see real-time workforce statistics.</p>
         </div>
       )}
 

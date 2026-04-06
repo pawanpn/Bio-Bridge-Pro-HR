@@ -46,7 +46,7 @@ export const DeviceSettings: React.FC = () => {
     try {
       const data = await invoke<Device[]>('list_all_devices');
       setDevices(data || []);
-      const bs = await invoke<Branch[]>('get_branches');
+      const bs = await invoke<Branch[]>('list_branches');
       setBranches(bs || []);
     } catch (e) {
       console.error('Failed to load devices/branches:', e);
@@ -433,7 +433,6 @@ const tdStyle: React.CSSProperties = { padding: '14px 16px', fontSize: 14 };
 const rowStyle: React.CSSProperties = { display: 'flex', gap: 16, marginBottom: 20 };
 const labelStyle: React.CSSProperties = { display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.5px' };
 const inputStyle: React.CSSProperties = { width: '100%', padding: '9px 12px', borderRadius: 6, border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-color)', color: 'var(--text-color)', fontSize: 14, outline: 'none', boxSizing: 'border-box' };
-const badgeStyle: React.CSSProperties = { padding: '3px 10px', borderRadius: 20, background: 'var(--bg-color)', border: '1px solid var(--border-color)', fontSize: 12, fontWeight: 600 };
 const addBtnStyle: React.CSSProperties = { padding: '10px 20px', borderRadius: 8, backgroundColor: 'var(--primary-color)', color: '#fff', border: 'none', fontWeight: 700, fontSize: 14, cursor: 'pointer' };
 const primaryBtnStyle: React.CSSProperties = { padding: '9px 18px', borderRadius: 6, backgroundColor: 'var(--primary-color)', color: '#fff', border: 'none', fontWeight: 600, fontSize: 13, cursor: 'pointer' };
 const secondaryBtnStyle: React.CSSProperties = { padding: '9px 18px', borderRadius: 6, backgroundColor: 'transparent', color: 'var(--primary-color)', border: '1px solid var(--primary-color)', fontWeight: 600, fontSize: 13, cursor: 'pointer' };

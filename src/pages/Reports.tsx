@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { FileText, Download, Filter, Search, RefreshCw, ChevronLeft, ChevronRight, Calculator } from 'lucide-react';
-import NepaliDate from 'nepali-date-converter';
+import { listen } from '@tauri-apps/api/event';
+import { Download, Search, RefreshCw, Calculator } from 'lucide-react';
+
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -56,9 +57,11 @@ export const Reports: React.FC = () => {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [department, setDepartment] = useState('All');
   const [branch, setBranch] = useState<number | null>(null);
+  const [gate, setGate] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [gates, setGates] = useState<{id: number, name: string}[]>([]);
   const [departments, setDepartments] = useState<string[]>(['All']);
   const [loading, setLoading] = useState(false);
   
@@ -75,13 +78,32 @@ export const Reports: React.FC = () => {
 
   useEffect(() => {
     fetchData();
-  }, [activeTab, fromDate, toDate, month, department, branch]);
+  }, [activeTab, fromDate, toDate, month, department, branch, gate]);
+
+  useEffect(() => {
+     const unlisten = listen('attendance-sync-complete', (event) => {
+        console.log('Attendance sync event:', event.payload);
+        fetchData();
+     });
+     return () => { unlisten.then(f => f()); };
+  }, []);
+
+  useEffect(() => {
+    if (branch) {
+      invoke<{id: number, name: string}[]>('list_gates', { branchId: branch })
+        .then(res => { setGates(res || []); setGate(null); })
+        .catch(console.error);
+    } else {
+      setGates([]);
+      setGate(null);
+    }
+  }, [branch]);
 
   const loadMetadata = async () => {
     try {
       const depts = await invoke<string[]>('get_departments');
       setDepartments(depts);
-      const brs = await invoke<Branch[]>('get_branches');
+      const brs = await invoke<Branch[]>('list_branches');
       setBranches(brs);
     } catch (e) {
       console.error(e);
@@ -92,16 +114,16 @@ export const Reports: React.FC = () => {
     setLoading(true);
     try {
       if (activeTab === 'daily') {
-        const data = await invoke<DailyAttendance[]>('get_daily_reports', { fromDate, toDate, dept: department, search });
+        const data = await invoke<DailyAttendance[]>('get_daily_reports', { fromDate, toDate, dept: department, search, branchId: branch, gateId: gate });
         setDailyData(data);
       } else if (activeTab === 'ledger') {
-        const data = await invoke<MonthlyLedger[]>('get_monthly_ledger', { yearMonth: month, branchId: branch, dept: department });
+        const data = await invoke<MonthlyLedger[]>('get_monthly_ledger', { yearMonth: month, branchId: branch, gateId: gate, dept: department });
         setLedgerData(data);
       } else if (activeTab === 'salary') {
-        const data = await invoke<SalarySheet[]>('get_salary_sheet', { yearMonth: month, branchId: branch });
+        const data = await invoke<SalarySheet[]>('get_salary_sheet', { yearMonth: month, branchId: branch, gateId: gate });
         setSalaryData(data);
       } else if (activeTab === 'raw') {
-        const data = await invoke<RawLog[]>('get_raw_logs', { fromDate, toDate, search });
+        const data = await invoke<RawLog[]>('get_raw_logs', { fromDate, toDate, search, branchId: branch, gateId: gate });
         setRawData(data);
       }
     } catch (e) {
@@ -163,19 +185,12 @@ export const Reports: React.FC = () => {
     XLSX.writeFile(wb, `BioBridge_${activeTab}_Report.xlsx`);
   };
 
-  const renderBSDate = (adDate: string) => {
-    if (!adDate) return "";
-    try {
-        const [y, m, d] = adDate.split('-').map(Number);
-        return new NepaliDate(new Date(y, m - 1, d)).format('YYYY-MM-DD');
-    } catch { return adDate; }
+  // Ledger Helper: Days in month
+  const getDaysInMonth = () => {
+    const [y, m] = month.split('-').map(Number);
+    return new Date(y, m, 0).getDate();
   };
 
-  // Ledger Helper: Days in mont
-  const getDaysInMonth = () => {
-      const [y, m] = month.split('-').map(Number);
-      return new Date(y, m, 0).getDate();
-  };
 
   return (
     <div style={{ padding: '24px' }}>
@@ -207,6 +222,13 @@ export const Reports: React.FC = () => {
             <select style={inputStyle} value={branch || ''} onChange={e => setBranch(Number(e.target.value) || null)}>
                 <option value="">All Branches</option>
                 {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={labelStyle}>Gate / Location</label>
+            <select style={inputStyle} value={gate || ''} onChange={e => setGate(Number(e.target.value) || null)} disabled={!branch}>
+                <option value="">All Gates</option>
+                {gates.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
           </div>
           <div>
@@ -252,131 +274,147 @@ export const Reports: React.FC = () => {
               </div>
           ) : (
               <div style={{ overflowX: 'auto' }}>
-                  {activeTab === 'daily' && (
-                      <table style={tableStyle}>
-                          <thead>
-                              <tr style={rowStyle}>
-                                  <th style={thStyle}>Employee</th>
-                                  <th style={thStyle}>In Time</th>
-                                  <th style={thStyle}>Out Time</th>
-                                  <th style={thStyle}>Work Hrs</th>
-                                  <th style={thStyle}>Late</th>
-                                  <th style={thStyle}>Early</th>
-                                  <th style={thStyle}>Status</th>
-                              </tr>
-                          </thead>
-                          <tbody>
-                              {dailyData.map((d, i) => (
-                                  <tr key={i} style={trStyle}>
-                                      <td style={tdStyle}>
-                                          <div style={{ fontWeight: '600' }}>{d.name}</div>
-                                          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{d.department}</div>
-                                      </td>
-                                      <td style={tdStyle}>{d.check_in.split(' ')[1] || d.check_in}</td>
-                                      <td style={tdStyle}>{d.check_out.split(' ')[1] || d.check_out}</td>
-                                      <td style={{ ...tdStyle, fontWeight: '700' }}>{d.working_hours}</td>
-                                      <td style={{ ...tdStyle, color: d.late_entry==='Yes'?'var(--error)':'var(--success)' }}>{d.late_entry}</td>
-                                      <td style={{ ...tdStyle, color: d.early_exit==='Yes'?'var(--error)':'var(--success)' }}>{d.early_exit}</td>
-                                      <td style={tdStyle}>
-                                          <Badge type={d.status}>{d.status}</Badge>
-                                      </td>
-                                  </tr>
-                              ))}
-                          </tbody>
-                      </table>
+                   {activeTab === 'daily' && (
+                      dailyData.length === 0 ? (
+                        <NoDataView message="No daily attendance logs found for selected filters." />
+                      ) : (
+                        <table style={tableStyle}>
+                            <thead>
+                                <tr style={rowStyle}>
+                                    <th style={thStyle}>Employee</th>
+                                    <th style={thStyle}>In Time</th>
+                                    <th style={thStyle}>Out Time</th>
+                                    <th style={thStyle}>Work Hrs</th>
+                                    <th style={thStyle}>Late</th>
+                                    <th style={thStyle}>Early</th>
+                                    <th style={thStyle}>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {dailyData.map((d, i) => (
+                                    <tr key={i} style={trStyle}>
+                                        <td style={tdStyle}>
+                                            <div style={{ fontWeight: '600' }}>{d.name}</div>
+                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{d.department}</div>
+                                        </td>
+                                        <td style={tdStyle}>{d.check_in.split(' ')[1] || d.check_in}</td>
+                                        <td style={tdStyle}>{d.check_out.split(' ')[1] || d.check_out}</td>
+                                        <td style={{ ...tdStyle, fontWeight: '700' }}>{d.working_hours}</td>
+                                        <td style={{ ...tdStyle, color: d.late_entry==='Yes'?'var(--error)':'var(--success)' }}>{d.late_entry}</td>
+                                        <td style={{ ...tdStyle, color: d.early_exit==='Yes'?'var(--error)':'var(--success)' }}>{d.early_exit}</td>
+                                        <td style={tdStyle}>
+                                            <Badge type={d.status}>{d.status}</Badge>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                      )
                   )}
 
                   {activeTab === 'ledger' && (
-                      <table style={{ ...tableStyle, tableLayout: 'fixed' }}>
-                          <thead>
-                              <tr style={rowStyle}>
-                                  <th style={{ ...thStyle, width: '150px', position: 'sticky', left: 0, backgroundColor: 'var(--bg-color)', zIndex: 10 }}>Employee</th>
-                                  {Array.from({ length: getDaysInMonth() }).map((_, i) => (
-                                      <th key={i} style={{ ...thStyle, width: '35px', textAlign: 'center' }}>{(i + 1).toString().padStart(2, '0')}</th>
-                                  ))}
-                              </tr>
-                          </thead>
-                          <tbody>
-                              {ledgerData.map((l, i) => (
-                                  <tr key={i} style={trStyle}>
-                                      <td style={{ ...tdStyle, position: 'sticky', left: 0, backgroundColor: 'var(--surface-color)', zIndex: 5, borderRight: '1px solid var(--border-color)' }}>
-                                          <div style={{ fontWeight: '600', fontSize: '12px' }}>{l.name}</div>
-                                      </td>
-                                      {Array.from({ length: getDaysInMonth() }).map((_, di) => {
-                                          const day = (di + 1).toString().padStart(2, '0');
-                                          const status = l.attendance[day] || 'A';
-                                          return (
-                                              <td key={di} style={{ ...tdStyle, padding: '4px', textAlign: 'center' }}>
-                                                  <div style={{ 
-                                                      width: '24px', height: '24px', borderRadius: '4px', margin: '0 auto',
-                                                      display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold',
-                                                      backgroundColor: status === 'P' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                                                      color: status === 'P' ? 'var(--success)' : 'var(--error)'
-                                                  }}>
-                                                      {status}
-                                                  </div>
-                                              </td>
-                                          );
-                                      })}
-                                  </tr>
-                              ))}
-                          </tbody>
-                      </table>
+                      ledgerData.length === 0 ? (
+                        <NoDataView message="No monthly statistics found for this month." />
+                      ) : (
+                        <table style={{ ...tableStyle, tableLayout: 'fixed' }}>
+                            <thead>
+                                <tr style={rowStyle}>
+                                    <th style={{ ...thStyle, width: '150px', position: 'sticky', left: 0, backgroundColor: 'var(--bg-color)', zIndex: 10 }}>Employee</th>
+                                    {Array.from({ length: getDaysInMonth() }).map((_, i) => (
+                                        <th key={i} style={{ ...thStyle, width: '35px', textAlign: 'center' }}>{(i + 1).toString().padStart(2, '0')}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {ledgerData.map((l, i) => (
+                                    <tr key={i} style={trStyle}>
+                                        <td style={{ ...tdStyle, position: 'sticky', left: 0, backgroundColor: 'var(--surface-color)', zIndex: 5, borderRight: '1px solid var(--border-color)' }}>
+                                            <div style={{ fontWeight: '600', fontSize: '12px' }}>{l.name}</div>
+                                        </td>
+                                        {Array.from({ length: getDaysInMonth() }).map((_, di) => {
+                                            const day = (di + 1).toString().padStart(2, '0');
+                                            const status = l.attendance[day] || 'A';
+                                            return (
+                                                <td key={di} style={{ ...tdStyle, padding: '4px', textAlign: 'center' }}>
+                                                    <div style={{ 
+                                                        width: '24px', height: '24px', borderRadius: '4px', margin: '0 auto',
+                                                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold',
+                                                        backgroundColor: status === 'P' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                                                        color: status === 'P' ? 'var(--success)' : 'var(--error)'
+                                                    }}>
+                                                        {status}
+                                                    </div>
+                                                </td>
+                                            );
+                                        })}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                      )
                   )}
 
                   {activeTab === 'salary' && (
-                      <table style={tableStyle}>
-                          <thead>
-                              <tr style={rowStyle}>
-                                  <th style={thStyle}>Employee</th>
-                                  <th style={thStyle}>Present Days</th>
-                                  <th style={thStyle}>Paid Leaves</th>
-                                  <th style={thStyle}>Total Payable</th>
-                                  <th style={thStyle}>Remarks</th>
-                              </tr>
-                          </thead>
-                          <tbody>
-                              {salaryData.map((s, i) => (
-                                  <tr key={i} style={trStyle}>
-                                      <td style={tdStyle}>
-                                         <div style={{ fontWeight: '600' }}>{s.name}</div>
-                                         <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.department}</div>
-                                      </td>
-                                      <td style={tdStyle}>{s.present_days}</td>
-                                      <td style={tdStyle}>{s.paid_leaves}</td>
-                                      <td style={{ ...tdStyle, fontSize: '16px', fontWeight: 'bold', color: 'var(--primary-color)' }}>{s.payable_days}</td>
-                                      <td style={tdStyle}>
-                                          <button style={{ background: 'transparent', border: 'none', color: 'var(--primary-color)', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                              <Calculator size={12} /> Adjustment
-                                          </button>
-                                      </td>
-                                  </tr>
-                              ))}
-                          </tbody>
-                      </table>
+                      salaryData.length === 0 ? (
+                        <NoDataView message="No salary sheet data available for selected month." />
+                      ) : (
+                        <table style={tableStyle}>
+                            <thead>
+                                <tr style={rowStyle}>
+                                    <th style={thStyle}>Employee</th>
+                                    <th style={thStyle}>Present Days</th>
+                                    <th style={thStyle}>Paid Leaves</th>
+                                    <th style={thStyle}>Total Payable</th>
+                                    <th style={thStyle}>Remarks</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {salaryData.map((s, i) => (
+                                    <tr key={i} style={trStyle}>
+                                        <td style={tdStyle}>
+                                           <div style={{ fontWeight: '600' }}>{s.name}</div>
+                                           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.department}</div>
+                                        </td>
+                                        <td style={tdStyle}>{s.present_days}</td>
+                                        <td style={tdStyle}>{s.paid_leaves}</td>
+                                        <td style={{ ...tdStyle, fontSize: '16px', fontWeight: 'bold', color: 'var(--primary-color)' }}>{s.payable_days}</td>
+                                        <td style={tdStyle}>
+                                            <button style={{ background: 'transparent', border: 'none', color: 'var(--primary-color)', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <Calculator size={12} /> Adjustment
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                      )
                   )}
 
                   {activeTab === 'raw' && (
-                      <table style={tableStyle}>
-                          <thead>
-                               <tr style={rowStyle}>
-                                   <th style={thStyle}>Employee</th>
-                                   <th style={thStyle}>Timestamp</th>
-                                   <th style={thStyle}>Log Type</th>
-                                   <th style={thStyle}>System / Device</th>
-                               </tr>
-                          </thead>
-                          <tbody>
-                               {rawData.map((r, i) => (
-                                   <tr key={i} style={trStyle}>
-                                       <td style={tdStyle}>{r.name}</td>
-                                       <td style={tdStyle}>{r.timestamp}</td>
-                                       <td style={tdStyle}>{r.type || 'FINGER'}</td>
-                                       <td style={tdStyle}>{r.device}</td>
-                                   </tr>
-                               ))}
-                          </tbody>
-                      </table>
+                      rawData.length === 0 ? (
+                        <NoDataView message="No raw logs found on device for this period." />
+                      ) : (
+                        <table style={tableStyle}>
+                            <thead>
+                                 <tr style={rowStyle}>
+                                     <th style={thStyle}>Employee</th>
+                                     <th style={thStyle}>Timestamp</th>
+                                     <th style={thStyle}>Log Type</th>
+                                     <th style={thStyle}>System / Device</th>
+                                 </tr>
+                            </thead>
+                            <tbody>
+                                 {rawData.map((r, i) => (
+                                     <tr key={i} style={trStyle}>
+                                         <td style={tdStyle}>{r.name}</td>
+                                         <td style={tdStyle}>{r.timestamp}</td>
+                                         <td style={tdStyle}>{r.type || 'FINGER'}</td>
+                                         <td style={tdStyle}>{r.device}</td>
+                                     </tr>
+                                 ))}
+                            </tbody>
+                        </table>
+                      )
                   )}
               </div>
           )}
@@ -397,6 +435,18 @@ const Tab = ({ active, onClick, children }: any) => (
             transition: '0.2s'
         }}
     >{children}</button>
+);
+
+const NoDataView = ({ message }: { message: string }) => (
+    <div style={{ 
+        padding: '60px 20px', textAlign: 'center', 
+        backgroundColor: 'var(--surface-color)', borderRadius: '12px',
+        border: '1px dashed var(--border-color)', margin: '20px 0'
+    }}>
+        <div style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.5 }}>📂</div>
+        <h3 style={{ margin: 0, color: 'var(--text-color)' }}>No Records Found</h3>
+        <p style={{ margin: '8px 0 0', color: 'var(--text-muted)', fontSize: '14px' }}>{message}</p>
+    </div>
 );
 
 const Badge = ({ type, children }: any) => {

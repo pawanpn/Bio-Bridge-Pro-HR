@@ -1,32 +1,48 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { SetupWizard } from './components/SetupWizard';
 import { MainLayout } from './layout/MainLayout';
 import { Dashboard } from './pages/Dashboard';
 import { DeviceSettings } from './pages/DeviceSettings';
 import { SystemSettings } from './pages/SystemSettings';
 import { Reports } from './pages/Reports';
+import { Login } from './pages/Login';
 import './styles/global.css';
 
-function App() {
+function AppContent() {
+  const { user } = useAuth();
   const isSetupComplete = localStorage.getItem('setupComplete') === 'true';
+
+  if (!isSetupComplete) {
+    return <SetupWizard />;
+  }
+
+  if (!user) {
+    return <Login />;
+  }
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route 
-          path="/" 
-          element={isSetupComplete ? <Navigate to="/dashboard" replace /> : <SetupWizard />} 
-        />
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/" element={<MainLayout />}>
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="device-settings" element={<DeviceSettings />} />
           <Route path="system-settings" element={<SystemSettings />} />
           <Route path="reports" element={<Reports />} />
-          {/* Redirect old cloud-settings route */}
           <Route path="cloud-settings" element={<Navigate to="/system-settings" replace />} />
         </Route>
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </BrowserRouter>
+  );
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 
