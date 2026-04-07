@@ -12,144 +12,116 @@ pub struct ZKTecoDriver;
 impl DeviceDriver for ZKTecoDriver {
     fn brand_name(&self) -> &'static str { "ZKTeco" }
 
-    async fn sync_logs(&self, ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32) -> Result<Vec<AttendanceLog>, AppError> {
-        let socket = connect_device_udp(ip, port).await?;
-        let session_id = establish_zk_session_udp(&socket, ip, port, comm_key, machine_number).await?;
-        println!("[ZK @ {}] UDP Sync Logs Session ID: {}", ip, session_id);
-
-        let log_packet = assemble_zk_packet(ZKCommand::AttLogRrq, session_id, 1, &[]);
-        socket.send_to(&log_packet, format!("{}:{}", ip, port)).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
-
-        let mut attendance_logs = Vec::new();
-        let mut full_log_buf = Vec::new();
-        let mut buf = [0u8; 2048];
+    async fn sync_logs(&self, ip: &str, port: u16, _comm_key: i32, device_id: i32, _machine_number: i32) -> Result<Vec<AttendanceLog>, AppError> {
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let script_path = current_dir.join("src").join("bin").join("zk_fetch.cjs");
         
-        loop {
-            let result = tokio::time::timeout(Duration::from_secs(3), socket.recv_from(&mut buf)).await;
-            match result {
-                Ok(Ok((n, _))) if n >= 8 => {
-                    // CRITICAL FIX: Skip the 8-byte UDP header from EVERY packet to ensure records align!
-                    full_log_buf.extend_from_slice(&buf[8..n]);
-                    if n < 2048 { break; } // Assuming last packet is smaller; may need refinement for exact MTU
+        let output = tokio::process::Command::new("node")
+            .arg(script_path)
+            .arg(ip)
+            .arg(port.to_string())
+            .arg("10000") // 10s wait
+            .output()
+            .await;
+
+        match output {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap_or(serde_json::json!({}));
+                let mut attendance_logs = Vec::new();
+                
+                if let Some(attendances) = parsed.get("attendances").and_then(|a| a.as_array()) {
+                    for att in attendances {
+                        let emp_str = att.get("deviceUserId").and_then(|v| v.as_str()).unwrap_or("0");
+                        let employee_id = emp_str.parse::<i32>().unwrap_or(0);
+                        let timestamp = att.get("recordTime").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        
+                        if employee_id > 0 && !timestamp.is_empty() {
+                            attendance_logs.push(AttendanceLog {
+                                device_id,
+                                employee_id,
+                                timestamp,
+                                punch_method: "Verified".to_string()
+                            });
+                        }
+                    }
                 }
-                _ => break,
+                
+                Ok(attendance_logs)
             }
+            Ok(output) => Err(AppError::ConnectionError(format!("Failed to retrieve logs. Error: {}", String::from_utf8_lossy(&output.stderr)))),
+            Err(_) => Err(AppError::ConnectionError("Node.js not installed.".into()))
         }
-
-        if full_log_buf.is_empty() {
-             return Err(AppError::HardwareError("Device returned no logs (UDP Offset Error fixed)".into()));
-        }
-
-        let mut offset = 0; // Skip headers was handled during collection
-        while offset + 12 <= full_log_buf.len() {
-            let employee_id = u32::from_le_bytes([full_log_buf[offset], full_log_buf[offset+1], full_log_buf[offset+2], full_log_buf[offset+3]]) as i32;
-            let raw_ts = u32::from_le_bytes([full_log_buf[offset+6], full_log_buf[offset+7], full_log_buf[offset+8], full_log_buf[offset+9]]);
-            
-            let year  = ((raw_ts >> 26) & 0x3f) + 2000;
-            let month = (raw_ts >> 22) & 0x0f;
-            let day   = (raw_ts >> 17) & 0x1f;
-            let hour  = (raw_ts >> 12) & 0x1f;
-            let min   = (raw_ts >> 6) & 0x3f;
-            let sec   = raw_ts & 0x3f;
-
-            let verify_mode = full_log_buf[offset+4];
-            let punch_method = match verify_mode {
-                1 => "Finger".to_string(),
-                2 => "Card".to_string(),
-                15 | 25 => "Face".to_string(),
-                0 => "Password".to_string(),
-                _ => format!("Mode {}", verify_mode)
-            };
-
-            let timestamp = format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hour, min, sec);
-
-            if employee_id > 0 {
-                attendance_logs.push(AttendanceLog { device_id, employee_id, timestamp, punch_method });
-            }
-            offset += 12;
-        }
-
-        let _ = socket.send_to(&assemble_zk_packet(ZKCommand::Exit, session_id, 2, &[]), format!("{}:{}", ip, port)).await;
-        Ok(attendance_logs)
     }
 
-    async fn get_all_user_info(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32) -> Result<Vec<crate::models::UserInfo>, AppError> {
-        let socket = connect_device_udp(ip, port).await?;
-        let session_id = establish_zk_session_udp(&socket, ip, port, comm_key, machine_number).await?;
-        println!("[ZK @ {}] UDP User List Session ID: {}", ip, session_id);
+    async fn get_all_user_info(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32) -> Result<Vec<crate::models::UserInfo>, AppError> {
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let script_path = current_dir.join("src").join("bin").join("zk_fetch.cjs");
+        
+        let output = tokio::process::Command::new("node")
+            .arg(script_path)
+            .arg(ip)
+            .arg(port.to_string())
+            .arg("10000") // 10s wait
+            .output()
+            .await;
 
-        let user_packet = assemble_zk_packet(ZKCommand::UserInfoRrq, session_id, 1, &[]);
-        socket.send_to(&user_packet, format!("{}:{}", ip, port)).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
-
-        let mut users = Vec::new();
-        let mut buf = [0u8; 2048];
-        let mut full_buf = Vec::new();
-
-        loop {
-            let result = tokio::time::timeout(Duration::from_secs(3), socket.recv_from(&mut buf)).await;
-            match result {
-                Ok(Ok((n, _))) if n >= 8 => {
-                    // CRITICAL FIX: Skip the 8-byte UDP header from EVERY packet to ensure user records align!
-                    full_buf.extend_from_slice(&buf[8..n]);
-                    if n < 2048 { break; }
+        match output {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap_or(serde_json::json!({}));
+                let mut users = Vec::new();
+                
+                if let Some(users_array) = parsed.get("users").and_then(|u| u.as_array()) {
+                    for u in users_array {
+                        let emp_str = u.get("userId").and_then(|v| v.as_str()).unwrap_or("0");
+                        let employee_id = emp_str.parse::<i32>().unwrap_or(0);
+                        let name = u.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        
+                        if employee_id > 0 {
+                            users.push(crate::models::UserInfo {
+                                employee_id,
+                                name: if name.is_empty() { format!("User {}", employee_id) } else { name }
+                            });
+                        }
+                    }
                 }
-                _ => break,
+                
+                Ok(users)
             }
+            Ok(output) => Err(AppError::ConnectionError(format!("Failed to retrieve users. Err: {}", String::from_utf8_lossy(&output.stderr)))),
+            Err(_) => Err(AppError::ConnectionError("Node.js not installed.".into()))
         }
-
-        let mut offset = 0; // Skip headers was handled during collection
-        while offset + 72 <= full_buf.len() {
-            // Read 2-byte ID as per standard ZKTeco 72-byte structure if 4-byte read results in garbage
-            // But we'll try 4-byte first, then fallback to 2-byte if it looks like a large offset error
-            let employee_id = u32::from_le_bytes([full_buf[offset], full_buf[offset+1], full_buf[offset+2], full_buf[offset+3]]) as i32;
-            let alternative_id = u16::from_le_bytes([full_buf[offset], full_buf[offset+1]]) as i32;
-            
-            let final_id = if employee_id > 1000000 { alternative_id } else { employee_id };
-
-            let mut name_bytes = Vec::new();
-            // Name is at offset 24 for 72-byte records
-            for i in 0..24 {
-                let p = full_buf[offset + 24 + i];
-                if p == 0 { break; }
-                name_bytes.push(p);
-            }
-            let name = String::from_utf8_lossy(&name_bytes).trim().to_string();
-            if final_id > 0 {
-                users.push(crate::models::UserInfo { employee_id: final_id, name: if name.is_empty() { format!("User {}", final_id) } else { name } });
-            }
-            offset += 72;
-        }
-
-        let _ = socket.send_to(&assemble_zk_packet(ZKCommand::Exit, session_id, 2, &[]), format!("{}:{}", ip, port)).await;
-        Ok(users)
     }
 
-    async fn test_connectivity(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32) -> Result<(), AppError> {
-        // 1. Try UDP first (standard)
-        let socket = connect_device_udp(ip, port).await?;
-        if establish_zk_session_udp(&socket, ip, port, comm_key, machine_number).await.is_ok() {
-            return Ok(());
-        }
-
-        // 2. Try TCP fallback (some devices/networks prefer TCP)
-        let addr = format!("{}:{}", ip, port);
-        match tokio::time::timeout(Duration::from_secs(3), tokio::net::TcpStream::connect(&addr)).await {
-            Ok(Ok(mut stream)) => {
-                use tokio::io::{AsyncWriteExt, AsyncReadExt};
-                let pkt = assemble_zk_packet(ZKCommand::Connect, 0, 0, &[]); // Simple TCP probe
-                let len_bytes = (pkt.len() as u32).to_le_bytes();
-                let mut tcp_pkt = vec![0x50, 0x50, 0x82, 0x7d, len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]; // TCP Header (8 bytes)
-                tcp_pkt.extend_from_slice(&pkt);
-                let _ = stream.write_all(&tcp_pkt).await;
-                let mut buf = [0u8; 64];
-                if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_secs(2), stream.read(&mut buf)).await {
-                    if n > 0 { return Ok(()); }
-                }
-            }
-            _ => {}
-        }
+    async fn test_connectivity(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32) -> Result<(), AppError> {
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let script_path = current_dir.join("src").join("bin").join("zk_fetch.cjs");
         
-        Err(AppError::ConnectionError(format!("Device at {} unreachable via UDP or TCP on port {}", ip, port)))
+        // Spawn the node script to verify connectivity
+        let output = tokio::process::Command::new("node")
+            .arg(script_path)
+            .arg(ip)
+            .arg(port.to_string())
+            .arg("3000") // 3s timeout for testing
+            .output()
+            .await;
+
+        match output {
+            Ok(output) if output.status.success() => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if stdout.contains("\"status\":\"success\"") {
+                    return Ok(());
+                }
+                Err(AppError::ConnectionError(format!("Connection test failed. Log: {}", String::from_utf8_lossy(&output.stderr))))
+            }
+            Ok(output) => {
+                Err(AppError::ConnectionError(format!("Device unreachable at {}:{}. Err: {}", ip, port, String::from_utf8_lossy(&output.stderr))))
+            }
+            Err(_) => {
+                Err(AppError::ConnectionError("Node.js is required but not installed or script not found.".to_string()))
+            }
+        }
     }
 
     async fn listen_realtime(&self, ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError> {
