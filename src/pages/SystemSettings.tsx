@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { PrimaryButton } from '../components/common/PrimaryButton';
 import { AppConfig } from '../config/appConfig';
-import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, Trash2, UserPlus } from 'lucide-react';
+import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, Trash2, UserPlus, UserCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { EmployeeProfileSidebar } from '../components/EmployeeProfileSidebar';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -505,6 +506,7 @@ const EmployeeDirectory: React.FC = () => {
   const [employees, setEmployees] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
   const [editingEmp, setEditingEmp] = useState<any | null>(null);
+  const [viewingProfile, setViewingProfile] = useState<any | null>(null);
   const [status, setStatus] = useState('');
 
   useEffect(() => {
@@ -566,12 +568,20 @@ const EmployeeDirectory: React.FC = () => {
                     {branches.find(b => b.id === emp.branch_id)?.name || 'Default'}
                   </td>
                   <td style={{ padding: '12px 8px' }}>
-                    <button 
-                      onClick={() => setEditingEmp(emp)}
-                      style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid var(--primary-color)', background: 'transparent', color: 'var(--primary-color)', cursor: 'pointer', fontSize: 12 }}
-                    >
-                      Edit
-                    </button>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                        <button 
+                          onClick={() => setViewingProfile(emp)}
+                          style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid var(--primary-color)', background: 'var(--primary-color)', color: 'white', cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}
+                        >
+                          <UserCircle size={14} /> Profile
+                        </button>
+                        <button 
+                          onClick={() => setEditingEmp(emp)}
+                          style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border-color)', background: 'transparent', color: 'var(--text-color)', cursor: 'pointer', fontSize: 12 }}
+                        >
+                          Edit
+                        </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -625,6 +635,13 @@ const EmployeeDirectory: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {viewingProfile && (
+        <EmployeeProfileSidebar 
+          employee={viewingProfile} 
+          onClose={() => setViewingProfile(null)} 
+        />
       )}
     </div>
   );

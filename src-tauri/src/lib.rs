@@ -488,7 +488,7 @@ async fn sync_device_logs(
         }
 
         // D. Monthly HR ERP Summary (Requirement 4)
-        let hr_report = generate_hr_summary_text(&logs, &normalized);
+        let hr_report = generate_hr_summary_text(&logs, &user_info_result);
         
         // E. Run Salary Engine & OT Persistence (Requirement 3)
         let _ = record_payroll_and_ot(&logs, &state);
@@ -577,6 +577,133 @@ fn generate_csv_report(logs: &[crate::models::AttendanceLog], branch: &str, gate
             log.employee_id, log.timestamp, branch, gate, log.punch_method));
     }
     csv
+}
+
+// ── Employee Document Commands ────────────────────────────────────────────
+
+#[tauri::command]
+async fn upload_employee_document(
+    employee_id: i32,
+    doc_type: String, // Citizenship, Contract, Photo
+    file_name: String,
+    file_bytes: Vec<u8>,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<String, AppError> {
+    let ext = file_name.split('.').last().unwrap_or("bin");
+    let new_name = format!("{}_{}.{}", employee_id, doc_type.replace("/", "_"), ext);
+    
+    // 1. Save Locally (Primary Source)
+    let app_dir = app.path().app_data_dir().unwrap();
+    let local_path = app_dir.join("Employee_Documents").join(&new_name);
+    std::fs::write(&local_path, &file_bytes).map_err(|e| AppError::IoError(e))?;
+
+    // 2. Upload to Cloud
+    let mut cloud_id = String::new();
+    let key_opt = state.service_account_key.lock().map_err(lock_err)?.clone();
+    let root_id_opt = state.root_folder_id.lock().map_err(lock_err)?.clone();
+
+    if let (Some(key), Some(root_id)) = (key_opt, root_id_opt) {
+        if let Ok(structure) = crate::cloud::gdrive::ensure_biobridge_structure(&key, &root_id).await {
+            if let Some(folder_id) = structure["docsFolderId"].as_str() {
+                let mime = if ext == "pdf" { "application/pdf" } else { "image/jpeg" };
+                if let Ok(id) = crate::cloud::gdrive::upload_file_to_drive(&key, folder_id, &new_name, mime, file_bytes).await {
+                    cloud_id = id;
+                }
+            }
+        }
+    }
+
+    // 3. Update DB
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    if let Some(conn) = db_guard.as_ref() {
+        conn.execute(
+            "INSERT INTO EmployeeDocuments (employee_id, doc_type, doc_name, cloud_file_id, upload_date) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![employee_id, doc_type, new_name, cloud_id, chrono::Local::now().to_rfc3339()]
+        )?;
+    }
+
+    Ok(new_name)
+}
+
+#[tauri::command]
+fn list_employee_documents(employee_id: i32, state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+    
+    let mut stmt = conn.prepare("SELECT doc_type, doc_name, cloud_file_id, upload_date FROM EmployeeDocuments WHERE employee_id = ?1")?;
+    let docs: Vec<serde_json::Value> = stmt.query_map([employee_id], |row| {
+        Ok(serde_json::json!({
+            "type": row.get::<_, String>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "cloudId": row.get::<_, String>(2)?,
+            "date": row.get::<_, String>(3)?
+        }))
+    })?.filter_map(|r| r.ok()).collect();
+    
+    Ok(serde_json::to_value(docs).unwrap())
+}
+
+#[tauri::command]
+async fn generate_payroll_slip(
+    employee_id: i32,
+    month: String, // YYYY-MM
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<String, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+    
+    // 1. Fetch Payroll Data
+    let record = conn.query_row(
+        "SELECT days_present, net_pay FROM PayrollRecords WHERE employee_id = ?1 AND year_month = ?2",
+        params![employee_id, month],
+        |row| Ok((row.get::<_, i32>(0)?, row.get::<_, f64>(1)?))
+    ).map_err(|_| AppError::Unknown("No payroll record found for this month. Sync attendance first.".into()))?;
+
+    let (days, net) = record;
+    let slip_content = format!(
+        "=== BIOBRIDGE PRO HR - PAY SLIP ===\n\
+         Period: {}\n\
+         Employee ID: #{}\n\
+         Days Present: {}\n\
+         Basic Calculation: {} units\n\
+         ----------------------------------\n\
+         NET PAYABLE: Rs. {:.2}\n\
+         Status: PROCESSED & VERIFIED\n\
+         ==================================",
+        month, employee_id, days, days, net
+    );
+
+    let slip_name = format!("PaySlip_{}_{}.txt", employee_id, month);
+    let app_dir = app.path().app_data_dir().unwrap();
+    let local_path = app_dir.join("Reports").join(&slip_name); // Or add a Slips folder
+    std::fs::write(&local_path, &slip_content).map_err(|e| AppError::IoError(e))?;
+
+    // 2. Upload to Cloud /Salary_Slips
+    let key_opt = state.service_account_key.lock().map_err(lock_err)?.clone();
+    let root_id_opt = state.root_folder_id.lock().map_err(lock_err)?.clone();
+
+    if let (Some(key), Some(root_id)) = (key_opt, root_id_opt) {
+        if let Ok(structure) = crate::cloud::gdrive::ensure_biobridge_structure(&key, &root_id).await {
+            if let Some(folder_id) = structure["slipsFolderId"].as_str() {
+                let _ = crate::cloud::gdrive::upload_file_to_drive(&key, folder_id, &slip_name, "text/plain", slip_content.into_bytes()).await;
+            }
+        }
+    }
+
+    Ok(slip_name)
+}
+
+#[tauri::command]
+async fn get_document_preview(doc_name: String, app: tauri::AppHandle) -> Result<Vec<u8>, AppError> {
+    let app_dir = app.path().app_data_dir().unwrap();
+    let local_path = app_dir.join("Employee_Documents").join(&doc_name);
+    if local_path.exists() {
+        std::fs::read(local_path).map_err(|e| AppError::IoError(e))
+    } else {
+        Err(AppError::Unknown("File not found locally".into()))
+    }
 }
 
 #[tauri::command]
@@ -1507,6 +1634,10 @@ pub fn run() {
             set_default_device,
             check_port_conflict,
             import_hardware_files,
+            upload_employee_document,
+            list_employee_documents,
+            get_document_preview,
+            generate_payroll_slip,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Bio Bridge Pro HR");
