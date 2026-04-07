@@ -1,3 +1,34 @@
+
+use tauri::Manager;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .setup(|app| {
+            // 1. Initialize the Updater Plugin
+            #[cfg(desktop)]
+            app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            // 2. Example: Background task for ZKTeco real-time logs
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    // Logic to listen to your ZKTeco device would go here
+                    // Then emit the log to the frontend
+                    handle.emit("new-attendance-log", "User 101 Clocked In").unwrap();
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                }
+            });
+
+            Ok(())
+        })
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+
+
+
 mod db;
 mod hardware;
 mod cloud;
