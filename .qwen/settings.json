@@ -2,7 +2,14 @@
   "permissions": {
     "allow": [
       "Bash(npx *)",
-      "Bash(cargo check)"
+      "Bash(cargo check)",
+      "Bash(mkdir *)",
+      "Bash(npm run *)",
+      "Bash(taskkill *)",
+      "Bash(netstat *)",
+      "Bash(findstr *)",
+      "Bash(tasklist)",
+      "Bash(timeout *)"
     ]
   },
   "$version": 3

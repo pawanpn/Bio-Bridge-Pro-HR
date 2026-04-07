@@ -308,6 +308,24 @@ async fn sync_device_logs(
     ip: String, port: u16, device_id: i32, brand: String,
     app: AppHandle, state: State<'_, AppState>,
 ) -> Result<String, AppError> {
+    // Incremental sync — uses last_timestamp filter
+    sync_device_logs_internal(ip, port, device_id, brand, true, app, state).await
+}
+
+/// Pull ALL logs from device (no timestamp filter) — from day one to now
+#[tauri::command]
+async fn pull_all_logs(
+    ip: String, port: u16, device_id: i32, brand: String,
+    app: AppHandle, state: State<'_, AppState>,
+) -> Result<String, AppError> {
+    sync_device_logs_internal(ip, port, device_id, brand, false, app, state).await
+}
+
+async fn sync_device_logs_internal(
+    ip: String, port: u16, device_id: i32, brand: String,
+    incremental: bool,
+    app: AppHandle, state: State<'_, AppState>,
+) -> Result<String, AppError> {
     let parsed_brand = match brand.as_str() {
         "Hikvision" => DeviceBrand::Hikvision,
         "ZKTeco"    => DeviceBrand::ZKTeco,
@@ -406,8 +424,8 @@ async fn sync_device_logs(
     // 1b. Step B: Pull attendance logs ONLY if users were found
     let _ = app.emit("console-log", format!("[{}] STEP B: Pulling logs...", chrono::Utc::now().format("%H:%M:%S")));
     
-    // Get last sync timestamp to enable fast incremental sync
-    let last_timestamp: Option<String> = {
+    // Get last sync timestamp for incremental sync, or None for full pull
+    let last_timestamp: Option<String> = if incremental {
         let db_guard = state.db.lock().map_err(lock_err)?;
         let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
         conn.query_row(
@@ -415,7 +433,12 @@ async fn sync_device_logs(
             params![device_id],
             |row| row.get(0)
         ).ok()
+    } else {
+        None // Pull ALL logs from beginning
     };
+
+    let mode_label = if incremental { "Incremental sync" } else { "FULL PULL (all logs from day one)" };
+    let _ = app.emit("console-log", format!("[{}] MODE: {}", chrono::Utc::now().format("%H:%M:%S"), mode_label));
     
     let logs: Vec<crate::models::AttendanceLog> = crate::hardware::sync_device(&ip, port, comm_key, device_id, machine_no, parsed_brand, last_timestamp).await
         .map_err(|e| {
@@ -1124,9 +1147,17 @@ fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, 
     };
 
     for (id, name, in_time_full) in present_rows {
-        let time_only = if in_time_full.len() >= 16 { &in_time_full[11..16] } else { "" };
-        let is_late = time_only > "09:15";
-        
+        // Extract time: handle both "2025-04-07 09:15:00" and malformed "2025"
+        let time_only = if in_time_full.len() >= 16 {
+            &in_time_full[11..16]
+        } else if in_time_full.len() >= 10 {
+            // Malformed: just date, show last 2 digits of year
+            &in_time_full[in_time_full.len().saturating_sub(2)..]
+        } else {
+            &in_time_full
+        };
+        let is_late = time_only.len() >= 5 && time_only > "09:15";
+
         present_staff.push(serde_json::json!({ "id": id, "name": name.clone(), "time": time_only }));
         if is_late {
             late_staff.push(serde_json::json!({ "id": id, "name": name, "time": time_only }));
@@ -1183,6 +1214,101 @@ fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, 
         "leaveStaff": leave_staff,
         "lastUpdated": chrono::Local::now().format("%H:%M").to_string(),
         "lastDeviceSync": last_device_sync,
+    }))
+}
+
+/// Get ALL attendance punches for a specific employee for TODAY
+/// Returns full timeline: IN, OUT, lunch breaks, etc.
+#[tauri::command]
+fn get_today_employee_punches(
+    state: State<'_, AppState>,
+    employee_id: i64,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    // Find today's date from the latest log in the DB
+    let today: String = conn.query_row("SELECT MAX(substr(timestamp, 1, 10)) FROM AttendanceLogs", [], |r| r.get(0))
+        .unwrap_or_else(|_| chrono::Local::now().format("%Y-%m-%d").to_string());
+
+    let today_pattern = format!("{}%", today);
+
+    // Fetch all punches for this employee today, ordered by time
+    let mut stmt = conn.prepare("
+        SELECT al.timestamp, al.punch_method, d.name
+        FROM AttendanceLogs al
+        LEFT JOIN Devices d ON al.device_id = d.id
+        WHERE al.employee_id = ?1 AND al.timestamp LIKE ?2
+        ORDER BY al.timestamp ASC
+    ")?;
+
+    let punches: Vec<serde_json::Value> = stmt.query_map(params![employee_id, today_pattern], |row| {
+        let timestamp: String = row.get(0)?;
+        let method: Option<String> = row.get(1)?;
+        let device: Option<String> = row.get(2)?;
+
+        // Extract time portion (handles both "2025-04-07 09:15:00" and malformed "2025")
+        let time_str = if timestamp.len() >= 16 {
+            timestamp[11..16].to_string()
+        } else if timestamp.len() >= 10 {
+            timestamp[5..10].to_string() // fallback: show month-day
+        } else {
+            timestamp.clone()
+        };
+
+        Ok(serde_json::json!({
+            "timestamp": timestamp,
+            "time": time_str,
+            "method": method.unwrap_or_else(|| "Verified".into()),
+            "device": device.unwrap_or_else(|| "Unknown".into()),
+        }))
+    })?.filter_map(|r| r.ok()).collect();
+
+    // Compute summary
+    let first_in = punches.first().map(|p| p["time"].as_str().unwrap_or("").to_string()).unwrap_or_default();
+    let last_out = punches.last().map(|p| p["time"].as_str().unwrap_or("").to_string()).unwrap_or_default();
+
+    let status = if punches.is_empty() {
+        "Absent".to_string()
+    } else if first_in.len() >= 5 && first_in.as_str() > "09:15" {
+        "Late".to_string()
+    } else {
+        "Present".to_string()
+    };
+
+    // Compute working hours
+    let working_hours = if !first_in.is_empty() && !last_out.is_empty() && first_in.len() >= 4 && last_out.len() >= 4 {
+        let parse_time = |t: &str| -> Option<(i32, i32)> {
+            let parts: Vec<&str> = t.split(':').collect();
+            if parts.len() == 2 {
+                Some((parts[0].parse().ok()?, parts[1].parse().ok()?))
+            } else { None }
+        };
+        match (parse_time(&first_in), parse_time(&last_out)) {
+            (Some((h1, m1)), Some((h2, m2))) => {
+                let diff = (h2 * 60 + m2) - (h1 * 60 + m1);
+                if diff > 0 { format!("{}h {}m", diff / 60, diff % 60) } else { "0h 0m".to_string() }
+            }
+            _ => "N/A".to_string()
+        }
+    } else { "N/A".to_string() };
+
+    // Employee name
+    let emp_name: String = conn.query_row(
+        "SELECT name FROM Employees WHERE id = ?1", params![employee_id],
+        |row| row.get(0)
+    ).unwrap_or_else(|_| "Unknown".to_string());
+
+    Ok(serde_json::json!({
+        "employeeId": employee_id,
+        "name": emp_name,
+        "date": today,
+        "status": status,
+        "firstIn": first_in,
+        "lastOut": last_out,
+        "workingHours": working_hours,
+        "totalPunches": punches.len(),
+        "punches": punches,
     }))
 }
 
@@ -1685,6 +1811,269 @@ fn get_employee_monthly_attendance(
     }))
 }
 
+// ── Leave Management Commands ──────────────────────────────────────────────
+
+#[tauri::command]
+fn list_leave_requests(
+    state: State<'_, AppState>,
+    employee_id: Option<i64>,
+    status: Option<String>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    // RBAC
+    let u_role = state.current_user_role.lock().map_err(lock_err)?.clone();
+    let u_branch = state.current_user_branch_id.lock().map_err(lock_err)?.clone();
+
+    let mut query = String::from(
+        "SELECT lr.id, lr.employee_id, e.name, lr.leave_type, lr.start_date, lr.end_date, lr.status, lr.reason, lr.approved_by
+         FROM LeaveRequests lr JOIN Employees e ON lr.employee_id = e.id WHERE 1=1"
+    );
+
+    // Branch filter for ADMIN/OPERATOR
+    if u_role == Some("ADMIN".to_string()) || u_role == Some("OPERATOR".to_string()) {
+        if let Some(branch) = u_branch {
+            query.push_str(&format!(" AND e.branch_id = {}", branch));
+        }
+    }
+
+    if let Some(eid) = employee_id {
+        query.push_str(&format!(" AND lr.employee_id = {}", eid));
+    }
+    if let Some(s) = status {
+        if s != "all" {
+            query.push_str(&format!(" AND lr.status = '{}'", s.replace('\'', "''")));
+        }
+    }
+
+    query.push_str(" ORDER BY lr.start_date DESC");
+
+    let mut stmt = conn.prepare(&query)?;
+    let rows: Vec<serde_json::Value> = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "employeeId": row.get::<_, i64>(1)?,
+            "employeeName": row.get::<_, String>(2)?,
+            "leaveType": row.get::<_, String>(3)?,
+            "startDate": row.get::<_, String>(4)?,
+            "endDate": row.get::<_, String>(5)?,
+            "status": row.get::<_, String>(6)?,
+            "reason": row.get::<_, Option<String>>(7)?.unwrap_or_default(),
+            "approvedBy": row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+        }))
+    })?.filter_map(|r| r.ok()).collect();
+
+    Ok(serde_json::to_value(rows).unwrap())
+}
+
+#[tauri::command]
+fn add_leave_request(
+    state: State<'_, AppState>,
+    employee_id: i64,
+    leave_type: String,
+    start_date: String,
+    end_date: String,
+    reason: Option<String>,
+) -> Result<i64, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let status = "pending".to_string();
+    conn.execute(
+        "INSERT INTO LeaveRequests (employee_id, leave_type, start_date, end_date, status, reason) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![employee_id, leave_type, start_date, end_date, status, reason.unwrap_or_default()],
+    )?;
+
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn update_leave_status(
+    state: State<'_, AppState>,
+    leave_id: i64,
+    status: String,
+    approved_by: Option<String>,
+) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "UPDATE LeaveRequests SET status = ?1, approved_by = ?2 WHERE id = ?3",
+        params![status, approved_by.unwrap_or_default(), leave_id],
+    )?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_leave_request(
+    state: State<'_, AppState>,
+    leave_id: i64,
+) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute("DELETE FROM LeaveRequests WHERE id = ?1", params![leave_id])?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_leave_stats(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+
+    // Pending count
+    let pending: i64 = conn.query_row("SELECT COUNT(*) FROM LeaveRequests WHERE status = 'pending'", [], |r| r.get(0))?;
+
+    // Approved today
+    let approved_today: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM LeaveRequests WHERE status = 'approved' AND ?1 BETWEEN start_date AND end_date",
+        params![today],
+        |r| r.get(0),
+    )?;
+
+    // Currently on leave
+    let on_leave: i64 = conn.query_row(
+        "SELECT COUNT(DISTINCT employee_id) FROM LeaveRequests WHERE status != 'rejected' AND ?1 BETWEEN start_date AND end_date",
+        params![today],
+        |r| r.get(0),
+    )?;
+
+    Ok(serde_json::json!({
+        "pending": pending,
+        "approvedToday": approved_today,
+        "currentlyOnLeave": on_leave,
+    }))
+}
+
+#[tauri::command]
+fn get_leave_types(_state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
+    Ok(vec![
+        "Sick Leave".to_string(),
+        "Casual Leave".to_string(),
+        "Paid Leave".to_string(),
+        "Maternity Leave".to_string(),
+        "Paternity Leave".to_string(),
+        "Emergency Leave".to_string(),
+    ])
+}
+
+// ── Offline Mode Commands (Manual Entry + CSV Import) ──────────────────────
+
+#[tauri::command]
+fn add_manual_attendance(
+    state: State<'_, AppState>,
+    employee_id: i64,
+    timestamp: String,
+    punch_method: Option<String>,
+) -> Result<i64, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    // Get default branch/gate/device
+    let (branch_id, gate_id, device_id) = conn.query_row(
+        "SELECT id, gate_id, (SELECT id FROM Devices LIMIT 1) FROM Branches WHERE org_id = 1 LIMIT 1",
+        [],
+        |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<i64>>(2)?.unwrap_or(1)))
+    ).unwrap_or((1, 1, 1));
+
+    conn.execute(
+        "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, gate_id, device_id, timestamp, punch_method, is_synced) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+        params![employee_id, branch_id, gate_id, device_id, timestamp, punch_method.unwrap_or_else(|| "Manual".to_string())],
+    )?;
+
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn import_csv_attendance(
+    state: State<'_, AppState>,
+    csv_content: String,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut imported = 0;
+    let mut skipped = 0;
+    let mut errors: Vec<String> = Vec::new();
+
+    for (line_num, line) in csv_content.lines().enumerate() {
+        if line_num == 0 && line.to_lowercase().contains("employee") {
+            continue; // Skip header
+        }
+
+        let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+        if parts.len() < 3 {
+            errors.push(format!("Line {}: Invalid format", line_num + 1));
+            skipped += 1;
+            continue;
+        }
+
+        let emp_id: i64 = parts[0].parse().unwrap_or(0);
+        let timestamp = parts[1].to_string();
+        let method = parts.get(2).map(|s| s.to_string()).unwrap_or_else(|| "CSV".to_string());
+
+        if emp_id == 0 || timestamp.is_empty() {
+            errors.push(format!("Line {}: Invalid data", line_num + 1));
+            skipped += 1;
+            continue;
+        }
+
+        match conn.execute(
+            "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, gate_id, device_id, timestamp, punch_method, is_synced) VALUES (?1, 1, 1, 1, ?2, ?3, 0)",
+            params![emp_id, timestamp, method],
+        ) {
+            Ok(0) => skipped += 1, // Duplicate
+            Ok(_) => imported += 1,
+            Err(e) => errors.push(format!("Line {}: {}", line_num + 1, e)),
+        }
+    }
+
+    Ok(serde_json::json!({
+        "imported": imported,
+        "skipped": skipped,
+        "errors": errors,
+    }))
+}
+
+#[tauri::command]
+fn list_employees_for_select(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let u_role = state.current_user_role.lock().map_err(lock_err)?.clone();
+    let u_branch = state.current_user_branch_id.lock().map_err(lock_err)?.clone();
+
+    let mut stmt = if u_role == Some("SUPER_ADMIN".to_string()) {
+        conn.prepare("SELECT id, name, department FROM Employees WHERE status = 'active' ORDER BY name")?
+    } else if let Some(_branch) = u_branch {
+        conn.prepare("SELECT id, name, department FROM Employees WHERE status = 'active' AND branch_id = ?1 ORDER BY name")?
+    } else {
+        conn.prepare("SELECT id, name, department FROM Employees WHERE status = 'active' ORDER BY name")?
+    };
+
+    let emps: Vec<serde_json::Value> = stmt.query_map(params![], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "department": row.get::<_, String>(2)?,
+        }))
+    })?.filter_map(|r| r.ok()).collect();
+
+    Ok(serde_json::to_value(emps).unwrap())
+}
+
+// ── Language/Localization ──────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_localized_strings(_lang: String) -> Result<serde_json::Value, AppError> {
+    // For now, return empty. Language switching handled in frontend.
+    Ok(serde_json::json!({}))
+}
+
 #[tauri::command]
 fn get_employee_profile(
     state: State<'_, AppState>,
@@ -1867,6 +2256,7 @@ pub fn run() {
             save_cloud_credentials,
             get_cloud_config,
             sync_device_logs,
+            pull_all_logs,
             get_device_users,
             scan_network,
             get_dashboard_stats,
@@ -1875,6 +2265,7 @@ pub fn run() {
             update_device,
             get_employee_profile,
             get_employee_monthly_attendance,
+            get_today_employee_punches,
             save_device_config,
             delete_device,
             get_active_devices,
@@ -1911,6 +2302,16 @@ pub fn run() {
             list_employee_documents,
             get_document_preview,
             generate_payroll_slip,
+            list_leave_requests,
+            add_leave_request,
+            update_leave_status,
+            delete_leave_request,
+            get_leave_stats,
+            get_leave_types,
+            add_manual_attendance,
+            import_csv_attendance,
+            list_employees_for_select,
+            get_localized_strings,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Bio Bridge Pro HR");

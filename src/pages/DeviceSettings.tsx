@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { Wifi, WifiOff, FileText, Plus } from 'lucide-react';
 
 interface Device {
   id: number;
@@ -58,7 +59,15 @@ export const DeviceSettings: React.FC = () => {
   const [discoveredDevices, setDiscoveredDevices] = useState<{ ip: string; brand: string }[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
-  
+
+  // Offline Mode States
+  const [showOfflineMode, setShowOfflineMode] = useState(false);
+  const [offlineEmployees, setOfflineEmployees] = useState<{id: number; name: string; department: string}[]>([]);
+  const [manualForm, setManualForm] = useState({ employeeId: '', date: new Date().toISOString().split('T')[0], time: '09:00', method: 'Manual' });
+  const [manualStatus, setManualStatus] = useState('');
+  const [csvContent, setCsvContent] = useState('');
+  const [csvStatus, setCsvStatus] = useState('');
+
   const [branches, setBranches] = useState<Branch[]>([]);
   const [gates, setGates] = useState<Gate[]>([]);
 
@@ -264,12 +273,69 @@ export const DeviceSettings: React.FC = () => {
     setTimeout(() => setSyncStatus(prev => ({ ...prev, [dev.id]: '' })), 6000);
   };
 
+  const handlePullAllLogs = async (dev: Device) => {
+    if (!confirm(`Pull ALL attendance logs from "${dev.name}"?\n\nThis will fetch every log from day one to now.\nDuplicate logs will be auto-skipped.`)) return;
+    setSyncStatus(prev => ({ ...prev, [dev.id]: '🔄 Pulling ALL logs...' }));
+    try {
+      const result = await invoke<string>('pull_all_logs', {
+        ip: dev.ip,
+        port: Number(dev.port),
+        deviceId: dev.id,
+        brand: dev.brand,
+      });
+      setSyncStatus(prev => ({ ...prev, [dev.id]: `✅ ${result}` }));
+    } catch (e) {
+      setSyncStatus(prev => ({ ...prev, [dev.id]: `❌ ${e}` }));
+    }
+    setTimeout(() => setSyncStatus(prev => ({ ...prev, [dev.id]: '' })), 10000);
+  };
+
   const handleScan = async () => {
     try { await invoke('scan_network', { baseIp }); } catch {}
   };
 
   const selectDiscovered = (d: { ip: string; brand: string }) => {
     setForm(f => ({ ...f, ip: d.ip, brand: d.brand, port: d.brand === 'ZKTeco' ? 4370 : 8000 }));
+  };
+
+  // ── Offline Mode Functions ────────────────────────────────────────────
+
+  const loadOfflineEmployees = async () => {
+    try {
+      const emps = await invoke<any[]>('list_employees_for_select');
+      setOfflineEmployees(emps || []);
+    } catch (e) { console.error(e); }
+  };
+
+  const handleManualEntry = async () => {
+    if (!manualForm.employeeId) { alert('Please select an employee'); return; }
+    setManualStatus('Saving...');
+    try {
+      const timestamp = `${manualForm.date}T${manualForm.time}:00`;
+      await invoke('add_manual_attendance', {
+        employeeId: parseInt(manualForm.employeeId),
+        timestamp,
+        punchMethod: manualForm.method,
+      });
+      setManualStatus('✅ Saved!');
+      setManualForm({ ...manualForm, employeeId: '' });
+    } catch (e) {
+      setManualStatus(`❌ ${e}`);
+    }
+    setTimeout(() => setManualStatus(''), 3000);
+  };
+
+  const handleCSVImport = async () => {
+    if (!csvContent.trim()) { setCsvStatus('❌ Paste CSV data first'); return; }
+    setCsvStatus('Importing...');
+    try {
+      const result = await invoke<any>('import_csv_attendance', { csvContent });
+      setCsvStatus(`✅ Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? `, Errors: ${result.errors.length}` : ''}`);
+      setCsvContent('');
+    } catch (e) {
+      setCsvStatus(`❌ ${e}`);
+    }
+    setTimeout(() => setCsvStatus(''), 5000);
   };
 
   const statusColor = (s: string) => s === 'online' ? '#10b981' : '#6b7280';
@@ -284,10 +350,108 @@ export const DeviceSettings: React.FC = () => {
             Manage biometric hardware (ZKTeco / Hikvision) for attendance synchronization.
           </p>
         </div>
-        <button onClick={openAddModal} style={addBtnStyle}>
-          + Add Device
-        </button>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button onClick={() => { setShowOfflineMode(!showOfflineMode); loadOfflineEmployees(); }} style={{
+            ...addBtnStyle,
+            backgroundColor: showOfflineMode ? 'var(--warning)' : 'var(--bg-color)',
+            color: showOfflineMode ? 'white' : 'var(--text-color)',
+            border: '1px solid var(--border-color)',
+            display: 'flex', alignItems: 'center', gap: '8px'
+          }}>
+            {showOfflineMode ? <WifiOff size={16} /> : <Wifi size={16} />}
+            {showOfflineMode ? 'Close Offline Mode' : 'Offline Mode'}
+          </button>
+          <button onClick={openAddModal} style={addBtnStyle}>
+            + Add Device
+          </button>
+        </div>
       </div>
+
+      {/* Offline Mode Panel */}
+      {showOfflineMode && (
+        <div style={{
+          ...cardStyle, marginBottom: 24, borderColor: 'var(--warning)',
+          background: 'linear-gradient(135deg, rgba(245,158,11,0.03), rgba(245,158,11,0.08))'
+        }}>
+          <h3 style={{ margin: '0 0 20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <WifiOff size={20} color="var(--warning)" /> Offline Mode — Manual Entry & CSV Import
+          </h3>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+            {/* Manual Entry */}
+            <div style={{ padding: '20px', backgroundColor: 'var(--surface-color)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+              <h4 style={{ margin: '0 0 16px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Plus size={16} /> Manual Attendance Entry
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <select
+                  value={manualForm.employeeId}
+                  onChange={(e) => setManualForm({...manualForm, employeeId: e.target.value})}
+                  style={{ marginBottom: 0 }}
+                >
+                  <option value="">Select Employee</option>
+                  {offlineEmployees.map(emp => (
+                    <option key={emp.id} value={emp.id}>{emp.name} ({emp.department})</option>
+                  ))}
+                </select>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="date"
+                    value={manualForm.date}
+                    onChange={(e) => setManualForm({...manualForm, date: e.target.value})}
+                    style={{ marginBottom: 0, flex: 1 }}
+                  />
+                  <input
+                    type="time"
+                    value={manualForm.time}
+                    onChange={(e) => setManualForm({...manualForm, time: e.target.value})}
+                    style={{ marginBottom: 0, flex: 1 }}
+                  />
+                </div>
+                <select
+                  value={manualForm.method}
+                  onChange={(e) => setManualForm({...manualForm, method: e.target.value})}
+                  style={{ marginBottom: 0 }}
+                >
+                  <option value="Manual">Manual</option>
+                  <option value="Face">Face</option>
+                  <option value="Finger">Finger</option>
+                  <option value="Card">RFID Card</option>
+                </select>
+                <button onClick={handleManualEntry} style={{ width: '100%' }}>Save Entry</button>
+                {manualStatus && (
+                  <div style={{ fontSize: '12px', textAlign: 'center', color: manualStatus.startsWith('✅') ? 'var(--success)' : 'var(--error)' }}>
+                    {manualStatus}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* CSV Import */}
+            <div style={{ padding: '20px', backgroundColor: 'var(--surface-color)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+              <h4 style={{ margin: '0 0 16px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <FileText size={16} /> CSV Import
+              </h4>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '0 0 8px' }}>
+                Format: <code style={{ backgroundColor: 'var(--bg-color)', padding: '2px 6px', borderRadius: '4px' }}>employee_id,YYYY-MM-DD HH:MM:SS,method</code>
+              </p>
+              <textarea
+                value={csvContent}
+                onChange={(e) => setCsvContent(e.target.value)}
+                placeholder={"1,2025-04-07 09:00:00,Finger\n2,2025-04-07 09:15:00,Face\n3,2025-04-07 08:55:00,Card"}
+                rows={6}
+                style={{ width: '100%', padding: '10px', border: '1px solid var(--border-color)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '12px', resize: 'vertical', marginBottom: '12px' }}
+              />
+              <button onClick={handleCSVImport} style={{ width: '100%' }}>Import Data</button>
+              {csvStatus && (
+                <div style={{ fontSize: '12px', textAlign: 'center', color: csvStatus.startsWith('✅') ? 'var(--success)' : csvStatus.startsWith('❌') ? 'var(--error)' : 'var(--text-muted)', marginTop: '8px' }}>
+                  {csvStatus}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Device Table */}
       <div style={cardStyle}>
@@ -340,6 +504,12 @@ export const DeviceSettings: React.FC = () => {
                           label="⬇️ Sync Logs"
                           onClick={() => handleSyncLogs(dev)}
                           color="#7c3aed"
+                          disabled={!!syncStatus[dev.id]}
+                        />
+                        <ActionBtn
+                          label="📥 Pull ALL Logs"
+                          onClick={() => handlePullAllLogs(dev)}
+                          color="#059669"
                           disabled={!!syncStatus[dev.id]}
                         />
                         <ActionBtn
