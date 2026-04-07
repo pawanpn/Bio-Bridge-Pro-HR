@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { AnalyticalCard } from '../components/AnalyticalCard';
 import { DeviceScanner } from '../components/DeviceScanner';
 import { invoke } from '@tauri-apps/api/core';
-import { Users, UserCheck, AlertTriangle, UserMinus, Cloud, CloudOff, Clock } from 'lucide-react';
+import { Users, UserCheck, AlertTriangle, UserMinus, Cloud, CloudOff, Clock, X, Folder, Fingerprint, ScanFace } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 
 interface Staff {
@@ -53,6 +53,17 @@ export const Dashboard: React.FC = () => {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncProgress, setSyncProgress] = useState<string | null>(null);
   const [weeklyChart, setWeeklyChart] = useState<{day: string; present: number; absent: number}[]>([]);
+
+  // Interactivity States
+  const [activeListModal, setActiveListModal] = useState<{ title: string, data: Staff[], type: string } | null>(null);
+  const [profileModal, setProfileModal] = useState<{ isOpen: boolean; data: any }>({ isOpen: false, data: null });
+
+  const handleProfileClick = async (id: number) => {
+    try {
+      const data = await invoke('get_employee_profile', { employeeId: id });
+      setProfileModal({ isOpen: true, data });
+    } catch(e) { console.error("Failed to load profile:", e); }
+  };
 
   const buildWeeklyChart = (s: Stats) => {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -347,11 +358,11 @@ export const Dashboard: React.FC = () => {
       {stats && stats.totalStaff > 0 ? (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '20px', marginBottom: '40px' }}>
-            <AnalyticalCard title="Total Employees" value={stats.totalStaff} icon={<Users size={32} />} />
-            <AnalyticalCard title="Present Today" value={stats.presentToday} icon={<UserCheck size={32} />} color="var(--success)" />
-            <AnalyticalCard title="Late Today" value={stats.lateToday} icon={<Clock size={32} />} color="var(--error)" />
-            <AnalyticalCard title="On Leave" value={stats.onLeave} icon={<AlertTriangle size={32} />} color="var(--warning)" />
-            <AnalyticalCard title="Absent" value={stats.absent} icon={<UserMinus size={32} />} color="var(--error)" />
+            <div onClick={() => setActiveListModal({ title: 'Total Employees', data: [...stats.presentStaff, ...stats.absentStaff, ...stats.leaveStaff], type: 'total' })} style={{cursor: 'pointer'}}><AnalyticalCard title="Total Employees" value={stats.totalStaff} icon={<Users size={32} />} /></div>
+            <div onClick={() => setActiveListModal({ title: 'Present Today', data: stats.presentStaff, type: 'present' })} style={{cursor: 'pointer'}}><AnalyticalCard title="Present Today" value={stats.presentToday} icon={<UserCheck size={32} />} color="var(--success)" /></div>
+            <div onClick={() => setActiveListModal({ title: 'Late Today', data: stats.lateStaff, type: 'late' })} style={{cursor: 'pointer'}}><AnalyticalCard title="Late Today" value={stats.lateToday} icon={<Clock size={32} />} color="var(--error)" /></div>
+            <div onClick={() => setActiveListModal({ title: 'On Leave', data: stats.leaveStaff, type: 'leave' })} style={{cursor: 'pointer'}}><AnalyticalCard title="On Leave" value={stats.onLeave} icon={<AlertTriangle size={32} />} color="var(--warning)" /></div>
+            <div onClick={() => setActiveListModal({ title: 'Absent', data: stats.absentStaff, type: 'absent' })} style={{cursor: 'pointer'}}><AnalyticalCard title="Absent" value={stats.absent} icon={<UserMinus size={32} />} color="var(--error)" /></div>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr', gap: '32px', marginBottom: '40px' }}>
@@ -383,7 +394,17 @@ export const Dashboard: React.FC = () => {
                           { name: 'Leave', value: stats.onLeave, color: '#3b82f6' },
                           { name: 'Absent', value: stats.absent, color: '#ef4444' }
                         ].filter(d => d.value > 0).map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
+                          <Cell 
+                            key={`cell-${index}`} 
+                            fill={entry.color} 
+                            style={{ cursor: 'pointer', outline: 'none' }}
+                            onClick={() => {
+                              if (entry.name === 'On-time') setActiveListModal({ title: 'On-time Today', data: stats.presentStaff.filter(s => !stats.lateStaff.find(l => l.id === s.id)), type: 'present' });
+                              if (entry.name === 'Late') setActiveListModal({ title: 'Late Today', data: stats.lateStaff, type: 'late' });
+                              if (entry.name === 'Leave') setActiveListModal({ title: 'On Leave', data: stats.leaveStaff, type: 'leave' });
+                              if (entry.name === 'Absent') setActiveListModal({ title: 'Absent', data: stats.absentStaff, type: 'absent' });
+                            }} 
+                           />
                         ))}
                       </Pie>
                       <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-color)' }} itemStyle={{ color: 'var(--text-color)', fontWeight: 'bold' }} />
@@ -428,7 +449,7 @@ export const Dashboard: React.FC = () => {
                 {stats.presentStaff.length === 0 ? <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No one present yet.</p> : (
                   <div style={{ display: 'grid', gap: '8px' }}>
                     {stats.presentStaff.map(s => (
-                      <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', transition: '0.2s', borderLeft: '3px solid var(--success)' }} className="hover-list-item">
+                      <div key={s.id} onClick={() => handleProfileClick(s.id)} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', transition: '0.2s', borderLeft: '3px solid var(--success)' }} className="hover-list-item">
                         <span style={{ fontWeight: '600' }}>{s.name}</span>
                         <span style={{ color: 'var(--text-muted)' }}>In: {s.time}</span>
                       </div>
@@ -444,7 +465,7 @@ export const Dashboard: React.FC = () => {
                 {stats.absentStaff.length === 0 ? <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Everyone is present or on leave!</p> : (
                   <div style={{ display: 'grid', gap: '8px' }}>
                     {stats.absentStaff.map(s => (
-                      <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', transition: '0.2s', borderLeft: '3px solid var(--error)' }} className="hover-list-item">
+                      <div key={s.id} onClick={() => handleProfileClick(s.id)} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', transition: '0.2s', borderLeft: '3px solid var(--error)' }} className="hover-list-item">
                         <span style={{ fontWeight: '600' }}>{s.name}</span>
                         <span style={{ color: 'var(--error)' }}>Missing</span>
                       </div>
@@ -467,6 +488,102 @@ export const Dashboard: React.FC = () => {
       )}
 
       <DeviceScanner />
+
+      {/* List Modal */}
+      {activeListModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ backgroundColor: 'var(--surface-color)', padding: '24px', borderRadius: '12px', width: '90%', maxWidth: '500px', maxHeight: '80vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+               <h2 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  {activeListModal.type === 'present' ? <UserCheck color="var(--success)" /> : 
+                   activeListModal.type === 'late' ? <Clock color="var(--warning)" /> : 
+                   <UserMinus color="var(--error)" />}
+                  {activeListModal.title} ({activeListModal.data.length})
+               </h2>
+               <button onClick={() => setActiveListModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X /></button>
+            </div>
+            
+            {activeListModal.data.length === 0 ? (
+              <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No records found.</p>
+            ) : (
+              <div style={{ display: 'grid', gap: '8px' }}>
+                {activeListModal.data.map(s => {
+                  let info = "";
+                  if (activeListModal.type === 'late') {
+                    // Calculate late time assuming 09:15 is the threshold
+                    const inTime = s.time || "09:30";
+                    info = `Late by ${isNaN(Date.parse(`1970-01-01T${inTime}`)) ? "Unknown" : Math.floor((Date.parse(`1970-01-01T${inTime}`) - Date.parse(`1970-01-01T09:15:00`)) / 60000)} mins`;
+                  } else if (s.time) {
+                    info = `In: ${s.time}`;
+                  } else {
+                    info = activeListModal.type === 'absent' ? 'Missing' : 'On Leave';
+                  }
+
+                  return (
+                    <div key={s.id} onClick={() => { handleProfileClick(s.id); setActiveListModal(null); }} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', backgroundColor: 'var(--bg-color)', borderRadius: '8px', fontSize: '14px', cursor: 'pointer', transition: '0.2s', borderLeft: `4px solid ${activeListModal.type === 'present' ? 'var(--success)' : activeListModal.type === 'late' ? 'var(--warning)' : 'var(--error)'}` }} className="hover-list-item">
+                      <span style={{ fontWeight: '600' }}>{s.name}</span>
+                      <span style={{ color: activeListModal.type === 'present' ? 'var(--text-muted)' : (activeListModal.type === 'late' ? 'var(--warning)' : 'var(--error)'), fontWeight: 'bold' }}>
+                         {info}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Employee Profile Modal */}
+      {profileModal.isOpen && profileModal.data && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ backgroundColor: 'var(--surface-color)', padding: '32px', borderRadius: '16px', width: '90%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+               <div>
+                  <h2 style={{ margin: '0 0 4px 0', fontSize: '24px' }}>{profileModal.data.name}</h2>
+                  <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '14px' }}>
+                     {profileModal.data.department} • {profileModal.data.branch} • ID #{profileModal.data.id}
+                  </p>
+               </div>
+               <button onClick={() => setProfileModal({ isOpen: false, data: null })} style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-color)' }}><X size={16} /></button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
+                <a href="#" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', backgroundColor: 'rgba(59,130,246,0.1)', color: '#3b82f6', borderRadius: '8px', textDecoration: 'none', fontSize: '13px', fontWeight: 'bold' }}>
+                   <Folder size={16} /> Open Drive Folder
+                </a>
+            </div>
+            
+            <h3 style={{ fontSize: '16px', marginBottom: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>Recent Attendance (Last 7 Days)</h3>
+            
+            {profileModal.data.logs.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px 0' }}>No recent attendance logs.</p>
+            ) : (
+              <div style={{ display: 'grid', gap: '12px' }}>
+                {profileModal.data.logs.slice(0, 15).map((log: any, idx: number) => {
+                   const isFace = log.method.toUpperCase().includes('FACE') || log.method === '1';
+                   return (
+                     <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', backgroundColor: 'var(--bg-color)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                       <div>
+                          <div style={{ fontWeight: 'bold', fontSize: '14px', marginBottom: '4px' }}>{log.timestamp.slice(0, 10)} <span style={{ color: 'var(--primary-color)', marginLeft: '8px' }}>{log.timestamp.slice(11, 16)}</span></div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              Source Tag: <span style={{ backgroundColor: 'var(--border-color)', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>{log.source}</span>
+                          </div>
+                       </div>
+                       <div style={{ 
+                         display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold',
+                         backgroundColor: isFace ? 'rgba(59,130,246,0.1)' : 'rgba(16,185,129,0.1)', color: isFace ? '#3b82f6' : 'var(--success)'
+                       }}>
+                          {isFace ? <><ScanFace size={14} /> Face</> : <><Fingerprint size={14} /> Finger</>}
+                       </div>
+                     </div>
+                   );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
