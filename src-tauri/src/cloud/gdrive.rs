@@ -261,6 +261,80 @@ pub async fn sync_logs_to_drive(
     Ok(())
 }
 
+// ── New Enhanced Lifecycle Features ───────────────────────────────────────
+
+/// Creates the requested HR hierarchy: Root -> BioBridge_HR_Backup -> [Databases, Reports, Slips, Docs, OT, Leaves]
+pub async fn ensure_biobridge_structure(key: &ServiceAccountKey, root_id: &str) -> Result<serde_json::Value, AppError> {
+    let token = generate_bearer_token(key).await?;
+    let client = Client::new();
+
+    // 1. Create main Backup folder
+    let backup_id = ensure_folder(&client, &token, "BioBridge_HR_Backup", root_id).await?;
+    
+    // 2. Create sub-folders as requested for Complete HR Solution
+    let db_id      = ensure_folder(&client, &token, "Databases",         &backup_id).await?;
+    let reports_id = ensure_folder(&client, &token, "Attendance_Reports", &backup_id).await?;
+    let config_id   = ensure_folder(&client, &token, "Config",            &backup_id).await?;
+    
+    // NEW HR MODULES
+    let slips_id    = ensure_folder(&client, &token, "Salary_Slips",       &backup_id).await?;
+    let docs_id     = ensure_folder(&client, &token, "Employee_Documents", &backup_id).await?;
+    let ot_id       = ensure_folder(&client, &token, "OT_Reports",         &backup_id).await?;
+    let leaves_id   = ensure_folder(&client, &token, "Leave_Records",       &backup_id).await?;
+
+    Ok(json!({
+        "backupFolderId": backup_id,
+        "databasesFolderId": db_id,
+        "reportsFolderId": reports_id,
+        "configFolderId": config_id,
+        "slipsFolderId": slips_id,
+        "docsFolderId": docs_id,
+        "otFolderId": ot_id,
+        "leavesFolderId": leaves_id
+    }))
+}
+
+/// Robust file upload (for binary DB or PDF)
+pub async fn upload_file_to_drive(
+    key: &ServiceAccountKey,
+    parent_id: &str,
+    file_name: &str,
+    mime_type: &str,
+    data: Vec<u8>
+) -> Result<String, AppError> {
+    let token  = generate_bearer_token(key).await?;
+    let client = Client::new();
+
+    let file_metadata = json!({
+        "name":    file_name,
+        "parents": [parent_id],
+        "mimeType": mime_type
+    });
+
+    let form = reqwest::multipart::Form::new()
+        .part("metadata", reqwest::multipart::Part::text(file_metadata.to_string())
+            .mime_str("application/json").unwrap())
+        .part("media", reqwest::multipart::Part::bytes(data)
+            .mime_str(mime_type).unwrap());
+
+    let resp = client
+        .post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart")
+        .bearer_auth(&token)
+        .multipart(form)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let err_text = resp.text().await.unwrap_or_else(|_| "Unknown error".into());
+        return Err(AppError::Unknown(format!("Upload failed ({}): {}", file_name, err_text)));
+    }
+
+    let json = resp.json::<Value>().await
+        .map_err(|e| AppError::SerializationError(e.to_string()))?;
+
+    Ok(json["id"].as_str().unwrap_or("").to_string())
+}
+
 // ── Licensing Support ──────────────────────────────────────────────────────
 
 pub async fn fetch_license_database(key: &ServiceAccountKey, folder_id: &str) -> Result<Value, AppError> {

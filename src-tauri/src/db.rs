@@ -7,7 +7,16 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         fs::create_dir_all(app_dir).expect("Failed to create app data directory");
     }
 
-    let db_path = app_dir.join("biobridge.db");
+    // Create subfolders as requested
+    let dirs = vec!["Databases", "Attendance_Reports", "Employee_Photos", "OT_Reports", "Employee_Documents"];
+    for d in dirs {
+        let dir_path = app_dir.join(d);
+        if !dir_path.exists() {
+            fs::create_dir_all(dir_path).expect("Failed to create subdirectory");
+        }
+    }
+
+    let db_path = app_dir.join("Databases").join("biobridge_pro.db");
     let conn = Connection::open(db_path)?;
 
     conn.execute(
@@ -137,11 +146,69 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS CloudConfig (
-            id INTEGER PRIMARY KEY,
-            client_email TEXT NOT NULL,
-            private_key TEXT NOT NULL,
-            project_id TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_email TEXT,
+            private_key TEXT,
+            project_id TEXT,
             root_folder_id TEXT
+        )",
+        [],
+    )?;
+
+    // ── COMPLETE HR SOLUTION MODULES ──────────────────────────────────
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS SalaryStructures (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER UNIQUE,
+            basic_salary REAL DEFAULT 0,
+            allowances REAL DEFAULT 0,
+            deductions REAL DEFAULT 0,
+            overtime_rate REAL DEFAULT 0,
+            FOREIGN KEY(employee_id) REFERENCES Employees(id)
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS PayrollRecords (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER,
+            year_month TEXT, -- YYYY-MM
+            basic_paid REAL,
+            allowances_paid REAL,
+            deductions_paid REAL,
+            ot_paid REAL,
+            net_pay REAL,
+            days_present INTEGER,
+            generated_at TEXT,
+            FOREIGN KEY(employee_id) REFERENCES Employees(id)
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS LeaveManagement (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER,
+            leave_type TEXT, -- Sick, Casual, Paid
+            start_date TEXT,
+            end_date TEXT,
+            status TEXT DEFAULT 'Approved',
+            FOREIGN KEY(employee_id) REFERENCES Employees(id)
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS OvertimeTracker (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER,
+            date TEXT,
+            shift_end TEXT,
+            actual_out TEXT,
+            ot_hours REAL,
+            is_processed INTEGER DEFAULT 0,
+            FOREIGN KEY(employee_id) REFERENCES Employees(id)
         )",
         [],
     )?;

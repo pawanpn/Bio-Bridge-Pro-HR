@@ -1,8 +1,16 @@
 const ZKLib = require('node-zklib');
 
+// Suppress any debug/console.log from node-zklib internals
+const origLog = console.log;
+const origErr = console.error;
+let captured = [];
+
+// Temporarily redirect console.log so node-zklib debug messages don't corrupt stdout
+console.log = (...args) => { captured.push(args.join(' ')); };
+
 async function fetchZKData() {
     if (process.argv.length < 4) {
-        console.error("Usage: node zk_fetch.js <ip> <port> [timeout]");
+        origErr("Usage: node zk_fetch.cjs <ip> <port> [timeout]");
         process.exit(1);
     }
 
@@ -14,7 +22,8 @@ async function fetchZKData() {
     try {
         await zkInstance.createSocket();
     } catch (err) {
-        console.error("Connection Failed:", err.message);
+        console.log = origLog; // Restore
+        origErr("Connection Failed:", err.message);
         process.exit(1);
     }
 
@@ -22,8 +31,11 @@ async function fetchZKData() {
         let users = await zkInstance.getUsers();
         let attendances = await zkInstance.getAttendances();
 
-        // Print final JSON payload cleanly to STDOUT so Rust can parse it
-        console.log(JSON.stringify({ 
+        // Restore original console.log for our FINAL output
+        console.log = origLog;
+        
+        // Print ONLY the clean JSON payload to STDOUT
+        origLog(JSON.stringify({ 
             status: "success", 
             users: users.data || [], 
             attendances: attendances.data || [] 
@@ -31,7 +43,8 @@ async function fetchZKData() {
         
         await zkInstance.disconnect();
     } catch (e) {
-        console.error("Failed to fetch data:", e.message);
+        console.log = origLog; // Restore
+        origErr("Failed to fetch data:", e.message);
         await zkInstance.disconnect();
         process.exit(1);
     }

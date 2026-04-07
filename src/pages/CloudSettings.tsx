@@ -4,7 +4,7 @@ import { PrimaryButton } from '../components/common/PrimaryButton';
 import { AppConfig } from '../config/appConfig';
 import { SuperAdminGuard } from '../components/SuperAdminGuard';
 import { useAdminAuth } from '../context/AdminAuthContext';
-import { Lock } from 'lucide-react';
+import { Lock, CheckCircle, AlertCircle } from 'lucide-react';
 
 interface CloudConfig {
   configured: boolean;
@@ -12,10 +12,6 @@ interface CloudConfig {
   projectId?: string;
   rootFolderId?: string;
 }
-
-const statusDot = (color: string): React.CSSProperties => ({
-  width: 10, height: 10, borderRadius: '50%', backgroundColor: color,
-});
 
 // Inner content — only shown when unlocked
 const CloudSettingsContent: React.FC = () => {
@@ -73,13 +69,16 @@ const CloudSettingsContent: React.FC = () => {
 
   const doSave = async () => {
     setIsLoading(true);
-    setStatus('');
+    setStatus('Creating BioBridge HR Cloud Structure...');
     try {
-      await invoke('save_cloud_credentials', {
+      const result: any = await invoke('save_cloud_credentials', {
         jsonContent: jsonText || '',
         rootFolderId,
       });
-      setStatus('✅ Cloud settings saved successfully!');
+      
+      setStatus(`✅ Cloud Lifecycle Initialized! \n` +
+                `Backup: ${result.backupFolderId}\n` +
+                `Reports Ready: ${result.reportsFolderId}`);
       loadConfig();
       setJsonText('');
     } catch (err) {
@@ -89,58 +88,60 @@ const CloudSettingsContent: React.FC = () => {
 
   return (
     <div style={{ padding: '24px', maxWidth: '800px', position: 'relative' }}>
-      <h1>Cloud Settings</h1>
+      <h1>Cloud Data Lifecycle</h1>
       <p style={{ color: 'var(--text-muted)', marginBottom: '32px' }}>
-        Configure Google Drive Service Account and Target Folder ID.
+        Automated biometric backup to Google Drive Enterprise Storage.
       </p>
 
       {/* Connection Status */}
       <div style={cardStyle}>
-        <h3 style={{ marginBottom: '16px' }}>Connection Status</h3>
+        <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: 8 }}>
+            Connection Status {config?.configured ? <CheckCircle size={18} color="#10b981" /> : <AlertCircle size={18} color="#ef4444" />}
+        </h3>
         {config === null ? <p>Loading...</p> : config.configured ? (
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
-              <div style={statusDot('#10b981')} />
-              <span style={{ color: 'var(--success)', fontWeight: '600' }}>Configured</span>
-            </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
               <div>
-                <span style={labelStyle}>Service Account Email</span>
+                <span style={labelStyle}>Authorized Email</span>
                 <span style={valueStyle}>{config.clientEmail}</span>
               </div>
               <div>
-                <span style={labelStyle}>Target Root Folder ID</span>
+                <span style={labelStyle}>Target Root Folder</span>
                 <span style={valueStyle}>{config.rootFolderId}</span>
               </div>
             </div>
           </div>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={statusDot('#ef4444')} />
-            <span style={{ color: 'var(--error)', fontWeight: '600' }}>Not Configured</span>
+          <div style={{ color: 'var(--error)', fontSize: 13 }}>
+             Cloud synchronization is currently inactive. Set up credentials below.
           </div>
         )}
       </div>
 
       {/* Settings Form */}
       <div style={{ ...cardStyle, marginTop: '24px' }}>
-        <h3 style={{ marginBottom: '20px' }}>Update Configuration</h3>
+        <h3 style={{ marginBottom: '20px' }}>Setup Drive Connector</h3>
 
         <div style={{ marginBottom: '24px' }}>
-          <span style={labelStyle}>Target Root Folder ID</span>
-          <input type="text" value={rootFolderId} onChange={e => setRootFolderId(e.target.value)}
-            style={inputStyle} placeholder="Enter Google Drive Folder ID" />
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-            Default: {AppConfig.defaultRootFolderId}
+          <span style={labelStyle}>Google Drive Folder Link</span>
+          <input 
+            type="text" 
+            value={rootFolderId} 
+            onChange={e => setRootFolderId(e.target.value)}
+            style={inputStyle} 
+            placeholder="Paste folder URL (e.g. https://drive.google.com/drive/folders/ID...)" 
+          />
+          <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>
+            Smart Parser <b>AUTO-EXTRACTS</b> the ID even from full browser links. 
           </p>
         </div>
 
         <div style={{ marginBottom: '24px' }}>
           <span style={labelStyle}>Service Account Key (JSON)</span>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-            <PrimaryButton label="Choose JSON Key File" onClick={() => fileInputRef.current?.click()} />
+            <PrimaryButton label={jsonText ? "✅ File Loaded" : "Upload JSON Key File"} onClick={() => fileInputRef.current?.click()} />
             <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-              {jsonText ? '✅ Key loaded' : (config?.configured ? 'Existing key in use' : 'No key selected')}
+              {jsonText ? 'Press save to apply' : (config?.configured ? 'Existing key active' : 'Request from Google Cloud Console')}
             </span>
           </div>
           <input type="file" accept=".json" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileUpload} />
@@ -150,12 +151,12 @@ const CloudSettingsContent: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <PrimaryButton
             isAccent
-            label={isLoading ? 'Saving...' : '🔐 Save Cloud Settings'}
-            disabled={isLoading}
+            label={isLoading ? 'initializing Structure...' : '🚀 Initialize Cloud Lifecycle'}
+            disabled={isLoading || (!jsonText && !config?.configured)}
             onClick={handleSaveRequest}
           />
           <span style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Lock size={11} /> Master PIN required to save
+            <Lock size={11} /> Master PIN required
           </span>
         </div>
 

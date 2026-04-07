@@ -8,6 +8,16 @@ use super::DeviceDriver;
 
 pub struct ZKTecoDriver;
 
+/// Extract JSON from stdout, skipping any debug text before the JSON object
+fn extract_json_from_stdout(raw: &str) -> serde_json::Value {
+    // Find the first '{' which starts the JSON payload
+    if let Some(start) = raw.find('{') {
+        serde_json::from_str(&raw[start..]).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    }
+}
+
 #[async_trait]
 impl DeviceDriver for ZKTecoDriver {
     fn brand_name(&self) -> &'static str { "ZKTeco" }
@@ -27,7 +37,7 @@ impl DeviceDriver for ZKTecoDriver {
         match output {
             Ok(output) if output.status.success() => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap_or(serde_json::json!({}));
+                let parsed = extract_json_from_stdout(&stdout);
                 let mut attendance_logs = Vec::new();
                 
                 if let Some(attendances) = parsed.get("attendances").and_then(|a| a.as_array()) {
@@ -69,7 +79,7 @@ impl DeviceDriver for ZKTecoDriver {
         match output {
             Ok(output) if output.status.success() => {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap_or(serde_json::json!({}));
+                let parsed = extract_json_from_stdout(&stdout);
                 let mut users = Vec::new();
                 
                 if let Some(users_array) = parsed.get("users").and_then(|u| u.as_array()) {
