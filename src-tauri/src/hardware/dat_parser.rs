@@ -8,12 +8,16 @@ pub fn parse_user_dat(file_path: &str) -> Result<Vec<UserInfo>, String> {
 
     // Depending on ZK version, a user record is typically 72 bytes
     while offset + 72 <= data.len() {
-        let employee_id = u32::from_le_bytes([data[offset], data[offset+1], data[offset+2], data[offset+3]]) as i32;
+        // Read 2-byte ID first (standard for user.dat in many versions)
+        let id_2 = u16::from_le_bytes([data[offset], data[offset+1]]) as i32;
+        let id_4 = u32::from_le_bytes([data[offset+0], data[offset+1], data[offset+2], data[offset+3]]) as i32;
+        
+        // If id_4 is huge, it's likely a 2-byte ID being misread
+        let employee_id = if id_4 > 1000000 { id_2 } else { id_4 };
         
         let mut name_bytes = Vec::new();
-        // Name is usually after ID and some attributes. In many versions, it starts at +24 and is 24-40 bytes.
-        // For standard 72-byte records: ID(4), Privilege(1), Password(8), Name(24), ...
-        for i in 0..24 {
+        // Name is at offset 24 and is typically 24-40 bytes
+        for i in 0..30 {
             let p = data[offset + 24 + i];
             if p == 0 { break; }
             name_bytes.push(p);

@@ -183,7 +183,7 @@ async fn start_adms_listener(app: tauri::AppHandle) {
     println!("[ADMS] Cloud Listener started on port 8081");
     
     for request in server.incoming_requests() {
-        let _ = app.emit("console-log", format!("[ADMS] Received push from {}", request.remote_addr()));
+        let _ = app.emit("console-log", format!("[ADMS] Received push from {:?}", request.remote_addr()));
         // Simplified ADMS logic: acknowledge any push to keep device happy
         let response = Response::from_string("OK");
         let _ = request.respond(response);
@@ -1213,10 +1213,8 @@ pub fn run() {
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             ).ok();
-
+            
             let state = app.state::<AppState>();
-            *state.db.lock().unwrap() = Some(conn);
-
             if let Some((email, pkey, pid, rid)) = config {
                 *state.service_account_key.lock().unwrap() = Some(ServiceAccountKey {
                     client_email: email,
@@ -1243,6 +1241,8 @@ pub fn run() {
                 "UPDATE Devices SET machine_number = 11, is_default = 1 WHERE ip_address = '192.168.192.200'",
                 []
             );
+
+            *state.db.lock().unwrap() = Some(conn);
 
             // Start ADMS Listener
             let h = app.handle().clone();
@@ -1515,18 +1515,22 @@ async fn import_hardware_files(
     branch_id: i64,
     state: State<'_, AppState>,
 ) -> Result<String, AppError> {
-    // 1. Parse Users
-    let users = crate::hardware::dat_parser::parse_user_dat(&user_path)
-        .map_err(|e| AppError::HardwareError(format!("Failed to parse user.dat: {}", e)))?;
-    
-    // 2. Parse Logs
-    let logs = crate::hardware::dat_parser::parse_attlog_dat(&log_path, device_id)
-        .map_err(|e| AppError::HardwareError(format!("Failed to parse attlog.dat: {}", e)))?;
-
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    // 3. Update Employees
+    // 1. Flush Existing Data to remove placeholders (CRITICAL FIX)
+    let _ = conn.execute("DELETE FROM AttendanceLogs", []);
+    let _ = conn.execute("DELETE FROM Employees", []);
+
+    // 2. Parse Users from user.dat
+    let users = crate::hardware::dat_parser::parse_user_dat(&user_path)
+        .map_err(|e| AppError::HardwareError(format!("Failed to parse user.dat: {}", e)))?;
+    
+    // 3. Parse Logs from attlog.dat
+    let logs = crate::hardware::dat_parser::parse_attlog_dat(&log_path, device_id)
+        .map_err(|e| AppError::HardwareError(format!("Failed to parse attlog.dat: {}", e)))?;
+
+    // 4. Update Employees (Verified only)
     for u in &users {
         let _ = conn.execute(
             "INSERT INTO Employees (id, name, branch_id) VALUES (?1, ?2, ?3) \
@@ -1535,7 +1539,7 @@ async fn import_hardware_files(
         );
     }
 
-    // 4. Update Logs
+    // 5. Update Logs (Verified only)
     for log in &logs {
         let _ = conn.execute(
             "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, gate_id, device_id, timestamp, punch_method, is_synced) VALUES (?1, ?2, 1, ?3, ?4, ?5, 0)",
@@ -1543,7 +1547,7 @@ async fn import_hardware_files(
         );
     }
 
-    Ok(format!("Parsed {} users and {} logs from data files.", users.len(), logs.len()))
+    Ok(format!("Successfully flushed DB and imported {} verified staff members and {} logs.", users.len(), logs.len()))
 }
 
 #[tauri::command]
