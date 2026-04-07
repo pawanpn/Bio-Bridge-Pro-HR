@@ -1,34 +1,3 @@
-
-use tauri::Manager;
-
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default()
-        .setup(|app| {
-            // 1. Initialize the Updater Plugin
-            #[cfg(desktop)]
-            app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
-
-            // 2. Example: Background task for ZKTeco real-time logs
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                loop {
-                    // Logic to listen to your ZKTeco device would go here
-                    // Then emit the log to the frontend
-                    handle.emit("new-attendance-log", "User 101 Clocked In").unwrap();
-                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
-                }
-            });
-
-            Ok(())
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
-}
-
-
-
-
 mod db;
 mod hardware;
 mod cloud;
@@ -437,6 +406,8 @@ async fn sync_device_logs(
             let _ = app.emit("sync-error", format!("Connection to {}:{} failed: {}", ip, port, e));
             e
         })?;
+
+    let _ = app.emit("sync-progress", format!("Syncing {} Employees... Mapping {} Attendance Logs...", user_info_result.len(), logs.len()));
 
     let _ = app.emit("console-log", format!(
         "[{} UTC] {} attendance logs pulled from {}:{} ({})",
@@ -1105,7 +1076,10 @@ fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, 
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
     
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let mut today: String = conn.query_row("SELECT MAX(substr(timestamp, 1, 10)) FROM AttendanceLogs", [], |r| r.get(0)).unwrap_or_else(|_| String::new());
+    if today.is_empty() {
+        today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    }
     let today_pattern = format!("{}%", today);
 
     // RBAC: If ADMIN, restrict to their branch
@@ -1305,7 +1279,7 @@ fn get_raw_logs(
             al.id, 
             e.name, 
             al.timestamp, 
-            al.log_type, 
+            al.punch_method as log_type, 
             d.name as device
         FROM AttendanceLogs al
         JOIN Employees e ON al.employee_id = e.id
@@ -1330,6 +1304,89 @@ fn get_raw_logs(
     })?;
 
     Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[tauri::command]
+async fn export_usb_db(state: State<'_, AppState>) -> Result<String, AppError> {
+    let home_dir = std::env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string());
+    let desktop_dir = std::path::Path::new(&home_dir).join("Desktop");
+    let export_path = desktop_dir.join(format!("Attendance_{}.db", chrono::Local::now().format("%Y%m%d_%H%M%S")));
+    
+    // Create new DB file
+    let mut conn_out = Connection::open(&export_path).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    
+    // Create exact schema provided by user
+    conn_out.execute(
+        "CREATE TABLE Attendance (
+            DeviceID INTEGER (0) NOT NULL,
+            UserID INT NOT NULL,
+            AttDateTime DATETIME NOT NULL,
+            VerifyMode INT NOT NULL,
+            InOutMode INT NOT NULL,
+            CreatedOn DATETIME NOT NULL,
+            PRIMARY KEY (DeviceID, UserID, AttDateTime)
+        )",
+        []
+    ).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+
+    // Create index
+    conn_out.execute("CREATE INDEX sqlite_autoindex_Attendance_1 ON Attendance (DeviceID, UserID, AttDateTime)", []).ok();
+
+    // Fetch local data
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn_in = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn_in.prepare("
+        SELECT al.device_id, al.employee_id, al.timestamp, al.punch_method 
+        FROM AttendanceLogs al
+    ").map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    
+    let rows: Vec<(i32, i32, String, Option<String>)> = stmt.query_map([], |row| {
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?
+        ))
+    }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
+
+    // Insert into output db
+    let tx = conn_out.transaction().map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    {
+        let mut ins_stmt = tx.prepare(
+            "INSERT OR IGNORE INTO Attendance (DeviceID, UserID, AttDateTime, VerifyMode, InOutMode, CreatedOn) VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+        ).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+
+        let created_on = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        for (device_id, emp_id, timestamp, _method) in rows {
+            // VerifyMode (0=Password, 1=Fingerprint, 2=Card, 15=Face - Using 1 as default)
+            // InOutMode (0=Check-In, 1=Check-Out - Using 0 as default)
+            let _ = ins_stmt.execute(rusqlite::params![
+                device_id,
+                emp_id,
+                timestamp,
+                1,
+                0,
+                created_on
+            ]);
+        }
+    }
+    tx.commit().map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    
+    // Also create the matching sqlitestudio_temp_table for full compatibility
+    conn_out.execute(
+        "CREATE TABLE \"sqlitestudio_temp_table\" (
+            DeviceID INTEGER (0) NOT NULL,
+            UserID INT NOT NULL,
+            AttDateTime DATETIME NOT NULL,
+            VerifyMode INT NOT NULL,
+            InOutMode INT NOT NULL,
+            CreatedOn DATETIME NOT NULL,
+            PRIMARY KEY (DeviceID, UserID, AttDateTime)
+        )", []
+    ).ok();
+
+    Ok(export_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -1647,6 +1704,7 @@ pub fn run() {
             is_master_pin_set,
             get_daily_reports,
             get_raw_logs,
+            export_usb_db,
             get_departments,
             get_monthly_summary,
             get_monthly_ledger,
