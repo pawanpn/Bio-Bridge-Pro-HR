@@ -6,8 +6,6 @@ use crate::models::AttendanceLog;
 use crate::errors::AppError;
 use super::DeviceDriver;
 
-const CONNECT_TIMEOUT_SECS: u64 = 10;
-
 pub struct ZKTecoDriver;
 
 #[async_trait]
@@ -139,7 +137,8 @@ impl DeviceDriver for ZKTecoDriver {
             Ok(Ok(mut stream)) => {
                 use tokio::io::{AsyncWriteExt, AsyncReadExt};
                 let pkt = assemble_zk_packet(ZKCommand::Connect, 0, 0, &[]); // Simple TCP probe
-                let mut tcp_pkt = vec![0x50, 0x50, 0x82, 0x7d, pkt.len() as u8, 0x00]; // TCP Header (simplified)
+                let len_bytes = (pkt.len() as u32).to_le_bytes();
+                let mut tcp_pkt = vec![0x50, 0x50, 0x82, 0x7d, len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]; // TCP Header (8 bytes)
                 tcp_pkt.extend_from_slice(&pkt);
                 let _ = stream.write_all(&tcp_pkt).await;
                 let mut buf = [0u8; 64];
@@ -205,11 +204,11 @@ async fn establish_zk_session_udp(socket: &tokio::net::UdpSocket, ip: &str, port
 
     // 2. Identification: Use Device ID 11 as requested. 
     // In ZK, the data block for Connect can contain either the Comm Key or the Device ID.
-    let mut data = if comm_key > 0 { 
+    let data = if comm_key > 0 { 
         comm_key.to_le_bytes().to_vec() 
     } else { 
-        // If comm_key is 0, we identify specifically with the machine_number (11)
-        (machine_number as u16).to_le_bytes().to_vec() 
+        // Standard convention: if no comm_key is set, the payload should be purely empty, not the machine number.
+        vec![]
     };
 
     let pkt = assemble_zk_packet(ZKCommand::Connect, 0, 0, &data);

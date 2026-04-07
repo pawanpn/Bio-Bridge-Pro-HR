@@ -1309,6 +1309,7 @@ pub fn run() {
             get_dashboard_stats,
             test_device_connection,
             add_device,
+            update_device,
             save_device_config,
             delete_device,
             get_active_devices,
