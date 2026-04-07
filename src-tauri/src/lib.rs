@@ -1584,6 +1584,103 @@ fn list_branches(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, A
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// Get monthly attendance history for a specific employee (drill-down from dashboard)
+#[tauri::command]
+fn get_employee_monthly_attendance(
+    state: State<'_, AppState>,
+    employee_id: i64,
+    year: i32,
+    month: i32, // 1-12
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    // Fetch employee info
+    let (name, dept, branch_name, status) = conn.query_row(
+        "SELECT e.name, IFNULL(e.department, 'N/A'), b.name, IFNULL(e.status, 'active') FROM Employees e JOIN Branches b ON e.branch_id = b.id WHERE e.id = ?1",
+        params![employee_id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+    ).unwrap_or(("Unknown".into(), "Unknown".into(), "Unknown".into(), "unknown".into()));
+
+    let month_pattern = format!("{:04}-{:02}-%", year, month);
+
+    // All attendance logs for the month
+    let mut stmt = conn.prepare("
+        SELECT al.timestamp, al.punch_method, d.name, al.device_id
+        FROM AttendanceLogs al
+        LEFT JOIN Devices d ON al.device_id = d.id
+        WHERE al.employee_id = ?1 AND al.timestamp LIKE ?2
+        ORDER BY al.timestamp ASC
+    ")?;
+
+    let logs = stmt.query_map(params![employee_id, month_pattern], |row| {
+        let timestamp: String = row.get(0)?;
+        let method: Option<String> = row.get(1)?;
+        let device_name: Option<String> = row.get(2)?;
+        let device_id: Option<i32> = row.get(3)?;
+
+        let source_tag = device_name.unwrap_or_else(|| "Manual Entry".to_string());
+
+        Ok(serde_json::json!({
+            "timestamp": timestamp,
+            "method": method.unwrap_or("Unknown".into()),
+            "source": source_tag,
+            "deviceId": device_id.unwrap_or(0),
+        }))
+    })?.filter_map(|r| r.ok()).collect::<Vec<serde_json::Value>>();
+
+    // Compute summary stats for the month
+    let mut daily_map: std::collections::HashMap<String, Vec<&serde_json::Value>> = std::collections::HashMap::new();
+    for log in &logs {
+        let day = log["timestamp"].as_str().unwrap_or("").split(' ').next().unwrap_or("").to_string();
+        if !day.is_empty() {
+            daily_map.entry(day).or_default().push(log);
+        }
+    }
+
+    let days_present = daily_map.len() as i32;
+    let total_punches = logs.len() as i32;
+
+    // Find earliest check-in and latest check-out per day for summary
+    let mut first_in: Option<String> = None;
+    let mut last_out: Option<String> = None;
+    for log in &logs {
+        let ts = log["timestamp"].as_str().unwrap_or("").to_string();
+        if first_in.is_none() { first_in = Some(ts.clone()); }
+        last_out = Some(ts);
+    }
+
+    // Late days count (first punch after 09:15)
+    let mut late_days = 0;
+    for (_day, day_logs) in &daily_map {
+        if let Some(first) = day_logs.first() {
+            let ts = first["timestamp"].as_str().unwrap_or("");
+            if ts.len() >= 16 {
+                let time_part = &ts[11..16];
+                if time_part > "09:15" {
+                    late_days += 1;
+                }
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "employeeId": employee_id,
+        "name": name,
+        "department": dept,
+        "branch": branch_name,
+        "status": status,
+        "year": year,
+        "month": month,
+        "daysPresent": days_present,
+        "totalPunches": total_punches,
+        "lateDays": late_days,
+        "firstCheckIn": first_in.unwrap_or_default(),
+        "lastCheckOut": last_out.unwrap_or_default(),
+        "logs": logs,
+    }))
+}
+
 #[tauri::command]
 fn get_employee_profile(
     state: State<'_, AppState>,
@@ -1763,6 +1860,7 @@ pub fn run() {
             add_device,
             update_device,
             get_employee_profile,
+            get_employee_monthly_attendance,
             save_device_config,
             delete_device,
             get_active_devices,
