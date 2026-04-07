@@ -1,5 +1,4 @@
-use tokio::net::TcpStream;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UdpSocket;
 use async_trait::async_trait;
 use std::time::Duration;
 use tauri::Emitter;
@@ -15,46 +14,41 @@ pub struct ZKTecoDriver;
 impl DeviceDriver for ZKTecoDriver {
     fn brand_name(&self) -> &'static str { "ZKTeco" }
 
-    async fn sync_logs(&self, ip: &str, port: u16, device_id: i32) -> Result<Vec<AttendanceLog>, AppError> {
-        let mut stream = connect_device(ip, port).await?;
-
-        // 1. Send Connect CMD (0x03e8)
-        let connect_packet = assemble_zk_packet(ZKCommand::Connect, 0, 0, &[]);
-        stream.write_all(&connect_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
-
-        let mut buf = [0u8; 1024];
-        let n = stream.read(&mut buf).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
-        if n < 8 { return Err(AppError::ConnectionError("Invalid response from device".to_string())); }
-
-        // 2. Clear Session ID
-        let session_id = u16::from_le_bytes([buf[8+4], buf[8+5]]);
-
-        // 3. Request Attendance Logs (0x000d)
-        let log_packet = assemble_zk_packet(ZKCommand::AttLogRrq, session_id, 1, &[]);
-        stream.write_all(&log_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
-
-        let mut log_buf = vec![0u8; 512 * 1024]; // 512KB for massive history
-        let bytes_read = stream.read(&mut log_buf).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
-
-        // 4. Parse Logs
-        // ZKTeco Attendance logs in the binary buffer start after the 8-byte header.
-        // Each record is typically 12 bytes: UserID(4), Type(1), Timestamp(4), etc.
-        let mut attendance_logs = Vec::new();
-        let mut offset = 8; // skip header
+    async fn sync_logs(&self, ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32) -> Result<Vec<AttendanceLog>, AppError> {
+        let socket = connect_device_udp(ip, port).await?;
         
-        while offset + 12 <= bytes_read {
-            let employee_id = u32::from_le_bytes([log_buf[offset], log_buf[offset+1], log_buf[offset+2], log_buf[offset+3]]) as i32;
-            // Simplified timestamp extraction (in a real scenario, this is a bit-packed 32-bit int)
-            // For now, we use a placeholder or convert correctly if possible.
-            let raw_ts = u32::from_le_bytes([log_buf[offset+6], log_buf[offset+7], log_buf[offset+8], log_buf[offset+9]]);
+        let session_id = establish_zk_session_udp(&socket, ip, port, comm_key, machine_number).await?;
+        println!("[ZK @ {}] UDP Session ID: {}", ip, session_id);
+
+        let log_packet = assemble_zk_packet(ZKCommand::AttLogRrq, session_id, 1, &[]);
+        socket.send_to(&log_packet, format!("{}:{}", ip, port)).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+
+        let mut attendance_logs = Vec::new();
+        let mut full_log_buf = Vec::new();
+        
+        // Read chunks (UDP might fragment or require multiple reads for large data)
+        let mut buf = [0u8; 2048];
+        loop {
+            let result = tokio::time::timeout(Duration::from_secs(3), socket.recv_from(&mut buf)).await;
+            match result {
+                Ok(Ok((n, _))) if n > 8 => {
+                    full_log_buf.extend_from_slice(&buf[0..n]);
+                    // If we receive a packet smaller than buffer or containing ACK, we might be done
+                    if n < 2048 { break; }
+                }
+                _ => break,
+            }
+        }
+
+        if full_log_buf.is_empty() {
+             return Err(AppError::HardwareError("Device returned no data (UDP Timeout)".into()));
+        }
+
+        let mut offset = 8;
+        while offset + 12 <= full_log_buf.len() {
+            let employee_id = u32::from_le_bytes([full_log_buf[offset], full_log_buf[offset+1], full_log_buf[offset+2], full_log_buf[offset+3]]) as i32;
+            let raw_ts = u32::from_le_bytes([full_log_buf[offset+6], full_log_buf[offset+7], full_log_buf[offset+8], full_log_buf[offset+9]]);
             
-            // Decoded ZK Timestamp logic:
-            // Year: ((ts >> 26) & 0x3f) + 2000
-            // Month: (ts >> 22) & 0x0f
-            // Day: (ts >> 17) & 0x1f
-            // Hour: (ts >> 12) & 0x1f
-            // Min: (ts >> 6) & 0x3f
-            // Sec: ts & 0x3f
             let year  = ((raw_ts >> 26) & 0x3f) + 2000;
             let month = (raw_ts >> 22) & 0x0f;
             let day   = (raw_ts >> 17) & 0x1f;
@@ -62,159 +56,184 @@ impl DeviceDriver for ZKTecoDriver {
             let min   = (raw_ts >> 6) & 0x3f;
             let sec   = raw_ts & 0x3f;
 
+            let verify_mode = full_log_buf[offset+4];
+            let punch_method = match verify_mode {
+                1 => "Finger".to_string(),
+                2 => "Card".to_string(),
+                15 | 25 => "Face".to_string(),
+                0 => "Password".to_string(),
+                _ => format!("Mode {}", verify_mode)
+            };
+
             let timestamp = format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hour, min, sec);
 
             if employee_id > 0 {
-                attendance_logs.push(AttendanceLog {
-                    device_id,
-                    employee_id,
-                    timestamp,
-                });
+                attendance_logs.push(AttendanceLog { device_id, employee_id, timestamp, punch_method });
             }
             offset += 12;
         }
 
-        // 5. Cleanup session (Disconnect)
-        let _ = stream.write_all(&assemble_zk_packet(ZKCommand::Exit, session_id, 2, &[])).await;
-
+        let _ = socket.send_to(&assemble_zk_packet(ZKCommand::Exit, session_id, 2, &[]), format!("{}:{}", ip, port)).await;
         Ok(attendance_logs)
     }
 
-    async fn get_all_user_info(&self, ip: &str, port: u16) -> Result<Vec<crate::models::UserInfo>, AppError> {
-        let mut stream = connect_device(ip, port).await?;
+    async fn get_all_user_info(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32) -> Result<Vec<crate::models::UserInfo>, AppError> {
+        let socket = connect_device_udp(ip, port).await?;
+        let session_id = establish_zk_session_udp(&socket, ip, port, comm_key, machine_number).await?;
 
-        // 1. Send Connect CMD
-        let connect_packet = assemble_zk_packet(ZKCommand::Connect, 0, 0, &[]);
-        stream.write_all(&connect_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
-
-        let mut buf = [0u8; 1024];
-        let n = stream.read(&mut buf).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
-        if n < 8 { return Err(AppError::ConnectionError("Invalid response".to_string())); }
-
-        let session_id = u16::from_le_bytes([buf[8+4], buf[8+5]]);
-
-        // 2. Request User Info (0x0009)
-        let log_packet = assemble_zk_packet(ZKCommand::UserInfoRrq, session_id, 1, &[]);
-        stream.write_all(&log_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
-
-        let mut out_buf = vec![0u8; 128 * 1024];
-        let bytes_read = stream.read(&mut out_buf).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+        let user_packet = assemble_zk_packet(ZKCommand::UserInfoRrq, session_id, 1, &[]);
+        socket.send_to(&user_packet, format!("{}:{}", ip, port)).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
 
         let mut users = Vec::new();
+        let mut buf = [0u8; 2048];
+        let mut full_buf = Vec::new();
+
+        loop {
+            let result = tokio::time::timeout(Duration::from_secs(3), socket.recv_from(&mut buf)).await;
+            match result {
+                Ok(Ok((n, _))) if n > 8 => {
+                    full_buf.extend_from_slice(&buf[0..n]);
+                    if n < 2048 { break; }
+                }
+                _ => break,
+            }
+        }
+
         let mut offset = 8;
-        
-        while offset + 72 <= bytes_read {
-            // Rough heuristic: in standard ZKTeco, User ID (int) is at 0, User ID (str) at 4, Name at 24
-            let employee_id = u32::from_le_bytes([out_buf[offset], out_buf[offset+1], out_buf[offset+2], out_buf[offset+3]]) as i32;
-            
-            // Name is max 24 chars starting at offset+24
+        while offset + 72 <= full_buf.len() {
+            let employee_id = u32::from_le_bytes([full_buf[offset], full_buf[offset+1], full_buf[offset+2], full_buf[offset+3]]) as i32;
             let mut name_bytes = Vec::new();
             for i in 0..24 {
-                let p = out_buf[offset + 24 + i];
+                let p = full_buf[offset + 24 + i];
                 if p == 0 { break; }
                 name_bytes.push(p);
             }
             let name = String::from_utf8_lossy(&name_bytes).trim().to_string();
-            let name = if name.is_empty() { format!("Employee {}", employee_id) } else { name };
-
             if employee_id > 0 {
-                users.push(crate::models::UserInfo { employee_id, name });
+                users.push(crate::models::UserInfo { employee_id, name: if name.is_empty() { format!("User {}", employee_id) } else { name } });
             }
-            // Length of each user record may vary (72 is common, or 28, 40 etc). We assume standard structured response.
-            // If the buffer doesn't match, we fallback to our generic loop and hope it aligns. 
-            // Better to iterate by fixed bytes for 72-byte structure.
             offset += 72;
         }
 
-        let _ = stream.write_all(&assemble_zk_packet(ZKCommand::Exit, session_id, 2, &[])).await;
-
+        let _ = socket.send_to(&assemble_zk_packet(ZKCommand::Exit, session_id, 2, &[]), format!("{}:{}", ip, port)).await;
         Ok(users)
     }
 
-    async fn test_connectivity(&self, ip: &str, port: u16) -> Result<(), AppError> {
-        let _stream = connect_device(ip, port).await?;
-        Ok(())
+    async fn test_connectivity(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32) -> Result<(), AppError> {
+        // 1. Try UDP first (standard)
+        let socket = connect_device_udp(ip, port).await?;
+        if establish_zk_session_udp(&socket, ip, port, comm_key, machine_number).await.is_ok() {
+            return Ok(());
+        }
+
+        // 2. Try TCP fallback (some devices/networks prefer TCP)
+        let addr = format!("{}:{}", ip, port);
+        match tokio::time::timeout(Duration::from_secs(3), tokio::net::TcpStream::connect(&addr)).await {
+            Ok(Ok(mut stream)) => {
+                use tokio::io::{AsyncWriteExt, AsyncReadExt};
+                let pkt = assemble_zk_packet(ZKCommand::Connect, 0, 0, &[]); // Simple TCP probe
+                let mut tcp_pkt = vec![0x50, 0x50, 0x82, 0x7d, pkt.len() as u8, 0x00]; // TCP Header (simplified)
+                tcp_pkt.extend_from_slice(&pkt);
+                let _ = stream.write_all(&tcp_pkt).await;
+                let mut buf = [0u8; 64];
+                if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_secs(2), stream.read(&mut buf)).await {
+                    if n > 0 { return Ok(()); }
+                }
+            }
+            _ => {}
+        }
+        
+        Err(AppError::ConnectionError(format!("Device at {} unreachable via UDP or TCP on port {}", ip, port)))
     }
 
-    async fn listen_realtime(&self, ip: &str, port: u16, device_id: i32, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError> {
-        let mut stream = connect_device(ip, port).await?;
+    async fn listen_realtime(&self, ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError> {
+        let socket = connect_device_udp(ip, port).await?;
+        let session_id = establish_zk_session_udp(&socket, ip, port, comm_key, machine_number).await?;
 
-        // 1. Connect
-        let connect_packet = assemble_zk_packet(ZKCommand::Connect, 0, 0, &[]);
-        stream.write_all(&connect_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
-        let mut buf = [0u8; 1024];
-        let n = stream.read(&mut buf).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
-        if n < 8 { return Err(AppError::ConnectionError("Invalid response".to_string())); }
-        let session_id = u16::from_le_bytes([buf[8+4], buf[8+5]]);
-
-        // 2. Register for Attendance Events (0x01)
         let reg_packet = assemble_zk_packet(ZKCommand::RegEvent, session_id, 1, &[0x01, 0x00, 0x00, 0x00]);
-        stream.write_all(&reg_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+        socket.send_to(&reg_packet, format!("{}:{}", ip, port)).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
 
-        // 3. Listen Loop
-        let mut event_buf = [0u8; 1024];
+        let mut buf = [0u8; 1024];
         loop {
-            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
-                 let _ = stream.write_all(&assemble_zk_packet(ZKCommand::Exit, session_id, 2, &[])).await;
-                 break; 
-            }
-            match stream.read(&mut event_buf).await {
-                Ok(0) => break, // Connection closed
-                Ok(bytes) if bytes >= 8 => {
-                    // Check for attendance event (simplified)
-                    // In real ZK protocol, we check for CMD_REG_EVENT responses or 
-                    // spontaneous packets with attendance payload.
-                    let cmd_reply = u16::from_le_bytes([event_buf[8], event_buf[9]]);
-                    if cmd_reply == 0x0500 { // Real-time event magic
-                         let employee_id = u32::from_le_bytes([event_buf[16], event_buf[17], event_buf[18], event_buf[19]]) as i32;
-                         let now = chrono::Utc::now().to_rfc3339();
-                         
+            if cancel.load(std::sync::atomic::Ordering::SeqCst) { break; }
+            match tokio::time::timeout(Duration::from_millis(500), socket.recv_from(&mut buf)).await {
+                Ok(Ok((n, _))) if n >= 12 => {
+                    let cmd_reply = u16::from_le_bytes([buf[0], buf[1]]);
+                    if cmd_reply == 0x0500 {
+                         let emp_id = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]) as i32;
+                         let verify_mode = buf[12];
+                         let punch_method = match verify_mode {
+                             1 => "Finger".to_string(),
+                             2 => "Card".to_string(),
+                             15 | 25 => "Face".to_string(),
+                             0 => "Password".to_string(),
+                             _ => format!("Mode {}", verify_mode)
+                         };
                          let _ = app_handle.emit("realtime-punch", serde_json::json!({
-                             "device_id": device_id,
-                             "employee_id": employee_id,
-                             "timestamp": now,
-                             "brand": "ZKTeco"
+                             "device_id": device_id, "employee_id": emp_id, "timestamp": chrono::Utc::now().to_rfc3339(), "punch_method": punch_method
                          }));
                     }
                 }
                 _ => {}
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
         }
         Ok(())
     }
 }
 
-#[repr(u16)]
-#[derive(Clone, Copy)]
-#[allow(dead_code)]
-pub enum ZKCommand {
-    Connect     = 0x03e8, 
-    Exit        = 0x000b, 
-    AttLogRrq   = 0x000d, 
-    UserInfoRrq = 0x0009,
-    RegEvent    = 0x0041,
+async fn connect_device_udp(_ip: &str, _port: u16) -> Result<UdpSocket, AppError> {
+    let socket = UdpSocket::bind("0.0.0.0:0").await.map_err(|e| AppError::ConnectionError(format!("Socket bind failed: {}", e)))?;
+    Ok(socket)
 }
 
-fn create_checksum(data: &[u8]) -> u16 {
-    let mut sum: u32 = 0;
-    let mut i = 0;
-    let len = data.len();
-    while i + 1 < len {
-        let chunk = (data[i] as u32) | ((data[i + 1] as u32) << 8);
-        sum += chunk;
-        i += 2;
+async fn establish_zk_session_udp(socket: &tokio::net::UdpSocket, ip: &str, port: u16, comm_key: i32, machine_number: i32) -> Result<u16, AppError> {
+    let addr = format!("{}:{}", ip, port);
+    // Explicitly connect the socket to the remote address to help with some OS firewall filters
+    let _ = socket.connect(&addr).await;
+
+    // If comm_key is provided, use it. Some devices also want the machine_number (Device ID) 
+    // for identification in the data block if it's not the default 1.
+    let mut data = if comm_key > 0 { comm_key.to_le_bytes().to_vec() } else { vec![] };
+    if machine_number > 1 && data.is_empty() {
+        data.extend_from_slice(&(machine_number as u16).to_le_bytes());
     }
-    if i < len { sum += data[i] as u32; }
-    while (sum >> 16) > 0 { sum = (sum & 0xffff) + (sum >> 16); }
-    !(sum as u16)
+
+    let pkt = assemble_zk_packet(ZKCommand::Connect, 0, 0, &data);
+
+    // ZK UDP is unreliable; retry the first handshake packet up to 3 times
+    let mut buf = [0u8; 1024];
+    for attempt in 1..=3 {
+        if let Err(e) = socket.send(&pkt).await {
+            if attempt == 3 { return Err(AppError::ConnectionError(e.to_string())); }
+            continue;
+        }
+
+        match tokio::time::timeout(Duration::from_secs(3), socket.recv(&mut buf)).await {
+            Ok(Ok(n)) if n >= 8 => {
+                let reply_code = u16::from_le_bytes([buf[0], buf[1]]);
+                if reply_code == 0x07d5 { return Err(AppError::ConnectionError("Authentication Failed: Check Comm Key".into())); }
+                let session_id = u16::from_le_bytes([buf[4], buf[5]]);
+                return Ok(session_id);
+            }
+            _ => {
+                eprintln!("[ZK @ {}] Connect attempt {}/3 timed out, retrying...", ip, attempt);
+                if attempt == 3 { return Err(AppError::TimeoutError(9, attempt)); }
+            }
+        }
+    }
+    Err(AppError::TimeoutError(9, 3))
+}
+
+#[repr(u16)]
+#[derive(Clone, Copy)]
+pub enum ZKCommand {
+    Connect = 0x03e8, Exit = 0x000b, AttLogRrq = 0x000d, UserInfoRrq = 0x0009, RegEvent = 0x0041,
 }
 
 pub fn assemble_zk_packet(cmd: ZKCommand, session_id: u16, reply_id: u16, data: &[u8]) -> Vec<u8> {
     let mut payload = Vec::with_capacity(8 + data.len());
-    let cmd_val = cmd as u16;
-    payload.extend_from_slice(&cmd_val.to_le_bytes());
-    payload.extend_from_slice(&[0x00, 0x00]); // checksum placeholder
+    payload.extend_from_slice(&(cmd as u16).to_le_bytes());
+    payload.extend_from_slice(&[0x00, 0x00]); // checksum
     payload.extend_from_slice(&session_id.to_le_bytes());
     payload.extend_from_slice(&reply_id.to_le_bytes());
     payload.extend_from_slice(data);
@@ -223,24 +242,17 @@ pub fn assemble_zk_packet(cmd: ZKCommand, session_id: u16, reply_id: u16, data: 
     let cs = checksum.to_le_bytes();
     payload[2] = cs[0];
     payload[3] = cs[1];
-
-    let size = payload.len() as u32;
-    let mut pkt = vec![0x50, 0x50, 0x82, 0x7d];
-    pkt.extend_from_slice(&size.to_le_bytes());
-    pkt.extend(payload);
-    pkt
+    payload
 }
 
-pub async fn connect_device(ip: &str, port: u16) -> Result<TcpStream, AppError> {
-    let addr = format!("{}:{}", ip, port);
-    match tokio::time::timeout(
-        Duration::from_secs(CONNECT_TIMEOUT_SECS),
-        TcpStream::connect(&addr),
-    )
-    .await
-    {
-        Ok(Ok(stream)) => Ok(stream),
-        Ok(Err(e)) => Err(AppError::ConnectionError(format!("Refused on {}: {}", addr, e))),
-        Err(_) => Err(AppError::TimeoutError(CONNECT_TIMEOUT_SECS, 1)),
+fn create_checksum(data: &[u8]) -> u16 {
+    let mut sum: u32 = 0;
+    let mut i = 0;
+    while i + 1 < data.len() {
+        sum += (data[i] as u32) | ((data[i + 1] as u32) << 8);
+        i += 2;
     }
+    if i < data.len() { sum += data[i] as u32; }
+    while (sum >> 16) > 0 { sum = (sum & 0xffff) + (sum >> 16); }
+    !(sum as u16)
 }

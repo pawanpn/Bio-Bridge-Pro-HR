@@ -61,15 +61,22 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Devices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            branch_id INTEGER NOT NULL,
-            gate_id INTEGER NOT NULL DEFAULT 1,
             name TEXT NOT NULL,
             brand TEXT NOT NULL,
             ip_address TEXT NOT NULL,
-            port INTEGER DEFAULT 4370,
-            status TEXT DEFAULT 'offline',
-            FOREIGN KEY(branch_id) REFERENCES Branches(id),
-            FOREIGN KEY(gate_id) REFERENCES Gates(id)
+            port INTEGER NOT NULL,
+            comm_key INTEGER DEFAULT 0,
+            machine_number INTEGER DEFAULT 1,
+            is_default INTEGER DEFAULT 0,
+            branch_id INTEGER REFERENCES Branches(id),
+            gate_id INTEGER REFERENCES Gates(id),
+            subnet_mask TEXT,
+            gateway TEXT,
+            dns TEXT,
+            dhcp INTEGER DEFAULT 0,
+            server_mode TEXT,
+            server_address TEXT,
+            https_enabled INTEGER DEFAULT 0
         )",
         [],
     )?;
@@ -83,6 +90,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             device_id INTEGER NOT NULL,
             timestamp TEXT NOT NULL,
             log_type TEXT,
+            punch_method TEXT,
             is_synced INTEGER DEFAULT 0,
             FOREIGN KEY(employee_id) REFERENCES Employees(id),
             FOREIGN KEY(branch_id) REFERENCES Branches(id),
@@ -140,7 +148,18 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
 
     // Migration for existing tables (ensure columns exist)
     let _ = conn.execute("ALTER TABLE Devices ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE Devices ADD COLUMN comm_key INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE Devices ADD COLUMN is_default INTEGER DEFAULT 0", []);
+    let columns = vec![
+        ("subnet_mask", "TEXT"), ("gateway", "TEXT"), ("dns", "TEXT"), 
+        ("dhcp", "INTEGER DEFAULT 0"), ("server_mode", "TEXT"), 
+        ("server_address", "TEXT"), ("https_enabled", "INTEGER DEFAULT 0")
+    ];
+    for (col, col_type) in columns {
+        let _ = conn.execute(&format!("ALTER TABLE Devices ADD COLUMN {} {}", col, col_type), []);
+    }
     let _ = conn.execute("ALTER TABLE AttendanceLogs ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE AttendanceLogs ADD COLUMN punch_method TEXT", []);
     let _ = conn.execute("ALTER TABLE Users ADD COLUMN must_change_password INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE Employees ADD COLUMN status TEXT DEFAULT 'active'", []);
 

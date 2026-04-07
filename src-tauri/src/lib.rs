@@ -168,6 +168,28 @@ async fn admin_generate_keys(
     cloud::gdrive::update_license_database(&sa_key, folder_id, serde_json::Value::Object(db.clone())).await?;
     Ok(new_keys)
 }
+#[tauri::command]
+fn check_port_conflict(port: u16) -> Result<bool, AppError> {
+    use std::net::UdpSocket;
+    match UdpSocket::bind(format!("0.0.0.0:{}", port)) {
+        Ok(_) => Ok(false), // Port is free
+        Err(_) => Ok(true), // Port is in use
+    }
+}
+
+async fn start_adms_listener(app: tauri::AppHandle) {
+    use tiny_http::{Server, Response};
+    let server = Server::http("0.0.0.0:8081").unwrap();
+    println!("[ADMS] Cloud Listener started on port 8081");
+    
+    for request in server.incoming_requests() {
+        let _ = app.emit("console-log", format!("[ADMS] Received push from {}", request.remote_addr()));
+        // Simplified ADMS logic: acknowledge any push to keep device happy
+        let response = Response::from_string("OK");
+        let _ = request.respond(response);
+        // Note: Real parsing requires handling /iclock/cdata or /iclock/getrequest
+    }
+}
 
 #[tauri::command]
 fn get_license_info(app: AppHandle, state: State<'_, AppState>) -> Result<String, AppError> {
@@ -246,51 +268,61 @@ async fn sync_device_logs(
         chrono::Utc::now().format("%H:%M:%S"), device_id, ip, port, brand
     ));
 
-    // 0. Lookup device's assigned branch and gate FROM DB (device_id is the unique key)
-    let (branch_id, gate_id, branch_name, gate_name) = {
+    // 0. Lookup device configuration from DB
+    let (branch_id, gate_id, branch_name, gate_name, comm_key, machine_number) = {
         let db_guard = state.db.lock().map_err(lock_err)?;
         let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
         conn.query_row(
-            "SELECT d.branch_id, d.gate_id, b.name, g.name 
+            "SELECT d.branch_id, d.gate_id, b.name, g.name, d.comm_key, d.machine_number 
              FROM Devices d
              JOIN Branches b ON d.branch_id = b.id
              JOIN Gates g ON d.gate_id = g.id
              WHERE d.id = ?1",
             params![device_id],
-            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
-        ).unwrap_or((1, 1, "Head Office".to_string(), "Main Gate".to_string()))
+            |row| Ok((
+                row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, 
+                row.get::<_, String>(2)?, row.get::<_, String>(3)?,
+                row.get::<_, i32>(4)?, row.get::<_, i32>(5)?
+            ))
+        ).unwrap_or((1, 1, "Head Office".to_string(), "Main Gate".to_string(), 0, 1))
     };
 
-    // 1a. Fetch real user info first — update employee names in DB
-    let user_info_result = crate::hardware::get_all_user_info(&ip, port, parsed_brand.clone()).await;
-    match &user_info_result {
-        Ok(users) => {
-            let _ = app.emit("console-log", format!(
-                "[{}] {} staff records fetched from device at {}:{}",
-                chrono::Utc::now().format("%H:%M:%S"), users.len(), ip, port
-            ));
-            let db_guard = state.db.lock().map_err(lock_err)?;
-            if let Some(conn) = db_guard.as_ref() {
-                for u in users {
-                    let _ = conn.execute(
-                        "INSERT INTO Employees (id, name, branch_id) VALUES (?1, ?2, ?3) \
-                         ON CONFLICT(id) DO UPDATE SET name = excluded.name",
-                        params![u.employee_id, u.name, branch_id],
-                    );
-                }
+    // 1a. Step A: Fetch real user info first (Identify Users)
+    let user_info_result = crate::hardware::get_all_user_info(&ip, port, comm_key, machine_number, parsed_brand.clone()).await
+        .map_err(|e| {
+            let _ = app.emit("console-log", format!("[ERROR] Handshake/User pull failed: {}", e));
+            e
+        })?;
+
+    if user_info_result.is_empty() {
+        let err_msg = "Handshake OK but no staff members found on device. Sync aborted.".to_string();
+        let _ = app.emit("console-log", format!("[ERROR] {}", err_msg));
+        return Err(crate::errors::AppError::HardwareError(err_msg));
+    }
+
+    let _ = app.emit("console-log", format!(
+        "[{}] STEP A SUCCESS: {} staff found from device {}:{}",
+        chrono::Utc::now().format("%H:%M:%S"), user_info_result.len(), ip, port
+    ));
+
+    // Update employee records in DB
+    {
+        let db_guard = state.db.lock().map_err(lock_err)?;
+        if let Some(conn) = db_guard.as_ref() {
+            for u in &user_info_result {
+                let _ = conn.execute(
+                    "INSERT INTO Employees (id, name, branch_id) VALUES (?1, ?2, ?3) \
+                     ON CONFLICT(id) DO UPDATE SET name = excluded.name",
+                    params![u.employee_id, u.name, branch_id],
+                );
             }
-        },
-        Err(e) => {
-            let _ = app.emit("console-log", format!(
-                "[WARN] Could not fetch user list from {}:{}: {}", ip, port, e
-            ));
         }
     }
 
-    // 1b. Pull attendance logs via hardware driver — uses the EXACT ip+port the user configured
-    let logs: Vec<crate::models::AttendanceLog> = crate::hardware::sync_device(&ip, port, device_id, parsed_brand).await
+    // 1b. Step B: Pull attendance logs ONLY if users were found
+    let _ = app.emit("console-log", format!("[{}] STEP B: Pulling logs...", chrono::Utc::now().format("%H:%M:%S")));
+    let logs: Vec<crate::models::AttendanceLog> = crate::hardware::sync_device(&ip, port, comm_key, device_id, machine_number, parsed_brand).await
         .map_err(|e| {
-            // Surface the real error to the UI instead of silent failure
             let _ = app.emit("sync-error", format!("Connection to {}:{} failed: {}", ip, port, e));
             e
         })?;
@@ -305,20 +337,17 @@ async fn sync_device_logs(
         let db_guard = state.db.lock().map_err(lock_err)?;
         if let Some(conn) = db_guard.as_ref() {
             for log in &logs {
-                // Auto-Discovery of Employees
-                let _ = conn.execute(
-                    "INSERT OR IGNORE INTO Employees (id, name, branch_id) VALUES (?1, ?2, ?3)",
-                    params![log.employee_id, format!("New Employee {}", log.employee_id), branch_id]
-                );
-
                 // INSERT OR IGNORE based on (employee_id, timestamp) to prevent duplicates
+                // Note: We no longer create "New Employee" placeholders here.
+                // If the employee wasn't in UserInfo pull, this log will fail FK which is desired 
+                // for "Real Verified Data Only" mode.
                 let _ = conn.execute(
-                    "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, gate_id, device_id, timestamp, is_synced) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
-                    params![log.employee_id, branch_id, gate_id, device_id, log.timestamp],
+                    "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, gate_id, device_id, timestamp, punch_method, is_synced) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+                    params![log.employee_id, branch_id, gate_id, device_id, log.timestamp, log.punch_method],
                 );
             }
             let _ = app.emit("console-log", format!(
-                "[{} UTC] Sync complete. Created missing employee profiles for {} logs.",
+                "[{} UTC] Local storage updated for {} logs.",
                 chrono::Utc::now().format("%H:%M"), logs.len()
             ));
         }
@@ -393,39 +422,110 @@ async fn scan_network(base_ip: String, app: tauri::AppHandle) -> Result<String, 
 }
 
 #[tauri::command]
-async fn test_device_connection(ip: String, port: u16, brand: String) -> Result<(), AppError> {
+async fn test_device_connection(ip: String, port: u16, comm_key: i32, machine_number: i32, brand: String) -> Result<(), AppError> {
     let device_brand = match brand.as_str() {
         "Hikvision" => DeviceBrand::Hikvision,
         "ZKTeco"    => DeviceBrand::ZKTeco,
         _           => DeviceBrand::Unknown,
     };
-    hardware::test_device(&ip, port, device_brand).await
+    hardware::test_device(&ip, port, comm_key, machine_number, device_brand).await
+}
+
+#[derive(serde::Deserialize)]
+struct DeviceInput {
+    name: String, brand: String, ip: String, port: u16,
+    #[serde(rename = "commKey")]
+    comm_key: i32, 
+    #[serde(rename = "machineNumber")]
+    machine_number: i32,
+    #[serde(rename = "branchId")]
+    branch_id: i64, 
+    #[serde(rename = "gateId")]
+    gate_id: i64,
+    #[serde(rename = "subnetMask")]
+    subnet_mask: String,
+    gateway: String,
+    dns: String,
+    dhcp: i32,
+    #[serde(rename = "serverMode")]
+    server_mode: String,
+    #[serde(rename = "serverAddress")]
+    server_address: String,
+    #[serde(rename = "httpsEnabled")]
+    https_enabled: i32,
 }
 
 #[tauri::command]
 fn add_device(
-    name: String, brand: String, ip: String, port: u16, branch_id: i64, gate_id: i64,
+    device: DeviceInput,
     state: State<'_, AppState>,
 ) -> Result<i64, AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
     conn.execute(
-        "INSERT INTO Devices (branch_id, gate_id, name, brand, ip_address, port, status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'offline')",
-        (branch_id, gate_id, &name, &brand, &ip, port),
+        "INSERT INTO Devices (
+            branch_id, gate_id, name, brand, ip_address, port, comm_key, machine_number,
+            subnet_mask, gateway, dns, dhcp, server_mode, server_address, https_enabled, 
+            is_default
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0)",
+        (
+            device.branch_id, device.gate_id, &device.name, &device.brand, &device.ip, 
+            device.port, device.comm_key, device.machine_number,
+            &device.subnet_mask, &device.gateway, &device.dns, device.dhcp,
+            &device.server_mode, &device.server_address, device.https_enabled
+        ),
     )?;
     Ok(conn.last_insert_rowid())
 }
 
 #[tauri::command]
-fn save_device_config(
-    id: i64, name: String, brand: String, ip: String, port: u16, branch_id: i64, gate_id: i64,
+fn update_device(
+    id: i64,
+    device: DeviceInput,
     state: State<'_, AppState>,
 ) -> Result<(), AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
     conn.execute(
-        "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, branch_id=?5, gate_id=?6 WHERE id=?7",
-        (&name, &brand, &ip, port, branch_id, gate_id, id),
+        "UPDATE Devices SET 
+            name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, machine_number=?6,
+            subnet_mask=?7, gateway=?8, dns=?9, dhcp=?10, server_mode=?11, 
+            server_address=?12, https_enabled=?13, branch_id=?14, gate_id=?15
+         WHERE id=?16",
+        (
+            &device.name, &device.brand, &device.ip, device.port, device.comm_key, device.machine_number,
+            &device.subnet_mask, &device.gateway, &device.dns, device.dhcp,
+            &device.server_mode, &device.server_address, device.https_enabled,
+            device.branch_id, device.gate_id, id
+        ),
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+fn set_default_device(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    // 1. Reset all to non-default
+    conn.execute("UPDATE Devices SET is_default = 0", [])?;
+    
+    // 2. Set the target as default
+    conn.execute("UPDATE Devices SET is_default = 1 WHERE id = ?1", [id])?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+fn save_device_config(
+    id: i64, name: String, brand: String, ip: String, port: u16, comm_key: i32, branch_id: i64, gate_id: i64,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    conn.execute(
+        "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, branch_id=?6, gate_id=?7 WHERE id=?8",
+        (&name, &brand, &ip, port, comm_key, branch_id, gate_id, id),
     )?;
     Ok(())
 }
@@ -454,11 +554,12 @@ async fn start_realtime_sync(
 
     let device_config = get_active_devices_internal(&state)?;
     if device_config.is_null() {
-        return Err(AppError::DatabaseError("No active device found".into()));
+        return Err(AppError::DatabaseError("No default or active device found".into()));
     }
 
     let ip = device_config["ip"].as_str().unwrap_or("").to_string();
     let port = device_config["port"].as_u64().unwrap_or(4370) as u16;
+    let comm_key = device_config["comm_key"].as_i64().unwrap_or(0) as i32;
     let brand_str = device_config["brand"].as_str().unwrap_or("");
     let brand = match brand_str {
         "Hikvision" => DeviceBrand::Hikvision,
@@ -471,8 +572,8 @@ async fn start_realtime_sync(
 
     let app_clone = app.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = app_clone.emit("console-log", format!("[INFO] Starting Real-Time Listener on {}...", ip));
-        if let Err(e) = hardware::listen_device(&ip, port, 1, brand, app_clone.clone(), cancel).await {
+        let _ = app_clone.emit("console-log", format!("[INFO] Starting Real-Time Listener on {} ({})...", ip, brand_str));
+        if let Err(e) = hardware::listen_device(&ip, port, comm_key, 1, 1, brand, app_clone.clone(), cancel).await {
              let _ = app_clone.emit("console-log", format!("[ERROR] Real-Time Listener stopped: {}", e));
         }
     });
@@ -493,6 +594,7 @@ async fn process_log_and_sync(
     employee_id: i32,
     device_id: i32,
     timestamp: String,
+    punch_method: String,
     app: tauri::AppHandle,
 ) -> Result<(), crate::errors::AppError> {
     let state: tauri::State<AppState> = app.state::<AppState>();
@@ -525,15 +627,11 @@ async fn process_log_and_sync(
                 |row| row.get(0)
             ).unwrap_or(1);
             
-            // Auto-Discovery for real-time pulses
+            // Note: We ONLY allow logs for employees already in the database.
+            // Dummy generation (New Employee) removed.
             let _ = conn.execute(
-                "INSERT OR IGNORE INTO Employees (id, name, branch_id) VALUES (?1, ?2, ?3)",
-                params![employee_id, format!("New Employee {}", employee_id), branch_id]
-            );
-
-            let _ = conn.execute(
-                "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, gate_id, device_id, timestamp, is_synced) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
-                params![employee_id, branch_id, gate_id, device_id, timestamp],
+                "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, gate_id, device_id, timestamp, punch_method, is_synced) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+                params![employee_id, branch_id, gate_id, device_id, timestamp, punch_method],
             );
         }
     }
@@ -584,16 +682,23 @@ fn get_active_devices(state: State<'_, AppState>) -> Result<serde_json::Value, A
 fn get_active_devices_internal(state: &AppState) -> Result<serde_json::Value, AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    // Return the first device for real-time listener purposes
-    let mut stmt = conn.prepare("SELECT id, name, brand, ip_address, port, status FROM Devices WHERE branch_id = 1 LIMIT 1")?;
+    // Return the default device first, otherwise the first created one
+    let mut stmt = conn.prepare("
+        SELECT id, name, brand, ip_address, port, comm_key, machine_number, is_default 
+        FROM Devices 
+        ORDER BY is_default DESC, id ASC 
+        LIMIT 1
+    ")?;
     let device = stmt.query_row([], |row| {
         Ok(serde_json::json!({
-            "id":     row.get::<_, i64>(0)?,
-            "name":   row.get::<_, String>(1)?,
-            "brand":  row.get::<_, String>(2)?,
-            "ip":     row.get::<_, String>(3)?,
-            "port":   row.get::<_, u16>(4)?,
-            "status": row.get::<_, String>(5)?,
+            "id":             row.get::<_, i64>(0)?,
+            "name":           row.get::<_, String>(1)?,
+            "brand":          row.get::<_, String>(2)?,
+            "ip":             row.get::<_, String>(3)?,
+            "port":           row.get::<_, u16>(4)?,
+            "comm_key":       row.get::<_, i32>(5)?,
+            "machine_number": row.get::<_, i32>(6)?,
+            "is_default":     row.get::<_, i32>(7)? == 1,
         }))
     }).ok();
     Ok(serde_json::json!(device))
@@ -604,24 +709,36 @@ fn list_all_devices(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
     let mut stmt = conn.prepare("
-        SELECT d.id, d.name, d.brand, d.ip_address, d.port, d.status, b.name as branch_name, g.name as gate_name, d.branch_id, d.gate_id
+        SELECT d.id, d.name, d.brand, d.ip_address, d.port, d.comm_key, d.machine_number, 
+               b.name as branch_name, g.name as gate_name, d.branch_id, d.gate_id, d.is_default,
+               d.subnet_mask, d.gateway, d.dns, d.dhcp, d.server_mode, d.server_address, d.https_enabled
         FROM Devices d
         JOIN Branches b ON d.branch_id = b.id
         JOIN Gates g ON d.gate_id = g.id
-        ORDER BY d.id
+        ORDER BY d.is_default DESC, d.id ASC
     ")?;
     let rows = stmt.query_map([], |row| {
         Ok(serde_json::json!({
-            "id":          row.get::<_, i64>(0)?,
-            "name":        row.get::<_, String>(1)?,
-            "brand":       row.get::<_, String>(2)?,
-            "ip":          row.get::<_, String>(3)?,
-            "port":        row.get::<_, u16>(4)?,
-            "status":      row.get::<_, String>(5)?,
-            "branch_name": row.get::<_, String>(6)?,
-            "gate_name":   row.get::<_, String>(7)?,
-            "branch_id":   row.get::<_, i64>(8)?,
-            "gate_id":     row.get::<_, i64>(9)?,
+            "id":             row.get::<_, i64>(0)?,
+            "name":           row.get::<_, String>(1)?,
+            "brand":          row.get::<_, String>(2)?,
+            "ip":             row.get::<_, String>(3)?,
+            "port":           row.get::<_, u16>(4)?,
+            "comm_key":       row.get::<_, i32>(5)?,
+            "machine_number": row.get::<_, i32>(6)?,
+            "branch_name":    row.get::<_, String>(7)?,
+            "gate_name":      row.get::<_, String>(8)?,
+            "branch_id":      row.get::<_, i64>(9)?,
+            "gate_id":        row.get::<_, i64>(10)?,
+            "is_default":     row.get::<_, i32>(11)? == 1,
+            "status":         "offline",
+            "subnet_mask":    row.get::<_, Option<String>>(12)?,
+            "gateway":        row.get::<_, Option<String>>(13)?,
+            "dns":            row.get::<_, Option<String>>(14)?,
+            "dhcp":           row.get::<_, i32>(15)? == 1,
+            "server_mode":    row.get::<_, Option<String>>(16)?,
+            "server_address": row.get::<_, Option<String>>(17)?,
+            "https_enabled":  row.get::<_, i32>(18)? == 1,
         }))
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -1120,6 +1237,19 @@ pub fn run() {
                 let _ = fs::write(&pin_path, default_hash);
             }
 
+            // AUTO-RESTART ENGINE FIX: Ensure User's specific device is set as Default
+            // Based on PHOTO update: IP is now 192.168.192.200
+            let _ = conn.execute(
+                "UPDATE Devices SET machine_number = 11, is_default = 1 WHERE ip_address = '192.168.192.200'",
+                []
+            );
+
+            // Start ADMS Listener
+            let h = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                start_adms_listener(h).await;
+            });
+
             // Real-Time Event Listener & Retry Worker
             let app_handle = app.handle().clone();
             app_handle.clone().listen("realtime-punch", move |event| {
@@ -1127,10 +1257,11 @@ pub fn run() {
                     let employee_id = payload["employee_id"].as_i64().unwrap_or(0) as i32;
                     let device_id = payload["device_id"].as_i64().unwrap_or(1) as i32;
                     let timestamp = payload["timestamp"].as_str().unwrap_or("").to_string();
+                    let punch_method = payload["punch_method"].as_str().unwrap_or("Finger/Face").to_string();
                     
                     let inner_app = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
-                        let _ = process_log_and_sync(employee_id, device_id, timestamp, inner_app).await;
+                        let _ = process_log_and_sync(employee_id, device_id, timestamp, punch_method, inner_app).await;
                     });
                 }
             });
@@ -1140,21 +1271,21 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 loop {
                     tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-                    let unsynced_logs: Vec<(i32, i32, String)> = {
+                    let unsynced_logs: Vec<(i32, i32, String, String)> = {
                         let state = retry_app.state::<AppState>();
                         let db_guard = state.db.lock().unwrap();
                         if let Some(conn) = db_guard.as_ref() {
-                            let mut stmt = conn.prepare("SELECT employee_id, device_id, timestamp FROM AttendanceLogs WHERE is_synced = 0 LIMIT 50").unwrap();
+                            let mut stmt = conn.prepare("SELECT employee_id, device_id, timestamp, IFNULL(punch_method, 'Finger/Face') FROM AttendanceLogs WHERE is_synced = 0 LIMIT 50").unwrap();
                             stmt.query_map([], |row| {
-                                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
                             }).unwrap().filter_map(|r| r.ok()).collect()
                         } else {
                             vec![]
                         }
                     };
                     
-                    for (emp_id, dev_id, ts) in unsynced_logs {
-                         let _ = process_log_and_sync(emp_id, dev_id, ts, retry_app.clone()).await;
+                    for (emp_id, dev_id, ts, pm) in unsynced_logs {
+                         let _ = process_log_and_sync(emp_id, dev_id, ts, pm, retry_app.clone()).await;
                     }
                 }
             });
@@ -1206,6 +1337,9 @@ pub fn run() {
             list_employees,
             update_employee,
             delete_employee,
+            set_default_device,
+            check_port_conflict,
+            import_hardware_files,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Bio Bridge Pro HR");
@@ -1215,14 +1349,14 @@ pub fn run() {
 
 #[tauri::command]
 async fn get_device_users(
-    ip: String, port: u16, brand: String,
+    ip: String, port: u16, comm_key: i32, machine_number: i32, brand: String,
 ) -> Result<serde_json::Value, AppError> {
     let parsed_brand = match brand.as_str() {
         "Hikvision" => DeviceBrand::Hikvision,
         "ZKTeco"    => DeviceBrand::ZKTeco,
         _           => DeviceBrand::Unknown,
     };
-    let users = crate::hardware::get_all_user_info(&ip, port, parsed_brand).await
+    let users = crate::hardware::get_all_user_info(&ip, port, comm_key, machine_number, parsed_brand).await
         .map_err(|e| AppError::ConnectionError(format!("Cannot reach {}:{} — {}", ip, port, e)))?;
     Ok(serde_json::json!({
         "count": users.len(),
@@ -1371,6 +1505,45 @@ fn add_user(username: String, password: String, role: String, branch_id: Option<
         params![username, hash, role, branch_id],
     )?;
     Ok(())
+}
+
+#[tauri::command]
+async fn import_hardware_files(
+    user_path: String,
+    log_path: String,
+    device_id: i32,
+    branch_id: i64,
+    state: State<'_, AppState>,
+) -> Result<String, AppError> {
+    // 1. Parse Users
+    let users = crate::hardware::dat_parser::parse_user_dat(&user_path)
+        .map_err(|e| AppError::HardwareError(format!("Failed to parse user.dat: {}", e)))?;
+    
+    // 2. Parse Logs
+    let logs = crate::hardware::dat_parser::parse_attlog_dat(&log_path, device_id)
+        .map_err(|e| AppError::HardwareError(format!("Failed to parse attlog.dat: {}", e)))?;
+
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    // 3. Update Employees
+    for u in &users {
+        let _ = conn.execute(
+            "INSERT INTO Employees (id, name, branch_id) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(id) DO UPDATE SET name = excluded.name",
+            params![u.employee_id, u.name, branch_id],
+        );
+    }
+
+    // 4. Update Logs
+    for log in &logs {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO AttendanceLogs (employee_id, branch_id, gate_id, device_id, timestamp, punch_method, is_synced) VALUES (?1, ?2, 1, ?3, ?4, ?5, 0)",
+            params![log.employee_id, branch_id, device_id, log.timestamp, log.punch_method],
+        );
+    }
+
+    Ok(format!("Parsed {} users and {} logs from data files.", users.len(), logs.len()))
 }
 
 #[tauri::command]

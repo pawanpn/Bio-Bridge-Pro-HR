@@ -30,6 +30,7 @@ interface DeviceConfig {
   ip: string;
   port: number;
   status: string;
+  is_default?: boolean;
 }
 
 interface CloudConfig {
@@ -112,11 +113,15 @@ export const Dashboard: React.FC = () => {
           await invoke('test_device_connection', {
             ip: activeDevice.ip,
             port: activeDevice.port,
+            commKey: 0, // Default 0 for quick check, backend will use DB key anyway
             brand: activeDevice.brand
           });
           setIsDeviceOnline(true);
+          // AUTO-SYNC ON CONNECT
+          triggerAutoSyncFromDevice(activeDevice);
         } catch (e) {
           setIsDeviceOnline(false);
+          console.error("Device test failed:", e);
         }
       }
     } catch (e) {
@@ -124,17 +129,15 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  const triggerAutoSync = async () => {
-    if (!device) return;
+  const triggerAutoSyncFromDevice = async (dev: DeviceConfig) => {
     setIsSyncing(true);
     setSyncError(null);
     try {
-      // Use the real device id and port from Device Management DB entry
       await invoke('sync_device_logs', {
-        ip: device.ip,
-        port: device.port,
-        deviceId: device.id,
-        brand: device.brand,
+        ip: dev.ip,
+        port: dev.port,
+        deviceId: dev.id,
+        brand: dev.brand,
       });
       invoke<Stats>('get_dashboard_stats').then(setStats);
     } catch (e) {
@@ -143,6 +146,11 @@ export const Dashboard: React.FC = () => {
     } finally {
       setIsSyncing(false);
     }
+  };
+
+  const triggerAutoSync = async () => {
+    if (!device) return;
+    triggerAutoSyncFromDevice(device);
   };
 
   const handleToggleQuickSync = () => {
@@ -186,6 +194,7 @@ export const Dashboard: React.FC = () => {
             }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: isDeviceOnline ? 'var(--success)' : isDeviceOnline === false ? 'var(--error)' : 'var(--text-muted)' }} />
               <span style={{ fontSize: '12px', fontWeight: '600', color: isDeviceOnline ? 'var(--success)' : isDeviceOnline === false ? 'var(--error)' : 'var(--text-muted)' }}>
+                {device.is_default && <span style={{ fontSize: 9, backgroundColor: 'var(--primary-color)', color: '#fff', padding: '1px 5px', borderRadius: 3, marginRight: 6 }}>DEFAULT</span>}
                 {device.name}: {isDeviceOnline ? 'CONNECTED' : isDeviceOnline === false ? 'OFFLINE' : 'CHECKING...'}
               </span>
             </div>

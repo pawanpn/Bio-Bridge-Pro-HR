@@ -5,7 +5,7 @@ pub struct AttendanceLog {
     pub device_id: i32,
     pub employee_id: i32,
     pub timestamp: String,
-    // Note: To map Employee Phone, append it identically here avoiding divergence.
+    pub punch_method: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -27,6 +27,9 @@ pub enum AppError {
     #[error("Permission Denied: {0}")]
     PermissionDenied(String),
 
+    #[error("Hardware logical error: {0}")]
+    HardwareError(String),
+
     #[error("Unmapped backend error: {0}")]
     Unknown(String),
 
