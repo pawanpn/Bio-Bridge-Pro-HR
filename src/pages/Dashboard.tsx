@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AnalyticalCard } from '../components/AnalyticalCard';
 import { DeviceScanner } from '../components/DeviceScanner';
 import { invoke } from '@tauri-apps/api/core';
@@ -41,6 +42,7 @@ interface CloudConfig {
 }
 
 export const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [stats, setStats] = useState<Stats | null>(null);
   const [cloud, setCloud] = useState<CloudConfig | null>(null);
   const [device, setDevice] = useState<DeviceConfig | null>(null);

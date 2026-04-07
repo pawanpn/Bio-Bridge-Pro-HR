@@ -6,6 +6,7 @@ import { Dashboard } from './pages/Dashboard';
 import { DeviceSettings } from './pages/DeviceSettings';
 import { SystemSettings } from './pages/SystemSettings';
 import { Reports } from './pages/Reports';
+import { EmployeeDetail } from './pages/EmployeeDetail';
 import { Login } from './pages/Login';
 import './styles/global.css';
 
@@ -27,6 +28,7 @@ function AppContent() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="/" element={<MainLayout />}>
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="employee/:employeeId" element={<EmployeeDetail />} />
           <Route path="device-settings" element={<DeviceSettings />} />
           <Route path="system-settings" element={<SystemSettings />} />
           <Route path="reports" element={<Reports />} />
