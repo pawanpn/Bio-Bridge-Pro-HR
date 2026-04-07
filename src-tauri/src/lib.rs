@@ -560,8 +560,8 @@ async fn start_realtime_sync(
     let ip = device_config["ip"].as_str().unwrap_or("").to_string();
     let port = device_config["port"].as_u64().unwrap_or(4370) as u16;
     let comm_key = device_config["comm_key"].as_i64().unwrap_or(0) as i32;
-    let brand_str = device_config["brand"].as_str().unwrap_or("");
-    let brand = match brand_str {
+    let brand_str = device_config["brand"].as_str().unwrap_or("").to_string();
+    let brand = match brand_str.as_str() {
         "Hikvision" => DeviceBrand::Hikvision,
         "ZKTeco"    => DeviceBrand::ZKTeco,
         _           => DeviceBrand::Unknown,
