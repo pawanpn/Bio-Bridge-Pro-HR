@@ -21,6 +21,7 @@ interface Stats {
   absentStaff: Staff[];
   lateStaff: Staff[];
   leaveStaff: Staff[];
+  lastDeviceSync?: string;
 }
 
 interface DeviceConfig {
@@ -306,16 +307,23 @@ export const Dashboard: React.FC = () => {
         </div>
         
         {cloud && (
-          <div style={{ 
-            display: 'flex', alignItems: 'center', gap: '10px', 
-            padding: '8px 16px', borderRadius: '24px', 
-            backgroundColor: cloud.configured ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-            border: `1px solid ${cloud.configured ? 'var(--success)' : 'var(--error)'}`
-          }}>
-            {cloud.configured ? <Cloud size={18} color="var(--success)" /> : <CloudOff size={18} color="var(--error)" />}
-            <span style={{ fontSize: '13px', fontWeight: '500', color: cloud.configured ? 'var(--success)' : 'var(--error)' }}>
-              {cloud.configured ? 'Cloud Sync Active' : 'Cloud Not Configured'}
-            </span>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+            <div style={{ 
+              display: 'flex', alignItems: 'center', gap: '10px', 
+              padding: '8px 16px', borderRadius: '24px', 
+              backgroundColor: cloud.configured ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+              border: `1px solid ${cloud.configured ? 'var(--success)' : 'var(--error)'}`
+            }}>
+              {cloud.configured ? <Cloud size={18} color="var(--success)" /> : <CloudOff size={18} color="var(--error)" />}
+              <span style={{ fontSize: '13px', fontWeight: '500', color: cloud.configured ? 'var(--success)' : 'var(--error)' }}>
+                {cloud.configured ? 'Cloud Sync Active' : 'Cloud Not Configured'}
+              </span>
+            </div>
+            {stats?.lastDeviceSync && (
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, paddingRight: '8px' }}>
+                Last Device Sync: {stats.lastDeviceSync}
+              </span>
+            )}
           </div>
         )}
       </div>

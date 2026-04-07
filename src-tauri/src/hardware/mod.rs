@@ -18,7 +18,7 @@ const RETRY_DELAY_SECS: u64 = 1;
 /// To add a new brand: implement this trait and register it in `get_driver()`.
 #[async_trait]
 pub trait DeviceDriver: Send + Sync {
-    async fn sync_logs(&self, ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32) -> Result<Vec<AttendanceLog>, AppError>;
+    async fn sync_logs(&self, ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, last_timestamp: Option<String>) -> Result<Vec<AttendanceLog>, AppError>;
     async fn get_all_user_info(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32) -> Result<Vec<crate::models::UserInfo>, AppError>;
     async fn test_connectivity(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32) -> Result<(), AppError>;
     async fn listen_realtime(&self, ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError>;
@@ -53,16 +53,18 @@ async fn with_retry(
     comm_key: i32,
     device_id: i32,
     machine_number: i32,
+    last_timestamp: Option<String>,
 ) -> Result<Vec<AttendanceLog>, AppError> {
     let mut last_err = AppError::Unknown("No attempts made".to_string());
 
     for attempt in 1..=MAX_RETRIES {
         let d = Arc::clone(&driver);
         let ip_clone = ip.clone();
+        let ts_clone = last_timestamp.clone();
 
         let result = tokio::time::timeout(
             Duration::from_secs(CONNECT_TIMEOUT_SECS),
-            async move { d.sync_logs(&ip_clone, port, comm_key, device_id, machine_number).await },
+            async move { d.sync_logs(&ip_clone, port, comm_key, device_id, machine_number, ts_clone).await },
         )
         .await;
 
@@ -92,9 +94,9 @@ async fn with_retry(
 }
 
 /// Public sync facade: resolves driver from brand, then applies retry logic.
-pub async fn sync_device(ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, brand: DeviceBrand) -> Result<Vec<AttendanceLog>, AppError> {
+pub async fn sync_device(ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, brand: DeviceBrand, last_timestamp: Option<String>) -> Result<Vec<AttendanceLog>, AppError> {
     let driver = get_driver(&brand)?;
-    with_retry(driver, ip.to_string(), port, comm_key, device_id, machine_number).await
+    with_retry(driver, ip.to_string(), port, comm_key, device_id, machine_number, last_timestamp).await
 }
 
 /// Public users facade: returns actual users from the device

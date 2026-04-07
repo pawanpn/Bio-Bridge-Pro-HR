@@ -21,18 +21,22 @@ fn extract_json_from_stdout(raw: &str) -> serde_json::Value {
 impl DeviceDriver for ZKTecoDriver {
     fn brand_name(&self) -> &'static str { "ZKTeco" }
 
-    async fn sync_logs(&self, ip: &str, port: u16, _comm_key: i32, device_id: i32, _machine_number: i32) -> Result<Vec<AttendanceLog>, AppError> {
+    async fn sync_logs(&self, ip: &str, port: u16, _comm_key: i32, device_id: i32, _machine_number: i32, last_timestamp: Option<String>) -> Result<Vec<AttendanceLog>, AppError> {
         let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let script_path = current_dir.join("src").join("bin").join("zk_fetch.cjs");
         
-        let output = tokio::process::Command::new("node")
-            .arg(&script_path)
-            .arg("sync")
-            .arg(ip)
-            .arg(port.to_string())
-            .arg("10000") // 10s wait
-            .output()
-            .await;
+        let mut cmd = tokio::process::Command::new("node");
+        cmd.arg(&script_path)
+           .arg("sync")
+           .arg(ip)
+           .arg(port.to_string())
+           .arg("10000"); // 10s wait
+           
+        if let Some(ts) = last_timestamp {
+            cmd.arg(ts);
+        }
+
+        let output = cmd.output().await;
 
         match output {
             Ok(output) if output.status.success() => {
