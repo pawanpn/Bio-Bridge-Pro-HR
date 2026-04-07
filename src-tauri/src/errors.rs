@@ -35,6 +35,9 @@ pub enum AppError {
 
     #[error("Licensing Error: {0}")]
     LicenseError(String),
+
+    #[error("IO error: {0}")]
+    IoError(std::io::Error),
 }
 
 // Serialize AppError as a plain string for Tauri IPC transport

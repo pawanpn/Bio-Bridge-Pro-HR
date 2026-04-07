@@ -651,15 +651,17 @@ async fn generate_payroll_slip(
     state: State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<String, AppError> {
-    let db_guard = state.db.lock().map_err(lock_err)?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
-    
     // 1. Fetch Payroll Data
-    let record = conn.query_row(
-        "SELECT days_present, net_pay FROM PayrollRecords WHERE employee_id = ?1 AND year_month = ?2",
-        params![employee_id, month],
-        |row| Ok((row.get::<_, i32>(0)?, row.get::<_, f64>(1)?))
-    ).map_err(|_| AppError::Unknown("No payroll record found for this month. Sync attendance first.".into()))?;
+    let record = {
+        let db_guard = state.db.lock().map_err(lock_err)?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+        
+        conn.query_row(
+            "SELECT days_present, net_pay FROM PayrollRecords WHERE employee_id = ?1 AND year_month = ?2",
+            params![employee_id, month],
+            |row| Ok((row.get::<_, i32>(0)?, row.get::<_, f64>(1)?))
+        )
+    }.map_err(|_| AppError::Unknown("No payroll record found for this month. Sync attendance first.".into()))?;
 
     let (days, net) = record;
     let slip_content = format!(
