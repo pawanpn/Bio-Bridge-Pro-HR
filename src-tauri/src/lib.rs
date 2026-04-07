@@ -1584,6 +1584,56 @@ fn list_branches(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, A
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+#[tauri::command]
+fn get_employee_profile(
+    state: State<'_, AppState>,
+    employee_id: i64,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let (name, dept, branch_name) = conn.query_row(
+        "SELECT e.name, IFNULL(e.department, 'N/A'), b.name FROM Employees e JOIN Branches b ON e.branch_id = b.id WHERE e.id = ?1",
+        params![employee_id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+    ).unwrap_or(("Unknown".into(), "Unknown".into(), "Unknown".into()));
+
+    let mut stmt = conn.prepare("
+        SELECT al.timestamp, al.punch_method, d.name
+        FROM AttendanceLogs al
+        LEFT JOIN Devices d ON al.device_id = d.id
+        WHERE al.employee_id = ?1
+        ORDER BY al.timestamp DESC
+        LIMIT 50
+    ")?;
+
+    let logs = stmt.query_map([employee_id], |row| {
+        let timestamp: String = row.get(0)?;
+        let method: Option<String> = row.get(1)?;
+        let device_name: Option<String> = row.get(2)?;
+        
+        let source_tag = if let Some(d) = device_name {
+            format!("[{}]", d)
+        } else {
+            "[Manual Entry]".to_string()
+        };
+
+        Ok(serde_json::json!({
+            "timestamp": timestamp,
+            "method": method.unwrap_or("Unknown".into()),
+            "source": source_tag,
+        }))
+    })?.filter_map(|r| r.ok()).collect::<Vec<serde_json::Value>>();
+
+    Ok(serde_json::json!({
+        "id": employee_id,
+        "name": name,
+        "department": dept,
+        "branch": branch_name,
+        "logs": logs
+    }))
+}
+
 
 // ── App Entry ──────────────────────────────────────────────────────────────
 
@@ -1712,6 +1762,7 @@ pub fn run() {
             test_device_connection,
             add_device,
             update_device,
+            get_employee_profile,
             save_device_config,
             delete_device,
             get_active_devices,
