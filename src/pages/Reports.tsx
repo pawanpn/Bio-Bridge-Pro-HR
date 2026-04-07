@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Download, Search, RefreshCw, Calculator } from 'lucide-react';
+import { Download, Search, RefreshCw, Calculator, Fingerprint, ScanFace, Database } from 'lucide-react';
 
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
@@ -185,6 +185,18 @@ export const Reports: React.FC = () => {
     XLSX.writeFile(wb, `BioBridge_${activeTab}_Report.xlsx`);
   };
 
+  const exportUSB = async () => {
+    try {
+      setLoading(true);
+      const path = await invoke<string>('export_usb_db');
+      alert(`USB Backup Database created successfully at:\n${path}`);
+    } catch (e) {
+      alert(`Export Failed: ${e}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Ledger Helper: Days in month
   const getDaysInMonth = () => {
     const [y, m] = month.split('-').map(Number);
@@ -201,7 +213,12 @@ export const Reports: React.FC = () => {
            <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: '13px' }}>Enterprise attendance analysis and payroll reconciliation</p>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
-             <button onClick={fetchData} style={secondaryBtnStyle}><RefreshCw size={14} className={loading?"animate-spin":""} /> Recalculate</button>
+             <button onClick={fetchData} style={secondaryBtnStyle} disabled={loading}><RefreshCw size={14} className={loading?"animate-spin":""} /> Recalculate</button>
+             {activeTab === 'raw' && (
+                <button onClick={exportUSB} style={{...secondaryBtnStyle, borderColor: '#3b82f6', color: '#3b82f6'}} disabled={loading}>
+                  <Database size={14} /> Export to USB (.db)
+                </button>
+             )}
              <button onClick={exportExcel} style={primaryBtnStyle}><Download size={14} /> XLSX</button>
              <button onClick={exportPDF} style={primaryBtnStyle}><Download size={14} /> PDF</button>
         </div>
@@ -209,10 +226,10 @@ export const Reports: React.FC = () => {
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', padding: '4px', backgroundColor: 'var(--bg-color)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-         <Tab active={activeTab === 'daily'} onClick={() => setActiveTab('daily')}>Daily Attendance</Tab>
+       <Tab active={activeTab === 'daily'} onClick={() => setActiveTab('daily')}>Daily Attendance</Tab>
          <Tab active={activeTab === 'ledger'} onClick={() => setActiveTab('ledger')}>Monthly Ledger</Tab>
          <Tab active={activeTab === 'salary'} onClick={() => setActiveTab('salary')}>Salary Sheet</Tab>
-         <Tab active={activeTab === 'raw'} onClick={() => setActiveTab('raw')}>Raw Logs</Tab>
+         <Tab active={activeTab === 'raw'} onClick={() => setActiveTab('raw')}>Attendance Logs</Tab>
       </div>
 
       {/* Filters Card */}
@@ -392,26 +409,51 @@ export const Reports: React.FC = () => {
 
                   {activeTab === 'raw' && (
                       rawData.length === 0 ? (
-                        <NoDataView message="No raw logs found on device for this period." />
+                        <NoDataView message="No attendance logs found. Sync your device to populate records." />
                       ) : (
                         <table style={tableStyle}>
                             <thead>
                                  <tr style={rowStyle}>
-                                     <th style={thStyle}>Employee</th>
-                                     <th style={thStyle}>Timestamp</th>
-                                     <th style={thStyle}>Log Type</th>
-                                     <th style={thStyle}>System / Device</th>
+                                     <th style={thStyle}>#</th>
+                                     <th style={thStyle}>Employee Name</th>
+                                     <th style={thStyle}>Date</th>
+                                     <th style={thStyle}>Time</th>
+                                     <th style={thStyle}>Punch Method</th>
+                                     <th style={thStyle}>Device</th>
                                  </tr>
                             </thead>
                             <tbody>
-                                 {rawData.map((r, i) => (
+                                 {rawData.map((r, i) => {
+                                   const dt = r.timestamp || '';
+                                   const datePart = dt.length >= 10 ? dt.substring(0, 10) : dt;
+                                   const timePart = dt.length >= 16 ? dt.substring(11, 16) : '';
+                                   const method = (r.type || 'FINGER').toUpperCase();
+                                   const isFace = method.includes('FACE') || method === '1';
+                                   return (
                                      <tr key={i} style={trStyle}>
-                                         <td style={tdStyle}>{r.name}</td>
-                                         <td style={tdStyle}>{r.timestamp}</td>
-                                         <td style={tdStyle}>{r.type || 'FINGER'}</td>
-                                         <td style={tdStyle}>{r.device}</td>
+                                         <td style={{ ...tdStyle, color: 'var(--text-muted)', fontSize: '11px', width: '40px' }}>{i + 1}</td>
+                                         <td style={tdStyle}>
+                                           <div style={{ fontWeight: 700 }}>{r.name}</div>
+                                           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ID #{r.id}</div>
+                                         </td>
+                                         <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '12px' }}>{datePart}</td>
+                                         <td style={{ ...tdStyle, fontFamily: 'monospace', fontWeight: 700, color: 'var(--primary-color)' }}>{timePart}</td>
+                                         <td style={tdStyle}>
+                                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px',
+                                             padding: '4px 10px', borderRadius: '20px', width: 'fit-content',
+                                             backgroundColor: isFace ? 'rgba(59,130,246,0.1)' : 'rgba(16,185,129,0.1)',
+                                             color: isFace ? '#3b82f6' : 'var(--success)'
+                                           }}>
+                                             {isFace
+                                               ? <><ScanFace size={14} /><span style={{ fontSize: '11px', fontWeight: 700 }}>Face</span></>
+                                               : <><Fingerprint size={14} /><span style={{ fontSize: '11px', fontWeight: 700 }}>Finger</span></>
+                                             }
+                                           </div>
+                                         </td>
+                                         <td style={{ ...tdStyle, fontSize: '12px', color: 'var(--text-muted)' }}>{r.device}</td>
                                      </tr>
-                                 ))}
+                                   );
+                                 })}
                             </tbody>
                         </table>
                       )

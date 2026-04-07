@@ -3,7 +3,7 @@ import { AnalyticalCard } from '../components/AnalyticalCard';
 import { DeviceScanner } from '../components/DeviceScanner';
 import { invoke } from '@tauri-apps/api/core';
 import { Users, UserCheck, AlertTriangle, UserMinus, Cloud, CloudOff, Clock } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 
 interface Staff {
   id: number;
@@ -50,9 +50,22 @@ export const Dashboard: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastPulse, setLastPulse] = useState<number>(0);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncProgress, setSyncProgress] = useState<string | null>(null);
+  const [weeklyChart, setWeeklyChart] = useState<{day: string; present: number; absent: number}[]>([]);
+
+  const buildWeeklyChart = (s: Stats) => {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    // Use present/absent from stats to fill today, rest are zeros until real data arrives
+    const chart = days.map((day, i) => ({
+      day,
+      present: i === new Date().getDay() - 1 ? s.presentToday : 0,
+      absent:  i === new Date().getDay() - 1 ? s.absent : 0,
+    }));
+    setWeeklyChart(chart);
+  };
 
   useEffect(() => {
-    invoke<Stats>('get_dashboard_stats').then(setStats);
+    invoke<Stats>('get_dashboard_stats').then(s => { setStats(s); buildWeeklyChart(s); });
     invoke<CloudConfig>('get_cloud_config').then(setCloud);
     loadAndTestDevice();
 
@@ -81,16 +94,25 @@ export const Dashboard: React.FC = () => {
 
       const un2 = await listen('attendance-sync-complete', () => {
         console.log("Sync complete, refreshing stats...");
-        invoke<Stats>('get_dashboard_stats').then(setStats);
+        setSyncProgress(null);
+        invoke<Stats>('get_dashboard_stats').then(s => {
+          setStats(s);
+          buildWeeklyChart(s);
+        });
       });
 
       // Real hardware error events — show in UI instead of silent failure
       const un3 = await listen<string>('sync-error', (event) => {
         setSyncError(event.payload);
+        setSyncProgress(null);
         setTimeout(() => setSyncError(null), 8000);
       });
 
-      unlisten = () => { un1(); un2(); un3(); };
+      const un4 = await listen<string>('sync-progress', (event) => {
+        setSyncProgress(event.payload);
+      });
+
+      unlisten = () => { un1(); un2(); un3(); un4(); };
 
       if (isRealtimeEnabled && isDeviceOnline) {
         invoke('start_realtime_sync').catch(console.error);
@@ -132,6 +154,7 @@ export const Dashboard: React.FC = () => {
   const triggerAutoSyncFromDevice = async (dev: DeviceConfig) => {
     setIsSyncing(true);
     setSyncError(null);
+    setSyncProgress('Connecting to device...');
     try {
       await invoke('sync_device_logs', {
         ip: dev.ip,
@@ -139,9 +162,11 @@ export const Dashboard: React.FC = () => {
         deviceId: dev.id,
         brand: dev.brand,
       });
-      invoke<Stats>('get_dashboard_stats').then(setStats);
+      setSyncProgress(null);
+      invoke<Stats>('get_dashboard_stats').then(s => { setStats(s); buildWeeklyChart(s); });
     } catch (e) {
       setSyncError(String(e));
+      setSyncProgress(null);
       setTimeout(() => setSyncError(null), 8000);
     } finally {
       setIsSyncing(false);
@@ -248,28 +273,36 @@ export const Dashboard: React.FC = () => {
           </div>
 
           {/* Manual Sync Button */}
-          <button 
-            onClick={triggerAutoSync}
-            disabled={isSyncing || !isDeviceOnline}
-            style={{
-              marginLeft: '12px',
-              padding: '6px 12px',
-              borderRadius: '4px',
-              border: '1px solid var(--primary-color)',
-              backgroundColor: isSyncing ? 'transparent' : 'var(--primary-color)',
-              color: isSyncing ? 'var(--primary-color)' : 'white',
-              fontSize: '11px',
-              fontWeight: 'bold',
-              cursor: isSyncing || !isDeviceOnline ? 'not-allowed' : 'pointer',
-              opacity: isSyncing || !isDeviceOnline ? 0.6 : 1,
-              transition: '0.2s',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}
-          >
-            {isSyncing ? 'SYNCING...' : 'SYNC NOW'}
-          </button>
+          <div style={{ marginLeft: '12px', display: 'flex', flexDirection: 'column', gap: '4px', minWidth: '160px' }}>
+            <button 
+              onClick={triggerAutoSync}
+              disabled={isSyncing || !isDeviceOnline}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '4px',
+                border: '1px solid var(--primary-color)',
+                backgroundColor: isSyncing ? 'transparent' : 'var(--primary-color)',
+                color: isSyncing ? 'var(--primary-color)' : 'white',
+                fontSize: '11px',
+                fontWeight: 'bold',
+                cursor: isSyncing || !isDeviceOnline ? 'not-allowed' : 'pointer',
+                opacity: isSyncing || !isDeviceOnline ? 0.6 : 1,
+                transition: '0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                width: '100%',
+                justifyContent: 'center'
+              }}
+            >
+              {isSyncing ? '↻ SYNCING...' : '⟳ SYNC NOW'}
+            </button>
+            {syncProgress && (
+              <div style={{ fontSize: '10px', color: 'var(--primary-color)', fontWeight: 600, textAlign: 'center', lineHeight: 1.3 }}>
+                {syncProgress}
+              </div>
+            )}
+          </div>
         </div>
         
         {cloud && (
@@ -314,43 +347,67 @@ export const Dashboard: React.FC = () => {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr', gap: '32px', marginBottom: '40px' }}>
-            {/* Pie Chart Section */}
-            <div style={{ backgroundColor: 'var(--surface-color)', padding: '24px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-              <h3 style={{ margin: '0 0 24px' }}>Overview</h3>
-              <div style={{ height: '300px' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={[
-                        { name: 'On-time', value: stats.presentToday - stats.lateToday, color: '#10b981' },
-                        { name: 'Late', value: stats.lateToday, color: '#f59e0b' },
-                        { name: 'Leave', value: stats.onLeave, color: '#3b82f6' },
-                        { name: 'Absent', value: stats.absent, color: '#ef4444' }
-                      ].filter(d => d.value > 0)}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={100}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {
-                        [
+            {/* Charts Column */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* Pie Chart */}
+              <div style={{ backgroundColor: 'var(--surface-color)', padding: '24px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 700 }}>Today's Overview</h3>
+                <div style={{ height: '220px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: 'On-time', value: stats.presentToday - stats.lateToday, color: '#10b981' },
+                          { name: 'Late', value: stats.lateToday, color: '#f59e0b' },
+                          { name: 'Leave', value: stats.onLeave, color: '#3b82f6' },
+                          { name: 'Absent', value: stats.absent, color: '#ef4444' }
+                        ].filter(d => d.value > 0)}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={85}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {[
                           { name: 'On-time', value: stats.presentToday - stats.lateToday, color: '#10b981' },
                           { name: 'Late', value: stats.lateToday, color: '#f59e0b' },
                           { name: 'Leave', value: stats.onLeave, color: '#3b82f6' },
                           { name: 'Absent', value: stats.absent, color: '#ef4444' }
                         ].filter(d => d.value > 0).map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))
-                      }
-                    </Pie>
-                    <Tooltip 
-                       contentStyle={{ borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-color)' }}
-                       itemStyle={{ color: 'var(--text-color)', fontWeight: 'bold' }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
+                        ))}
+                      </Pie>
+                      <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-color)' }} itemStyle={{ color: 'var(--text-color)', fontWeight: 'bold' }} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                {/* Legend */}
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '8px' }}>
+                  {[{label:'On-time', color:'#10b981'},{label:'Late', color:'#f59e0b'},{label:'Leave', color:'#3b82f6'},{label:'Absent', color:'#ef4444'}].map(l => (
+                    <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px' }}>
+                      <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: l.color }} />
+                      <span style={{ color: 'var(--text-muted)' }}>{l.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Weekly Bar Chart */}
+              <div style={{ backgroundColor: 'var(--surface-color)', padding: '24px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
+                <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 700 }}>Weekly Attendance</h3>
+                <div style={{ height: '160px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={weeklyChart} barSize={14}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                      <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
+                      <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
+                      <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-color)' }} />
+                      <Legend wrapperStyle={{ fontSize: '11px' }} />
+                      <Bar dataKey="present" fill="#10b981" name="Present" radius={[4,4,0,0]} />
+                      <Bar dataKey="absent" fill="#ef4444" name="Absent" radius={[4,4,0,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
 
