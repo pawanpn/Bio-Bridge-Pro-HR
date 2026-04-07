@@ -7,23 +7,43 @@ interface Device {
   brand: string;
   ip: string;
   port: number;
+  comm_key: number;
+  machine_number: number;
   status: string;
+  is_default: boolean;
   branch_id?: number;
   gate_id?: number;
   branch_name?: string;
   gate_name?: string;
+  // Extended fields from photos
+  subnet_mask?: string;
+  gateway?: string;
+  dns?: string;
+  dhcp?: boolean;
+  server_mode?: string;
+  server_address?: string;
+  https_enabled?: boolean;
 }
 
 interface Branch { id: number; name: string; }
 interface Gate { id: number; name: string; }
 
-const emptyForm = (): Omit<Device, 'id' | 'status'> => ({
+const emptyForm = (): Omit<Device, 'id' | 'status' | 'is_default'> => ({
   name: '',
   brand: 'ZKTeco',
   ip: '',
   port: 4370,
+  comm_key: 0,
+  machine_number: 1,
   branch_id: 1,
   gate_id: 1,
+  subnet_mask: '255.255.255.0',
+  gateway: '192.168.1.1',
+  dns: '8.8.8.8',
+  dhcp: false,
+  server_mode: 'Standalone',
+  server_address: '0.0.0.0',
+  https_enabled: false,
 });
 
 export const DeviceSettings: React.FC = () => {
@@ -48,10 +68,32 @@ export const DeviceSettings: React.FC = () => {
       setDevices(data || []);
       const bs = await invoke<Branch[]>('list_branches');
       setBranches(bs || []);
+
+      // DYNAMIC STATUS CHECK
+      if (data && data.length > 0) {
+        verifyDeviceStatuses(data);
+      }
     } catch (e) {
       console.error('Failed to load devices/branches:', e);
     }
   }, []);
+
+  const verifyDeviceStatuses = async (devList: Device[]) => {
+    for (const dev of devList) {
+      try {
+        await invoke('test_device_connection', { 
+            ip: dev.ip, 
+            port: Number(dev.port), 
+            commKey: Number(dev.comm_key),
+            machineNumber: Number(dev.machine_number || 1),
+            brand: dev.brand 
+        });
+        setDevices(prev => prev.map(d => d.id === dev.id ? { ...d, status: 'online' } : d));
+      } catch {
+        setDevices(prev => prev.map(d => d.id === dev.id ? { ...d, status: 'offline' } : d));
+      }
+    }
+  };
 
   const loadGates = async (branch_id: number) => {
     if(!branch_id) return;
@@ -68,6 +110,18 @@ export const DeviceSettings: React.FC = () => {
 
   useEffect(() => {
     loadDevices();
+
+    // AUTO-SYNC DEFAULT ON LOAD
+    const triggerAutoSync = async () => {
+      const allDevs = await invoke<Device[]>('list_all_devices');
+      const defaultDev = allDevs?.find(d => d.is_default);
+      if (defaultDev) {
+        console.log("Auto-syncing default device:", defaultDev.name);
+        handleSyncLogs(defaultDev);
+      }
+    };
+    triggerAutoSync();
+
     let unlistenFound: any, unlistenStart: any, unlistenComplete: any;
     const setupScanner = async () => {
       const { listen } = await import('@tauri-apps/api/event');
@@ -100,7 +154,16 @@ export const DeviceSettings: React.FC = () => {
     setEditingDevice(dev);
     setForm({ 
         name: dev.name, brand: dev.brand, ip: dev.ip, port: dev.port, 
-        branch_id: dev.branch_id || 1, gate_id: dev.gate_id || 1 
+        comm_key: dev.comm_key || 0,
+        machine_number: dev.machine_number || 1,
+        branch_id: dev.branch_id || 1, gate_id: dev.gate_id || 1,
+        subnet_mask: dev.subnet_mask || '255.255.255.0',
+        gateway: dev.gateway || '',
+        dns: dev.dns || '0.0.0.0',
+        dhcp: dev.dhcp || false,
+        server_mode: dev.server_mode || 'Standalone',
+        server_address: dev.server_address || '0.0.0.0',
+        https_enabled: dev.https_enabled || false,
     });
     setTestStatus({ type: 'idle', message: '' });
     setSaveStatus('');
@@ -121,7 +184,13 @@ export const DeviceSettings: React.FC = () => {
   const handleTest = async () => {
     setTestStatus({ type: 'loading', message: 'Testing...' });
     try {
-      await invoke('test_device_connection', { ip: form.ip, port: Number(form.port), brand: form.brand });
+      await invoke('test_device_connection', { 
+        ip: form.ip, 
+        port: Number(form.port), 
+        commKey: Number(form.comm_key),
+        machineNumber: Number(form.machine_number),
+        brand: form.brand 
+      });
       setTestStatus({ type: 'success', message: '✅ Device Reachable' });
     } catch (e) {
       setTestStatus({ type: 'error', message: `❌ Failed: ${e}` });
@@ -138,17 +207,20 @@ export const DeviceSettings: React.FC = () => {
           brand: form.brand,
           ip: form.ip,
           port: Number(form.port),
+          commKey: Number(form.comm_key),
           branchId: form.branch_id || 1,
           gateId: form.gate_id || 1,
         });
       } else {
         await invoke('add_device', {
-          name: form.name,
-          brand: form.brand,
-          ip: form.ip,
-          port: Number(form.port),
-          branchId: form.branch_id || 1,
-          gateId: form.gate_id || 1,
+          device: {
+            name: form.name, brand: form.brand, ip: form.ip, port: Number(form.port),
+            commKey: Number(form.comm_key), machineNumber: Number(form.machine_number),
+            branchId: form.branch_id, gateId: form.gate_id,
+            subnetMask: form.subnet_mask, gateway: form.gateway, dns: form.dns,
+            dhcp: form.dhcp ? 1 : 0, serverMode: form.server_mode,
+            serverAddress: form.server_address, httpsEnabled: form.https_enabled ? 1 : 0,
+          }
         });
       }
       setSaveStatus('✅ Saved!');
@@ -157,6 +229,13 @@ export const DeviceSettings: React.FC = () => {
     } catch (e) {
       setSaveStatus(`❌ ${e}`);
     }
+  };
+
+  const handleSetDefault = async (id: number) => {
+    try {
+        await invoke('set_default_device', { id });
+        await loadDevices();
+    } catch (e) { console.error("Set default failed", e); }
   };
 
   const handleDelete = async (id: number) => {
@@ -180,7 +259,6 @@ export const DeviceSettings: React.FC = () => {
       });
       setSyncStatus(prev => ({ ...prev, [dev.id]: `✅ ${result}` }));
     } catch (e) {
-      // Show the real error (Timeout, Connection Refused, etc.)
       setSyncStatus(prev => ({ ...prev, [dev.id]: `❌ ${e}` }));
     }
     setTimeout(() => setSyncStatus(prev => ({ ...prev, [dev.id]: '' })), 6000);
@@ -231,9 +309,12 @@ export const DeviceSettings: React.FC = () => {
             <tbody>
               {devices.map(dev => (
                 <React.Fragment key={dev.id}>
-                  <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
+                  <tr style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: dev.is_default ? 'rgba(124, 58, 237, 0.03)' : 'transparent' }}>
                     <td style={tdStyle}>
-                      <div style={{ fontWeight: 600 }}>{dev.name}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                         <div style={{ fontWeight: 600 }}>{dev.name}</div>
+                         {dev.is_default && <span style={{ fontSize: 9, backgroundColor: 'var(--primary-color)', color: '#fff', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>DEFAULT</span>}
+                      </div>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                          {dev.brand} : {dev.port}
                       </div>
@@ -251,6 +332,9 @@ export const DeviceSettings: React.FC = () => {
                     </td>
                     <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        {!dev.is_default && (
+                            <ActionBtn label="⭐ Set Default" onClick={() => handleSetDefault(dev.id)} color="var(--accent-color)" />
+                        )}
                         <ActionBtn label="✏️ Edit" onClick={() => openEditModal(dev)} color="var(--primary-color)" />
                         <ActionBtn
                           label="⬇️ Sync Logs"
@@ -268,7 +352,7 @@ export const DeviceSettings: React.FC = () => {
                   </tr>
                   {syncStatus[dev.id] && (
                     <tr>
-                      <td colSpan={6} style={{ padding: '6px 16px', fontSize: 12, color: syncStatus[dev.id].startsWith('✅') ? 'var(--success)' : '#ef4444', backgroundColor: 'var(--bg-color)' }}>
+                      <td colSpan={5} style={{ padding: '6px 16px', fontSize: 12, color: syncStatus[dev.id].startsWith('✅') ? 'var(--success)' : '#ef4444', backgroundColor: 'var(--bg-color)' }}>
                         {syncStatus[dev.id]}
                       </td>
                     </tr>
@@ -300,37 +384,96 @@ export const DeviceSettings: React.FC = () => {
       {/* Add / Edit Modal */}
       {modalOpen && (
         <div style={overlayStyle}>
-          <div style={{ ...cardStyle, width: '100%', maxWidth: 680, position: 'relative', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div style={{ ...cardStyle, width: '100%', maxWidth: 780, position: 'relative', maxHeight: '90vh', overflowY: 'auto', padding: '32px' }}>
             <button onClick={closeModal} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
             <h3 style={{ marginTop: 0, marginBottom: 24 }}>{editingDevice ? 'Edit Device' : 'Add New Device'}</h3>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: 24, alignItems: 'start' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(350px, 1.2fr) 280px', gap: 32, alignItems: 'start' }}>
               {/* Form */}
               <div>
+                <div style={{ ...sectionHeaderStyle, marginTop: 24 }}>Essential Connection (*)</div>
                 <div style={rowStyle}>
                   <div style={{ flex: 2 }}>
-                    <label style={labelStyle}>Device Name</label>
-                    <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Main Entrance" />
+                    <label style={labelStyle}>Device Name *</label>
+                    <input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Main Office Unit" />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <label style={labelStyle}>Brand</label>
+                    <label style={labelStyle}>Brand *</label>
                     <select style={inputStyle} value={form.brand} onChange={e => handleBrandChange(e.target.value)}>
                       <option value="ZKTeco">ZKTeco</option>
                       <option value="Hikvision">Hikvision</option>
                     </select>
                   </div>
                 </div>
+
                 <div style={rowStyle}>
                   <div style={{ flex: 2 }}>
-                    <label style={labelStyle}>IP Address</label>
-                    <input style={inputStyle} value={form.ip} onChange={e => setForm(f => ({ ...f, ip: e.target.value }))} placeholder="192.168.1.201" />
+                    <label style={labelStyle}>IP Address *</label>
+                    <input style={inputStyle} value={form.ip} onChange={e => setForm(f => ({ ...f, ip: e.target.value }))} placeholder="192.168.192.200" />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <label style={labelStyle}>Port</label>
+                    <label style={labelStyle}>Port *</label>
                     <input style={inputStyle} type="number" value={form.port} onChange={e => setForm(f => ({ ...f, port: Number(e.target.value) }))} />
                   </div>
                 </div>
 
+                <div style={rowStyle}>
+                   <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Machine ID / Device No. *</label>
+                    <input style={inputStyle} type="number" value={form.machine_number} onChange={e => setForm(f => ({ ...f, machine_number: Number(e.target.value) }))} />
+                    <p style={helpTextStyle}>Photo shows: 11</p>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Comm Key (Password)</label>
+                    <input style={inputStyle} type="number" value={form.comm_key} onChange={e => setForm(f => ({ ...f, comm_key: Number(e.target.value) }))} />
+                    <p style={helpTextStyle}>Default is 0</p>
+                  </div>
+                </div>
+
+                <div style={sectionHeaderStyle}>Ethernet Settings (Network)</div>
+                <div style={rowStyle}>
+                   <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Subnet Mask</label>
+                    <input style={inputStyle} value={form.subnet_mask} onChange={e => setForm(f => ({ ...f, subnet_mask: e.target.value }))} placeholder="255.255.255.0" />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Gateway</label>
+                    <input style={inputStyle} value={form.gateway} onChange={e => setForm(f => ({ ...f, gateway: e.target.value }))} placeholder="192.168.1.1" />
+                  </div>
+                </div>
+                <div style={rowStyle}>
+                   <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>DNS</label>
+                    <input style={inputStyle} value={form.dns} onChange={e => setForm(f => ({ ...f, dns: e.target.value }))} placeholder="0.0.0.0" />
+                  </div>
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', paddingTop: 20 }}>
+                     <input type="checkbox" checked={form.dhcp} onChange={e => setForm(f => ({ ...f, dhcp: e.target.checked }))} style={{ marginRight: 8 }} />
+                     <label style={labelStyle}>Enable DHCP</label>
+                  </div>
+                </div>
+
+                <div style={sectionHeaderStyle}>Cloud Server Setting (ADMS)</div>
+                <div style={rowStyle}>
+                   <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Server Mode</label>
+                    <select style={inputStyle} value={form.server_mode} onChange={e => setForm(f => ({ ...f, server_mode: e.target.value }))}>
+                       <option value="Standalone">Standalone</option>
+                       <option value="ADMS">ADMS (Cloud)</option>
+                    </select>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Server Address</label>
+                    <input style={inputStyle} value={form.server_address} onChange={e => setForm(f => ({ ...f, server_address: e.target.value }))} placeholder="0.0.0.0" />
+                  </div>
+                </div>
+                <div style={rowStyle}>
+                   <div style={{ flex: 1, display: 'flex', alignItems: 'center' }}>
+                     <input type="checkbox" checked={form.https_enabled} onChange={e => setForm(f => ({ ...f, https_enabled: e.target.checked }))} style={{ marginRight: 8 }} />
+                     <label style={labelStyle}>Enable HTTPS</label>
+                  </div>
+                </div>
+
+                <div style={sectionHeaderStyle}>Site Allocation</div>
                 <div style={rowStyle}>
                   <div style={{ flex: 1 }}>
                     <label style={labelStyle}>Branch</label>
@@ -340,15 +483,13 @@ export const DeviceSettings: React.FC = () => {
                   </div>
                   <div style={{ flex: 1 }}>
                     <label style={labelStyle}>Gate / Location</label>
-                    <div style={{display: 'flex', gap: '8px'}}>
-                        <select style={inputStyle} value={form.gate_id} onChange={e => setForm(f => ({ ...f, gate_id: Number(e.target.value) }))}>
-                          {gates.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                        </select>
-                    </div>
+                    <select style={inputStyle} value={form.gate_id} onChange={e => setForm(f => ({ ...f, gate_id: Number(e.target.value) }))}>
+                      {gates.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    </select>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
+                <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
                   <button onClick={handleTest} disabled={!form.ip || testStatus.type === 'loading'} style={secondaryBtnStyle}>
                     {testStatus.type === 'loading' ? 'Testing...' : 'Test Connection'}
                   </button>
@@ -439,3 +580,5 @@ const addBtnStyle: React.CSSProperties = { padding: '10px 20px', borderRadius: 8
 const primaryBtnStyle: React.CSSProperties = { padding: '9px 18px', borderRadius: 6, backgroundColor: 'var(--primary-color)', color: '#fff', border: 'none', fontWeight: 600, fontSize: 13, cursor: 'pointer' };
 const secondaryBtnStyle: React.CSSProperties = { padding: '9px 18px', borderRadius: 6, backgroundColor: 'transparent', color: 'var(--primary-color)', border: '1px solid var(--primary-color)', fontWeight: 600, fontSize: 13, cursor: 'pointer' };
 const cancelBtnStyle: React.CSSProperties = { padding: '9px 20px', borderRadius: 6, backgroundColor: 'transparent', color: 'var(--text-color)', border: '1px solid var(--border-color)', fontWeight: 600, fontSize: 14, cursor: 'pointer' };
+const sectionHeaderStyle: React.CSSProperties = { fontSize: 13, fontWeight: 700, margin: '24px 0 16px', color: 'var(--primary-color)', borderBottom: '1px solid var(--border-color)', paddingBottom: 6 };
+const helpTextStyle: React.CSSProperties = { fontSize: 10, color: 'var(--text-muted)', marginTop: 4, marginBottom: 0 };

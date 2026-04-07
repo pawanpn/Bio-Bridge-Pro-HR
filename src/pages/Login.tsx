@@ -15,6 +15,17 @@ export const Login: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const [rememberMe, setRememberMe] = useState(localStorage.getItem('rememberMe') === 'true');
+
+  React.useEffect(() => {
+    if (localStorage.getItem('rememberMe') === 'true') {
+        const storedUser = localStorage.getItem('saved_username');
+        const storedPass = localStorage.getItem('saved_password');
+        if (storedUser) setUsername(storedUser);
+        if (storedPass) setPassword(storedPass);
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username || !password) {
@@ -26,6 +37,17 @@ export const Login: React.FC = () => {
     setError('');
     try {
       const { mustChange } = await login(username, password);
+
+      if (rememberMe) {
+          localStorage.setItem('saved_username', username);
+          localStorage.setItem('saved_password', password);
+          localStorage.setItem('rememberMe', 'true');
+      } else {
+          localStorage.removeItem('saved_username');
+          localStorage.removeItem('saved_password');
+          localStorage.setItem('rememberMe', 'false');
+      }
+
       if (mustChange) {
         setIsChangingPass(true);
       }
@@ -34,6 +56,17 @@ export const Login: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const clearSaved = () => {
+    localStorage.removeItem('saved_username');
+    localStorage.removeItem('saved_password');
+    localStorage.setItem('rememberMe', 'false');
+    setRememberMe(false);
+    setUsername('');
+    setPassword('');
+    setError('Saved credentials cleared.');
+    setTimeout(() => setError(''), 3000);
   };
 
   const handlePasswordChange = async (e: React.FormEvent) => {
@@ -81,7 +114,7 @@ export const Login: React.FC = () => {
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="Enter username"
                   style={inputStyle}
-                  autoFocus
+                  autoFocus={!username}
                 />
               </div>
             </div>
@@ -98,6 +131,26 @@ export const Login: React.FC = () => {
                   style={inputStyle}
                 />
               </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px' }}>
+                    <input 
+                        type="checkbox" 
+                        checked={rememberMe} 
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                    />
+                    Save Credentials
+                </label>
+                {(localStorage.getItem('saved_username')) && (
+                    <span 
+                        onClick={clearSaved}
+                        style={{ fontSize: '12px', color: '#ef4444', cursor: 'pointer', fontWeight: 600 }}
+                    >
+                        Clear Saved
+                    </span>
+                )}
             </div>
 
             {error && <div style={errorStyle}>{error}</div>}
