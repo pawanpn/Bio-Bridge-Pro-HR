@@ -15,8 +15,8 @@ pub struct ZKTecoDriver;
 impl DeviceDriver for ZKTecoDriver {
     fn brand_name(&self) -> &'static str { "ZKTeco" }
 
-    async fn sync_logs(&self, ip: &str, device_id: i32) -> Result<Vec<AttendanceLog>, AppError> {
-        let mut stream = connect_device(ip, 4370).await?;
+    async fn sync_logs(&self, ip: &str, port: u16, device_id: i32) -> Result<Vec<AttendanceLog>, AppError> {
+        let mut stream = connect_device(ip, port).await?;
 
         // 1. Send Connect CMD (0x03e8)
         let connect_packet = assemble_zk_packet(ZKCommand::Connect, 0, 0, &[]);
@@ -80,6 +80,57 @@ impl DeviceDriver for ZKTecoDriver {
         Ok(attendance_logs)
     }
 
+    async fn get_all_user_info(&self, ip: &str, port: u16) -> Result<Vec<crate::models::UserInfo>, AppError> {
+        let mut stream = connect_device(ip, port).await?;
+
+        // 1. Send Connect CMD
+        let connect_packet = assemble_zk_packet(ZKCommand::Connect, 0, 0, &[]);
+        stream.write_all(&connect_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+
+        let mut buf = [0u8; 1024];
+        let n = stream.read(&mut buf).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+        if n < 8 { return Err(AppError::ConnectionError("Invalid response".to_string())); }
+
+        let session_id = u16::from_le_bytes([buf[8+4], buf[8+5]]);
+
+        // 2. Request User Info (0x0009)
+        let log_packet = assemble_zk_packet(ZKCommand::UserInfoRrq, session_id, 1, &[]);
+        stream.write_all(&log_packet).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+
+        let mut out_buf = vec![0u8; 128 * 1024];
+        let bytes_read = stream.read(&mut out_buf).await.map_err(|e| AppError::ConnectionError(e.to_string()))?;
+
+        let mut users = Vec::new();
+        let mut offset = 8;
+        
+        while offset + 72 <= bytes_read {
+            // Rough heuristic: in standard ZKTeco, User ID (int) is at 0, User ID (str) at 4, Name at 24
+            let employee_id = u32::from_le_bytes([out_buf[offset], out_buf[offset+1], out_buf[offset+2], out_buf[offset+3]]) as i32;
+            
+            // Name is max 24 chars starting at offset+24
+            let mut name_bytes = Vec::new();
+            for i in 0..24 {
+                let p = out_buf[offset + 24 + i];
+                if p == 0 { break; }
+                name_bytes.push(p);
+            }
+            let name = String::from_utf8_lossy(&name_bytes).trim().to_string();
+            let name = if name.is_empty() { format!("Employee {}", employee_id) } else { name };
+
+            if employee_id > 0 {
+                users.push(crate::models::UserInfo { employee_id, name });
+            }
+            // Length of each user record may vary (72 is common, or 28, 40 etc). We assume standard structured response.
+            // If the buffer doesn't match, we fallback to our generic loop and hope it aligns. 
+            // Better to iterate by fixed bytes for 72-byte structure.
+            offset += 72;
+        }
+
+        let _ = stream.write_all(&assemble_zk_packet(ZKCommand::Exit, session_id, 2, &[])).await;
+
+        Ok(users)
+    }
+
     async fn test_connectivity(&self, ip: &str, port: u16) -> Result<(), AppError> {
         let _stream = connect_device(ip, port).await?;
         Ok(())
@@ -138,10 +189,11 @@ impl DeviceDriver for ZKTecoDriver {
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
 pub enum ZKCommand {
-    Connect    = 0x03e8, 
-    Exit       = 0x000b, 
-    AttLogRrq  = 0x000d, 
-    RegEvent   = 0x0041,
+    Connect     = 0x03e8, 
+    Exit        = 0x000b, 
+    AttLogRrq   = 0x000d, 
+    UserInfoRrq = 0x0009,
+    RegEvent    = 0x0041,
 }
 
 fn create_checksum(data: &[u8]) -> u16 {

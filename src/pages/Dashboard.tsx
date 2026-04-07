@@ -24,6 +24,7 @@ interface Stats {
 }
 
 interface DeviceConfig {
+  id: number;
   name: string;
   brand: string;
   ip: string;
@@ -47,6 +48,7 @@ export const Dashboard: React.FC = () => {
   const [secondsUntilSync, setSecondsUntilSync] = useState<number>(60);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastPulse, setLastPulse] = useState<number>(0);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<Stats>('get_dashboard_stats').then(setStats);
@@ -81,7 +83,13 @@ export const Dashboard: React.FC = () => {
         invoke<Stats>('get_dashboard_stats').then(setStats);
       });
 
-      unlisten = () => { un1(); un2(); };
+      // Real hardware error events — show in UI instead of silent failure
+      const un3 = await listen<string>('sync-error', (event) => {
+        setSyncError(event.payload);
+        setTimeout(() => setSyncError(null), 8000);
+      });
+
+      unlisten = () => { un1(); un2(); un3(); };
 
       if (isRealtimeEnabled && isDeviceOnline) {
         invoke('start_realtime_sync').catch(console.error);
@@ -119,14 +127,19 @@ export const Dashboard: React.FC = () => {
   const triggerAutoSync = async () => {
     if (!device) return;
     setIsSyncing(true);
+    setSyncError(null);
     try {
+      // Use the real device id and port from Device Management DB entry
       await invoke('sync_device_logs', {
         ip: device.ip,
-        device_id: 1, // Assuming id=1 for now (Head Office)
-        brand: device.brand
+        port: device.port,
+        deviceId: device.id,
+        brand: device.brand,
       });
+      invoke<Stats>('get_dashboard_stats').then(setStats);
     } catch (e) {
-      console.error("Auto-Sync failed:", e);
+      setSyncError(String(e));
+      setTimeout(() => setSyncError(null), 8000);
     } finally {
       setIsSyncing(false);
     }
@@ -265,9 +278,21 @@ export const Dashboard: React.FC = () => {
         )}
       </div>
       
-      <p style={{ color: 'var(--text-muted)', marginBottom: '32px' }}>Real-time statistics for Head Office</p>
-      
+      <p style={{ color: 'var(--text-muted)', marginBottom: syncError ? '12px' : '32px' }}>Real-time statistics for Head Office</p>
 
+      {/* Sync Error Banner — shows real hardware errors instead of fake success */}
+      {syncError && (
+        <div style={{
+          marginBottom: '24px', padding: '12px 18px', borderRadius: '8px',
+          backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid #ef4444',
+          color: '#ef4444', fontSize: '13px', fontWeight: 600,
+          display: 'flex', alignItems: 'center', gap: '10px'
+        }}>
+          <span>⚠️</span>
+          <span>{syncError}</span>
+          <button onClick={() => setSyncError(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+        </div>
+      )}
 
       {stats && stats.totalStaff > 0 ? (
         <>

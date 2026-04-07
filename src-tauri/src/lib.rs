@@ -226,7 +226,7 @@ fn get_app_context(state: State<'_, AppState>) -> Result<serde_json::Value, AppE
 
 #[tauri::command]
 async fn sync_device_logs(
-    ip: String, device_id: i32, brand: String,
+    ip: String, port: u16, device_id: i32, brand: String,
     app: AppHandle, state: State<'_, AppState>,
 ) -> Result<String, AppError> {
     let parsed_brand = match brand.as_str() {
@@ -237,11 +237,16 @@ async fn sync_device_logs(
 
     let org_name    = state.organization_name.lock().map_err(lock_err)?
                           .clone().unwrap_or_else(|| "HeadOffice".to_string());
-    
+
     let key_opt     = state.service_account_key.lock().map_err(lock_err)?.clone();
     let root_id_opt = state.root_folder_id.lock().map_err(lock_err)?.clone();
 
-    // 0. Lookup device's assigned branch and gate
+    let _ = app.emit("console-log", format!(
+        "[{}] Connecting to device #{} at {}:{} ({})",
+        chrono::Utc::now().format("%H:%M:%S"), device_id, ip, port, brand
+    ));
+
+    // 0. Lookup device's assigned branch and gate FROM DB (device_id is the unique key)
     let (branch_id, gate_id, branch_name, gate_name) = {
         let db_guard = state.db.lock().map_err(lock_err)?;
         let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
@@ -256,12 +261,43 @@ async fn sync_device_logs(
         ).unwrap_or((1, 1, "Head Office".to_string(), "Main Gate".to_string()))
     };
 
-    // 1. Pull logs via hardware driver
-    let logs: Vec<crate::models::AttendanceLog> = crate::hardware::sync_device(&ip, device_id, parsed_brand).await?;
+    // 1a. Fetch real user info first — update employee names in DB
+    let user_info_result = crate::hardware::get_all_user_info(&ip, port, parsed_brand.clone()).await;
+    match &user_info_result {
+        Ok(users) => {
+            let _ = app.emit("console-log", format!(
+                "[{}] {} staff records fetched from device at {}:{}",
+                chrono::Utc::now().format("%H:%M:%S"), users.len(), ip, port
+            ));
+            let db_guard = state.db.lock().map_err(lock_err)?;
+            if let Some(conn) = db_guard.as_ref() {
+                for u in users {
+                    let _ = conn.execute(
+                        "INSERT INTO Employees (id, name, branch_id) VALUES (?1, ?2, ?3) \
+                         ON CONFLICT(id) DO UPDATE SET name = excluded.name",
+                        params![u.employee_id, u.name, branch_id],
+                    );
+                }
+            }
+        },
+        Err(e) => {
+            let _ = app.emit("console-log", format!(
+                "[WARN] Could not fetch user list from {}:{}: {}", ip, port, e
+            ));
+        }
+    }
+
+    // 1b. Pull attendance logs via hardware driver — uses the EXACT ip+port the user configured
+    let logs: Vec<crate::models::AttendanceLog> = crate::hardware::sync_device(&ip, port, device_id, parsed_brand).await
+        .map_err(|e| {
+            // Surface the real error to the UI instead of silent failure
+            let _ = app.emit("sync-error", format!("Connection to {}:{} failed: {}", ip, port, e));
+            e
+        })?;
 
     let _ = app.emit("console-log", format!(
-        "[{} UTC] {} logs pulled from {} ({}).",
-        chrono::Utc::now().format("%H:%M"), logs.len(), ip, brand
+        "[{} UTC] {} attendance logs pulled from {}:{} ({})",
+        chrono::Utc::now().format("%H:%M"), logs.len(), ip, port, brand
     ));
 
     // 2. Persist locally (Store-then-Sync)
@@ -1137,6 +1173,7 @@ pub fn run() {
             save_cloud_credentials,
             get_cloud_config,
             sync_device_logs,
+            get_device_users,
             scan_network,
             get_dashboard_stats,
             test_device_connection,
@@ -1172,6 +1209,25 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Bio Bridge Pro HR");
+}
+
+// ── Get Device Users (live staff count from hardware) ─────────────────────
+
+#[tauri::command]
+async fn get_device_users(
+    ip: String, port: u16, brand: String,
+) -> Result<serde_json::Value, AppError> {
+    let parsed_brand = match brand.as_str() {
+        "Hikvision" => DeviceBrand::Hikvision,
+        "ZKTeco"    => DeviceBrand::ZKTeco,
+        _           => DeviceBrand::Unknown,
+    };
+    let users = crate::hardware::get_all_user_info(&ip, port, parsed_brand).await
+        .map_err(|e| AppError::ConnectionError(format!("Cannot reach {}:{} — {}", ip, port, e)))?;
+    Ok(serde_json::json!({
+        "count": users.len(),
+        "users": users,
+    }))
 }
 
 #[tauri::command]
