@@ -229,7 +229,26 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE AttendanceLogs ADD COLUMN punch_method TEXT", []);
     let _ = conn.execute("ALTER TABLE Users ADD COLUMN must_change_password INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE Employees ADD COLUMN status TEXT DEFAULT 'active'", []);
-    
+
+    // Migration for LeaveRequests table
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN leave_type TEXT DEFAULT 'Casual Leave'", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN reason TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN approved_by TEXT", []);
+
+    // Migration for EmployeeDocuments table (ensure it exists)
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS EmployeeDocuments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER,
+            doc_type TEXT,
+            doc_name TEXT,
+            cloud_file_id TEXT,
+            upload_date TEXT,
+            FOREIGN KEY(employee_id) REFERENCES Employees(id)
+        )",
+        [],
+    );
+
     // Ensure uniqueness constraint for offline-first permanent sync
     let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_attendancelogs_emp_time ON AttendanceLogs (employee_id, timestamp)", []);
 

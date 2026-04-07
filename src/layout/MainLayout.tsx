@@ -5,7 +5,7 @@ import { AttendanceConsole } from '../components/AttendanceConsole';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { useAuth } from '../context/AuthContext';
 import { AppConfig } from '../config/appConfig';
-import { Calendar, Search, LayoutDashboard, Monitor, FileText, Settings, LogOut, User as UserIcon } from 'lucide-react';
+import { Calendar, Search, LayoutDashboard, Monitor, FileText, Settings, LogOut, User as UserIcon, CalendarCheck } from 'lucide-react';
 
 export const MainLayout: React.FC = () => {
   useShortcuts();
@@ -57,6 +57,9 @@ export const MainLayout: React.FC = () => {
 
         <div style={{ flex: 1, padding: '16px 0' }}>
           <SidebarItem icon={<LayoutDashboard size={18} />} label="Dashboard Overview" active={activeTab === 'Overview'} onClick={() => go('Overview', '/dashboard')} />
+          {!isOperator && (
+            <SidebarItem icon={<CalendarCheck size={18} />} label="Leave Management" active={activeTab === 'Leave'} onClick={() => go('Leave', '/leave-management')} />
+          )}
           {!isOperator && (
             <SidebarItem icon={<Monitor size={18} />} label="Device Management" active={activeTab === 'Devices'} onClick={() => go('Devices', '/device-settings')} />
           )}
