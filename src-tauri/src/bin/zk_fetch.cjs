@@ -56,6 +56,7 @@ async function main() {
         }
 
         if (action === "sync") {
+            const lastTimestamp = process.argv[6] || '';
             let users = [];
             let attendances = [];
 
@@ -74,10 +75,16 @@ async function main() {
             try {
                 const attData = await zkInstance.getAttendances();
                 if (attData && attData.data) {
-                    attendances = attData.data.map(a => ({
-                        deviceUserId: String(a.deviceUserId || a.uid || ''),
-                        recordTime: String(a.recordTime || '')
-                    }));
+                    attendances = attData.data
+                        .filter(a => {
+                            if (!lastTimestamp) return true;
+                            const t = String(a.recordTime || '');
+                            return t > lastTimestamp;
+                        })
+                        .map(a => ({
+                            deviceUserId: String(a.deviceUserId || a.uid || ''),
+                            recordTime: String(a.recordTime || '')
+                        }));
                 }
             } catch (e) {
                 console.error("Error fetching attendances:", e.message);

@@ -229,6 +229,9 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE AttendanceLogs ADD COLUMN punch_method TEXT", []);
     let _ = conn.execute("ALTER TABLE Users ADD COLUMN must_change_password INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE Employees ADD COLUMN status TEXT DEFAULT 'active'", []);
+    
+    // Ensure uniqueness constraint for offline-first permanent sync
+    let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_attendancelogs_emp_time ON AttendanceLogs (employee_id, timestamp)", []);
 
     // Seed default data
     conn.execute("INSERT OR IGNORE INTO Organizations (id, name) VALUES (1, 'Default Organization')", [])?;

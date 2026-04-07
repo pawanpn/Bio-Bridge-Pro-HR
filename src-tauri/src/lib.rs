@@ -401,7 +401,19 @@ async fn sync_device_logs(
 
     // 1b. Step B: Pull attendance logs ONLY if users were found
     let _ = app.emit("console-log", format!("[{}] STEP B: Pulling logs...", chrono::Utc::now().format("%H:%M:%S")));
-    let logs: Vec<crate::models::AttendanceLog> = crate::hardware::sync_device(&ip, port, comm_key, device_id, machine_no, parsed_brand).await
+    
+    // Get last sync timestamp to enable fast incremental sync
+    let last_timestamp: Option<String> = {
+        let db_guard = state.db.lock().map_err(lock_err)?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+        conn.query_row(
+            "SELECT MAX(timestamp) FROM AttendanceLogs WHERE device_id = ?1",
+            params![device_id],
+            |row| row.get(0)
+        ).ok()
+    };
+    
+    let logs: Vec<crate::models::AttendanceLog> = crate::hardware::sync_device(&ip, port, comm_key, device_id, machine_no, parsed_brand, last_timestamp).await
         .map_err(|e| {
             let _ = app.emit("sync-error", format!("Connection to {}:{} failed: {}", ip, port, e));
             e
@@ -1149,6 +1161,12 @@ fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, 
 
     let total_staff = present_staff.len() + absent_staff.len() + leave_staff.len();
 
+    let last_device_sync: String = conn.query_row(
+        "SELECT MAX(timestamp) FROM AttendanceLogs",
+        [],
+        |row| row.get(0)
+    ).unwrap_or_else(|_| "Never".to_string());
+
     Ok(serde_json::json!({
         "totalStaff": total_staff,
         "presentToday": present_staff.len(),
@@ -1160,6 +1178,7 @@ fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, 
         "lateStaff": late_staff,
         "leaveStaff": leave_staff,
         "lastUpdated": chrono::Local::now().format("%H:%M").to_string(),
+        "lastDeviceSync": last_device_sync,
     }))
 }
 
