@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import {
   ArrowLeft, Calendar, Clock, Fingerprint, ScanFace,
-  ChevronLeft, ChevronRight, User, Building, Briefcase, Activity
+  ChevronLeft, ChevronRight, Building, Briefcase, Activity
 } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts';
 
@@ -43,7 +43,7 @@ export const EmployeeDetail: React.FC = () => {
   const [month, setMonth] = useState(now.getMonth() + 1); // 1-12
   const [data, setData] = useState<EmployeeMonthlyData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [dailyChart, setDailyChart] = useState<{ day: string; punches: number }[]>([]);
+  const [dailyChart, setDailyChart] = useState<{ day: string; punches: number; isPresent: boolean }[]>([]);
 
   const fetchData = useCallback(async () => {
     if (!employeeId) return;

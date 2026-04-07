@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use std::time::Duration;
 use tauri::Emitter;
 use crate::models::AttendanceLog;
 use crate::errors::AppError;
@@ -22,6 +21,14 @@ impl DeviceDriver for ZKTecoDriver {
     fn brand_name(&self) -> &'static str { "ZKTeco" }
 
     async fn sync_logs(&self, ip: &str, port: u16, _comm_key: i32, device_id: i32, _machine_number: i32, last_timestamp: Option<String>) -> Result<Vec<AttendanceLog>, AppError> {
+        // Quick TCP pre-check — fail fast if device is unreachable
+        use std::net::TcpStream;
+        use std::time::Duration;
+        let addr = format!("{}:{}", ip, port);
+        if TcpStream::connect_timeout(&addr.parse().map_err(|e| AppError::ConnectionError(format!("Invalid address: {}", e)))?, Duration::from_secs(2)).is_err() {
+            return Err(AppError::ConnectionError(format!("Device unreachable at {}:{}", ip, port)));
+        }
+
         let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let script_path = current_dir.join("src").join("bin").join("zk_fetch.cjs");
         
@@ -69,6 +76,14 @@ impl DeviceDriver for ZKTecoDriver {
     }
 
     async fn get_all_user_info(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32) -> Result<Vec<crate::models::UserInfo>, AppError> {
+        // Quick TCP pre-check — fail fast if device is unreachable
+        use std::net::TcpStream;
+        use std::time::Duration;
+        let addr = format!("{}:{}", ip, port);
+        if TcpStream::connect_timeout(&addr.parse().map_err(|e| AppError::ConnectionError(format!("Invalid address: {}", e)))?, Duration::from_secs(2)).is_err() {
+            return Err(AppError::ConnectionError(format!("Device unreachable at {}:{}", ip, port)));
+        }
+
         let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let script_path = current_dir.join("src").join("bin").join("zk_fetch.cjs");
         
@@ -110,37 +125,27 @@ impl DeviceDriver for ZKTecoDriver {
     }
 
     async fn test_connectivity(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32) -> Result<(), AppError> {
-        let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let script_path = current_dir.join("src").join("bin").join("zk_fetch.cjs");
-        
-        // Spawn the node script to verify connectivity
-        let output = tokio::process::Command::new("node")
-            .arg(&script_path)
-            .arg("test")
-            .arg(ip)
-            .arg(port.to_string())
-            .arg("3000") // 3s timeout for testing
-            .output()
-            .await;
+        // Lightweight TCP port probe — just check if the port is open.
+        // No Node.js subprocess needed for a simple connectivity test.
+        use std::net::TcpStream;
+        use std::time::Duration;
 
-        match output {
-            Ok(output) if output.status.success() => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if stdout.contains("\"status\":\"success\"") {
-                    return Ok(());
-                }
-                Err(AppError::ConnectionError(format!("Connection test failed. Log: {}", String::from_utf8_lossy(&output.stderr))))
-            }
-            Ok(output) => {
-                Err(AppError::ConnectionError(format!("Device unreachable at {}:{}. Err: {}", ip, port, String::from_utf8_lossy(&output.stderr))))
-            }
-            Err(_) => {
-                Err(AppError::ConnectionError("Node.js is required but not installed or script not found.".to_string()))
-            }
+        let addr = format!("{}:{}", ip, port);
+        match TcpStream::connect_timeout(&addr.parse().map_err(|e| AppError::ConnectionError(format!("Invalid address: {}", e)))?, Duration::from_secs(3)) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(AppError::ConnectionError(format!("Device unreachable at {}:{}", ip, port))),
         }
     }
 
     async fn listen_realtime(&self, ip: &str, port: u16, _comm_key: i32, device_id: i32, _machine_number: i32, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError> {
+        // Quick TCP pre-check
+        use std::net::TcpStream;
+        use std::time::Duration;
+        let addr = format!("{}:{}", ip, port);
+        if TcpStream::connect_timeout(&addr.parse().map_err(|e| AppError::ConnectionError(format!("Invalid address: {}", e)))?, Duration::from_secs(2)).is_err() {
+            return Err(AppError::ConnectionError(format!("Device unreachable at {}:{}", ip, port)));
+        }
+
         let current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let script_path = current_dir.join("src").join("bin").join("zk_fetch.cjs");
 
