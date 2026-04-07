@@ -9,7 +9,6 @@ import { Reports } from './pages/Reports';
 import { LeaveManagement } from './pages/LeaveManagement';
 import { EmployeeDetail } from './pages/EmployeeDetail';
 import { Login } from './pages/Login';
-import './styles/global.css';
 
 function AppContent() {
   const { user } = useAuth();

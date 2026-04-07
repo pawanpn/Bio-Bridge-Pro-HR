@@ -2,8 +2,14 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { AppConfig } from '../config/appConfig';
-import { PrimaryButton } from './common/PrimaryButton';
-import { StandardInput } from './common/StandardInput';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Upload, CheckCircle2, Building2, Globe, Cloud, ArrowRight, ArrowLeft, Shield, FileText, UploadCloud } from 'lucide-react';
 
 export const SetupWizard: React.FC = () => {
   const [step, setStep] = useState(1);
@@ -83,8 +89,8 @@ export const SetupWizard: React.FC = () => {
       const text = await file.text();
       const parsed = JSON.parse(text);
       if (parsed.client_email) {
-        setFormData({ 
-          ...formData, 
+        setFormData({
+          ...formData,
           serviceAccountEmail: parsed.client_email,
           jsonKeyText: text
         });
@@ -123,141 +129,272 @@ export const SetupWizard: React.FC = () => {
     }
   };
 
+  const steps = [
+    { icon: Shield, title: 'Activation' },
+    { icon: CheckCircle2, title: 'Verified' },
+    { icon: Building2, title: 'Branch' },
+    { icon: Globe, title: 'Localization' },
+    { icon: Cloud, title: 'Cloud Sync' },
+  ];
+
   return (
-    <div style={styles.overlay}>
-      <div style={styles.modal}>
-        <div style={styles.header}>
-          <h2 style={{ margin: 0 }}>{AppConfig.appName}</h2>
-          <div style={{ color: 'var(--text-muted)', fontSize: '14px' }}>Step {step} of 5</div>
-        </div>
-
-        {/* Progress bar */}
-        <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--border-color)', margin: '12px 0 24px' }}>
-          <div style={{ width: `${(step / 5) * 100}%`, height: '100%', backgroundColor: 'var(--accent-color)', transition: 'width 0.3s ease' }} />
-        </div>
-
-         {step === 1 && (
-          <div>
-            <h3>Software Activation</h3>
-            <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '20px' }}>
-              Upload your cloud credentials and enter your license key to activate.
-            </p>
-            
-            <div style={{ marginBottom: '20px', padding: '12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', border: '1px dashed var(--border-color)' }}>
-              <span style={{ fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Computer ID</span>
-              <code style={{ display: 'block', fontSize: '12px', wordBreak: 'break-all', marginTop: '4px' }}>{formData.hardwareId}</code>
+    <div className="fixed inset-0 bg-gradient-to-br from-primary/90 to-primary flex items-center justify-center z-50 p-4">
+      <Card className="w-full max-w-2xl shadow-2xl border-0">
+        <CardHeader className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-2xl">{AppConfig.appName}</CardTitle>
+              <CardDescription>Initial Setup Wizard</CardDescription>
             </div>
-
-            <label style={styles.label}>1. Cloud Credentials (.json)</label>
-            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px' }}>
-              <PrimaryButton label="Choose JSON Key" onClick={() => fileInputRef.current?.click()} />
-              <input type="file" accept=".json" ref={fileInputRef} hidden onChange={handleFileUpload} />
-              <span style={{ fontSize: '12px' }}>{formData.jsonKeyText ? '✅ Loaded' : '❌ Not Loaded'}</span>
-            </div>
-
-            <label style={styles.label}>2. License Key</label>
-            <StandardInput placeholder="BIO-XXXX-XXXX-XXXX" value={formData.authKey} onChange={e => setFormData({ ...formData, authKey: e.target.value})} />
-            
-            <PrimaryButton isAccent style={{ marginTop: '24px', width: '100%' }} onClick={handleVerify} label="Activate License" />
-            
-            <button 
-              onClick={handleAdminGenerate}
-              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '11px', marginTop: '12px', cursor: 'pointer', textDecoration: 'underline' }}
-            >
-              [Admin] Generate 5 Stock Keys on Drive
-            </button>
+            <Badge variant="outline" className="text-sm">
+              Step {step} of 5
+            </Badge>
           </div>
-        )}
 
-        {step === 2 && (
-          <div>
-            <h3>Verification Successful</h3>
-            <p>Your license from Google Drive has been validated.</p>
-            <div style={{ padding: '16px', backgroundColor: 'var(--bg-color)', borderRadius: '8px', margin: '16px 0' }}>
-               Expiry Date: <strong style={{ color: 'var(--success)' }}>{formData.licenseExpiry}</strong>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <PrimaryButton onClick={prevStep} label="Back" />
-              <PrimaryButton isAccent onClick={nextStep} label="Next" />
-            </div>
+          {/* Progress bar */}
+          <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-accent transition-all duration-300 ease-in-out"
+              style={{ width: `${(step / 5) * 100}%` }}
+            />
           </div>
-        )}
 
-        {step === 3 && (
-          <div>
-            <h3>Multi-Branch Setup</h3>
-            <p>Define your primary branch. Sub-branches can be added later via Settings.</p>
-            <StandardInput value="Head Office" disabled />
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '24px' }}>
-              <PrimaryButton onClick={prevStep} label="Back" />
-              <PrimaryButton isAccent onClick={nextStep} label="Next" />
-            </div>
+          {/* Step indicators */}
+          <div className="flex items-center justify-between gap-2 pt-2">
+            {steps.map((s, idx) => {
+              const Icon = s.icon;
+              const isActive = idx + 1 === step;
+              const isCompleted = idx + 1 < step;
+              return (
+                <div
+                  key={idx}
+                  className={`flex items-center justify-center w-10 h-10 rounded-full transition-all ${
+                    isCompleted
+                      ? 'bg-green-500 text-white'
+                      : isActive
+                      ? 'bg-primary text-primary-foreground ring-2 ring-primary ring-offset-2'
+                      : 'bg-muted text-muted-foreground'
+                  }`}
+                >
+                  <Icon size={18} />
+                </div>
+              );
+            })}
           </div>
-        )}
+        </CardHeader>
 
-        {step === 4 && (
-          <div>
-            <h3>Localization</h3>
-            <label style={styles.label}>Default Calendar System</label>
-            <select style={styles.select} value={formData.defaultCalendar} onChange={e => setFormData({...formData, defaultCalendar: e.target.value})}>
-              <option value="BS">Bikram Sambat (BS)</option>
-              <option value="AD">English Date (AD)</option>
-            </select>
-            
-            <label style={styles.label}>Global Weekend</label>
-            <select style={styles.select} value={formData.globalWeekend} onChange={e => setFormData({...formData, globalWeekend: e.target.value})}>
-              <option value="Saturday">Saturday</option>
-              <option value="Sunday">Sunday</option>
-            </select>
+        <Separator />
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '24px' }}>
-              <PrimaryButton onClick={prevStep} label="Back" />
-              <PrimaryButton isAccent onClick={nextStep} label="Next" />
-            </div>
-          </div>
-        )}
-
-        {step === 5 && (
-          <div>
-            <h3>Cloud Sync Setup</h3>
-            <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '20px' }}>
-              Configure Google Drive to automatically push employee attendance logs.
-            </p>
-
-            {formData.serviceAccountEmail && (
-              <div style={{ padding: '12px', backgroundColor: 'rgba(16,185,129,0.1)', borderRadius: '6px', marginBottom: '24px', border: '1px solid var(--success)' }}>
-                <span style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>Drive Sync Status</span>
-                <p style={{ margin: 0, fontSize: '13px' }}>✅ Credentials verified during activation.</p>
+        <CardContent className="pt-6">
+          {step === 1 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xl font-semibold mb-2">Software Activation</h3>
+                <p className="text-sm text-muted-foreground">
+                  Upload your cloud credentials and enter your license key to activate.
+                </p>
               </div>
-            )}
 
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <PrimaryButton onClick={prevStep} label="Back" />
-              <PrimaryButton isAccent onClick={handleFinish} label="Complete Setup" />
+              <div className="p-4 bg-muted/50 rounded-lg border border-dashed">
+                <span className="text-xs uppercase text-muted-foreground">Computer ID</span>
+                <code className="block text-xs mt-1 break-all font-mono">{formData.hardwareId}</code>
+              </div>
+
+              <div className="space-y-2">
+                <Label>1. Cloud Credentials (.json)</Label>
+                <div className="flex items-center gap-3">
+                  <Button onClick={() => fileInputRef.current?.click()}>
+                    <Upload size={16} />
+                    Choose JSON Key
+                  </Button>
+                  <input type="file" accept=".json" ref={fileInputRef} hidden onChange={handleFileUpload} />
+                  <Badge variant={formData.jsonKeyText ? 'success' : 'destructive'}>
+                    {formData.jsonKeyText ? '✅ Loaded' : '❌ Not Loaded'}
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="authKey">2. License Key</Label>
+                <Input
+                  id="authKey"
+                  placeholder="BIO-XXXX-XXXX-XXXX"
+                  value={formData.authKey}
+                  onChange={e => setFormData({ ...formData, authKey: e.target.value})}
+                />
+              </div>
+
+              <Button className="w-full" onClick={handleVerify}>
+                <CheckCircle2 size={16} />
+                Activate License
+              </Button>
+
+              <button
+                onClick={handleAdminGenerate}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors underline"
+              >
+                [Admin] Generate 5 Stock Keys on Drive
+              </button>
             </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xl font-semibold mb-2">Verification Successful</h3>
+                <p className="text-sm text-muted-foreground">
+                  Your license from Google Drive has been validated.
+                </p>
+              </div>
+
+              <div className="p-6 bg-green-500/10 border border-green-500 rounded-lg">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle2 size={20} className="text-green-600" />
+                  <span className="font-semibold text-green-700">License Activated</span>
+                </div>
+                <p className="text-sm">
+                  Expiry Date: <strong className="text-green-600">{formData.licenseExpiry}</strong>
+                </p>
+              </div>
+
+              <div className="flex justify-between">
+                <Button variant="outline" onClick={prevStep}>
+                  <ArrowLeft size={16} />
+                  Back
+                </Button>
+                <Button onClick={nextStep}>
+                  Next
+                  <ArrowRight size={16} />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xl font-semibold mb-2">Multi-Branch Setup</h3>
+                <p className="text-sm text-muted-foreground">
+                  Define your primary branch. Sub-branches can be added later via Settings.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Primary Branch</Label>
+                <Input value="Head Office" disabled className="bg-muted/50" />
+              </div>
+
+              <div className="flex justify-between">
+                <Button variant="outline" onClick={prevStep}>
+                  <ArrowLeft size={16} />
+                  Back
+                </Button>
+                <Button onClick={nextStep}>
+                  Next
+                  <ArrowRight size={16} />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {step === 4 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xl font-semibold mb-2">Localization</h3>
+                <p className="text-sm text-muted-foreground">
+                  Configure your regional settings and calendar system.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="calendar">Default Calendar System</Label>
+                  <Select
+                    id="calendar"
+                    value={formData.defaultCalendar}
+                    onChange={e => setFormData({...formData, defaultCalendar: e.target.value})}
+                  >
+                    <option value="BS">Bikram Sambat (BS)</option>
+                    <option value="AD">English Date (AD)</option>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="weekend">Global Weekend</Label>
+                  <Select
+                    id="weekend"
+                    value={formData.globalWeekend}
+                    onChange={e => setFormData({...formData, globalWeekend: e.target.value})}
+                  >
+                    <option value="Saturday">Saturday</option>
+                    <option value="Sunday">Sunday</option>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex justify-between">
+                <Button variant="outline" onClick={prevStep}>
+                  <ArrowLeft size={16} />
+                  Back
+                </Button>
+                <Button onClick={nextStep}>
+                  Next
+                  <ArrowRight size={16} />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {step === 5 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xl font-semibold mb-2">Cloud Sync Setup</h3>
+                <p className="text-sm text-muted-foreground">
+                  Configure Google Drive to automatically push employee attendance logs.
+                </p>
+              </div>
+
+              {formData.serviceAccountEmail && (
+                <div className="p-4 bg-green-500/10 border border-green-500 rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <UploadCloud size={20} className="text-green-600" />
+                    <span className="font-semibold text-green-700">Drive Sync Status</span>
+                  </div>
+                  <p className="text-sm">
+                    ✅ Credentials verified during activation.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1 font-mono">
+                    {formData.serviceAccountEmail}
+                  </p>
+                </div>
+              )}
+
+              <div className="flex justify-between">
+                <Button variant="outline" onClick={prevStep}>
+                  <ArrowLeft size={16} />
+                  Back
+                </Button>
+                <Button onClick={handleFinish}>
+                  <CheckCircle2 size={16} />
+                  Complete Setup
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+
+        <Separator />
+
+        <CardFooter className="flex justify-between py-4">
+          <div className="text-xs text-muted-foreground">
+            {step === 5 ? 'Final step' : `${5 - step} steps remaining`}
           </div>
-        )}
-      </div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <FileText size={14} />
+            <span>BioBridge Pro HR Setup</span>
+          </div>
+        </CardFooter>
+      </Card>
     </div>
   );
-};
-
-const styles = {
-  overlay: {
-    position: 'fixed' as const, top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'var(--primary-dark)',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-  },
-  modal: {
-    backgroundColor: 'var(--surface-color)',
-    padding: '32px', borderRadius: '12px',
-    width: '550px', boxShadow: '0 10px 40px rgba(0,0,0,0.6)',
-    border: '1px solid rgba(255,255,255,0.05)'
-  },
-  header: {
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: '8px'
-  },
-  label: { display: 'block', margin: '16px 0 8px', fontSize: '13px', color: 'var(--text-muted)' },
-  select: { width: '100%', padding: '10px', borderRadius: '4px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-color)', color: 'var(--text-color)' }
 };
