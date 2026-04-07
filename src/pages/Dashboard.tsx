@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnalyticalCard } from '../components/AnalyticalCard';
 import { DeviceScanner } from '../components/DeviceScanner';
 import { invoke } from '@tauri-apps/api/core';
-import { Users, UserCheck, AlertTriangle, UserMinus, Cloud, CloudOff, Clock, X, Folder, Fingerprint, ScanFace } from 'lucide-react';
+import { Users, UserCheck, AlertTriangle, UserMinus, Cloud, CloudOff, Clock, X } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
 
 interface Staff {
@@ -56,15 +56,29 @@ export const Dashboard: React.FC = () => {
   const [syncProgress, setSyncProgress] = useState<string | null>(null);
   const [weeklyChart, setWeeklyChart] = useState<{day: string; present: number; absent: number}[]>([]);
 
+  // Refs for mutable state to avoid useEffect re-triggers
+  const isQuickSyncRef = useRef(isQuickSyncEnabled);
+  const isRealtimeRef = useRef(isRealtimeEnabled);
+  const isSyncingRef = useRef(isSyncing);
+  const deviceRef = useRef(device);
+  const isDeviceOnlineRef = useRef(isDeviceOnline);
+
+  // Keep refs in sync
+  useEffect(() => { isQuickSyncRef.current = isQuickSyncEnabled; }, [isQuickSyncEnabled]);
+  useEffect(() => { isRealtimeRef.current = isRealtimeEnabled; }, [isRealtimeEnabled]);
+  useEffect(() => { isSyncingRef.current = isSyncing; }, [isSyncing]);
+  useEffect(() => { deviceRef.current = device; }, [device]);
+  useEffect(() => { isDeviceOnlineRef.current = isDeviceOnline; }, [isDeviceOnline]);
+
+  const refreshStats = () => {
+    invoke<Stats>('get_dashboard_stats').then(s => { setStats(s); buildWeeklyChart(s); });
+  };
+
   // Interactivity States
   const [activeListModal, setActiveListModal] = useState<{ title: string, data: Staff[], type: string } | null>(null);
-  const [profileModal, setProfileModal] = useState<{ isOpen: boolean; data: any }>({ isOpen: false, data: null });
 
-  const handleProfileClick = async (id: number) => {
-    try {
-      const data = await invoke('get_employee_profile', { employeeId: id });
-      setProfileModal({ isOpen: true, data });
-    } catch(e) { console.error("Failed to load profile:", e); }
+  const handleEmployeeClick = async (id: number) => {
+    navigate(`/employee/${id}`);
   };
 
   const buildWeeklyChart = (s: Stats) => {
@@ -79,13 +93,14 @@ export const Dashboard: React.FC = () => {
   };
 
   useEffect(() => {
+    // Initial data load — runs ONCE on mount
     invoke<Stats>('get_dashboard_stats').then(s => { setStats(s); buildWeeklyChart(s); });
     invoke<CloudConfig>('get_cloud_config').then(setCloud);
     loadAndTestDevice();
 
-    // Auto-Sync Timer (QuickSync)
+    // Auto-Sync Timer (QuickSync) — uses refs to avoid re-creating interval
     const syncTimer = setInterval(() => {
-      if (isQuickSyncEnabled && device && isDeviceOnline && !isSyncing) {
+      if (isQuickSyncRef.current && deviceRef.current && isDeviceOnlineRef.current && !isSyncingRef.current) {
         setSecondsUntilSync(prev => {
           if (prev <= 1) {
             triggerAutoSync();
@@ -96,26 +111,25 @@ export const Dashboard: React.FC = () => {
       }
     }, 1000);
 
-    // Subscribe to Real-Time Pulses
+    // Subscribe to Real-Time Pulses — runs ONCE on mount
     let unlisten: () => void = () => {};
     const setupEvents = async () => {
       const { listen } = await import('@tauri-apps/api/event');
-      
+
       const un1 = await listen('realtime-pulse', () => {
         setLastPulse(Date.now());
-        invoke<Stats>('get_dashboard_stats').then(setStats);
+        // Debounced: only refresh if not already syncing
+        if (!isSyncingRef.current) {
+          refreshStats();
+        }
       });
 
       const un2 = await listen('attendance-sync-complete', () => {
         console.log("Sync complete, refreshing stats...");
         setSyncProgress(null);
-        invoke<Stats>('get_dashboard_stats').then(s => {
-          setStats(s);
-          buildWeeklyChart(s);
-        });
+        refreshStats();
       });
 
-      // Real hardware error events — show in UI instead of silent failure
       const un3 = await listen<string>('sync-error', (event) => {
         setSyncError(event.payload);
         setSyncProgress(null);
@@ -128,7 +142,8 @@ export const Dashboard: React.FC = () => {
 
       unlisten = () => { un1(); un2(); un3(); un4(); };
 
-      if (isRealtimeEnabled && isDeviceOnline) {
+      // Start realtime only if enabled AND device is online
+      if (isRealtimeRef.current && isDeviceOnlineRef.current) {
         invoke('start_realtime_sync').catch(console.error);
       }
     };
@@ -138,7 +153,8 @@ export const Dashboard: React.FC = () => {
       clearInterval(syncTimer);
       if (unlisten) unlisten();
     };
-  }, [isQuickSyncEnabled, isRealtimeEnabled, device, isDeviceOnline, isSyncing]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadAndTestDevice = async () => {
     try {
@@ -451,7 +467,7 @@ export const Dashboard: React.FC = () => {
                 {stats.presentStaff.length === 0 ? <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No one present yet.</p> : (
                   <div style={{ display: 'grid', gap: '8px' }}>
                     {stats.presentStaff.map(s => (
-                      <div key={s.id} onClick={() => handleProfileClick(s.id)} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', transition: '0.2s', borderLeft: '3px solid var(--success)' }} className="hover-list-item">
+                      <div key={s.id} onClick={() => handleEmployeeClick(s.id)} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', transition: '0.2s', borderLeft: '3px solid var(--success)' }} className="hover-list-item">
                         <span style={{ fontWeight: '600' }}>{s.name}</span>
                         <span style={{ color: 'var(--text-muted)' }}>In: {s.time}</span>
                       </div>
@@ -467,7 +483,7 @@ export const Dashboard: React.FC = () => {
                 {stats.absentStaff.length === 0 ? <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Everyone is present or on leave!</p> : (
                   <div style={{ display: 'grid', gap: '8px' }}>
                     {stats.absentStaff.map(s => (
-                      <div key={s.id} onClick={() => handleProfileClick(s.id)} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', transition: '0.2s', borderLeft: '3px solid var(--error)' }} className="hover-list-item">
+                      <div key={s.id} onClick={() => handleEmployeeClick(s.id)} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', transition: '0.2s', borderLeft: '3px solid var(--error)' }} className="hover-list-item">
                         <span style={{ fontWeight: '600' }}>{s.name}</span>
                         <span style={{ color: 'var(--error)' }}>Missing</span>
                       </div>
@@ -522,7 +538,7 @@ export const Dashboard: React.FC = () => {
                   }
 
                   return (
-                    <div key={s.id} onClick={() => { handleProfileClick(s.id); setActiveListModal(null); }} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', backgroundColor: 'var(--bg-color)', borderRadius: '8px', fontSize: '14px', cursor: 'pointer', transition: '0.2s', borderLeft: `4px solid ${activeListModal.type === 'present' ? 'var(--success)' : activeListModal.type === 'late' ? 'var(--warning)' : 'var(--error)'}` }} className="hover-list-item">
+                    <div key={s.id} onClick={() => { handleEmployeeClick(s.id); setActiveListModal(null); }} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', backgroundColor: 'var(--bg-color)', borderRadius: '8px', fontSize: '14px', cursor: 'pointer', transition: '0.2s', borderLeft: `4px solid ${activeListModal.type === 'present' ? 'var(--success)' : activeListModal.type === 'late' ? 'var(--warning)' : 'var(--error)'}` }} className="hover-list-item">
                       <span style={{ fontWeight: '600' }}>{s.name}</span>
                       <span style={{ color: activeListModal.type === 'present' ? 'var(--text-muted)' : (activeListModal.type === 'late' ? 'var(--warning)' : 'var(--error)'), fontWeight: 'bold' }}>
                          {info}
@@ -536,56 +552,6 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Employee Profile Modal */}
-      {profileModal.isOpen && profileModal.data && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ backgroundColor: 'var(--surface-color)', padding: '32px', borderRadius: '16px', width: '90%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 10px 40px rgba(0,0,0,0.2)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
-               <div>
-                  <h2 style={{ margin: '0 0 4px 0', fontSize: '24px' }}>{profileModal.data.name}</h2>
-                  <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '14px' }}>
-                     {profileModal.data.department} • {profileModal.data.branch} • ID #{profileModal.data.id}
-                  </p>
-               </div>
-               <button onClick={() => setProfileModal({ isOpen: false, data: null })} style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: '50%', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-color)' }}><X size={16} /></button>
-            </div>
-
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
-                <a href="#" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', backgroundColor: 'rgba(59,130,246,0.1)', color: '#3b82f6', borderRadius: '8px', textDecoration: 'none', fontSize: '13px', fontWeight: 'bold' }}>
-                   <Folder size={16} /> Open Drive Folder
-                </a>
-            </div>
-            
-            <h3 style={{ fontSize: '16px', marginBottom: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px' }}>Recent Attendance (Last 7 Days)</h3>
-            
-            {profileModal.data.logs.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '24px 0' }}>No recent attendance logs.</p>
-            ) : (
-              <div style={{ display: 'grid', gap: '12px' }}>
-                {profileModal.data.logs.slice(0, 15).map((log: any, idx: number) => {
-                   const isFace = log.method.toUpperCase().includes('FACE') || log.method === '1';
-                   return (
-                     <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', backgroundColor: 'var(--bg-color)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                       <div>
-                          <div style={{ fontWeight: 'bold', fontSize: '14px', marginBottom: '4px' }}>{log.timestamp.slice(0, 10)} <span style={{ color: 'var(--primary-color)', marginLeft: '8px' }}>{log.timestamp.slice(11, 16)}</span></div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              Source Tag: <span style={{ backgroundColor: 'var(--border-color)', padding: '2px 6px', borderRadius: '4px', fontWeight: 'bold' }}>{log.source}</span>
-                          </div>
-                       </div>
-                       <div style={{ 
-                         display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: 'bold',
-                         backgroundColor: isFace ? 'rgba(59,130,246,0.1)' : 'rgba(16,185,129,0.1)', color: isFace ? '#3b82f6' : 'var(--success)'
-                       }}>
-                          {isFace ? <><ScanFace size={14} /> Face</> : <><Fingerprint size={14} /> Finger</>}
-                       </div>
-                     </div>
-                   );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -232,15 +232,19 @@ fn check_port_conflict(port: u16) -> Result<bool, AppError> {
 
 async fn start_adms_listener(app: tauri::AppHandle) {
     use tiny_http::{Server, Response};
-    let server = Server::http("0.0.0.0:8081").unwrap();
+    let server = match Server::http("0.0.0.0:8081") {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[ADMS] Failed to start listener on port 8081: {}", e);
+            return;
+        }
+    };
     println!("[ADMS] Cloud Listener started on port 8081");
-    
-    for request in server.incoming_requests() {
+
+    while let Ok(request) = server.recv() {
         let _ = app.emit("console-log", format!("[ADMS] Received push from {:?}", request.remote_addr()));
-        // Simplified ADMS logic: acknowledge any push to keep device happy
         let response = Response::from_string("OK");
         let _ = request.respond(response);
-        // Note: Real parsing requires handling /iclock/cdata or /iclock/getrequest
     }
 }
 
@@ -1815,11 +1819,15 @@ pub fn run() {
                 }
             });
 
-            // Retry Worker (Every 10 seconds)
+            // Retry Worker (Every 10 seconds, with smart backoff)
             let retry_app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                let mut idle_count = 0;
                 loop {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                    // Smart backoff: 10s when busy, 60s when idle
+                    let sleep_secs = if idle_count > 5 { 60 } else { 10 };
+                    tokio::time::sleep(tokio::time::Duration::from_secs(sleep_secs)).await;
+
                     let unsynced_logs: Vec<(i32, i32, String, String)> = {
                         let state = retry_app.state::<AppState>();
                         let db_guard = state.db.lock().unwrap();
@@ -1832,7 +1840,13 @@ pub fn run() {
                             vec![]
                         }
                     };
-                    
+
+                    if unsynced_logs.is_empty() {
+                        idle_count += 1;
+                        continue;
+                    }
+                    idle_count = 0; // Reset idle counter when work is found
+
                     for (emp_id, dev_id, ts, pm) in unsynced_logs {
                          let _ = process_log_and_sync(emp_id, dev_id, ts, pm, retry_app.clone()).await;
                     }
