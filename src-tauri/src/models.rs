@@ -9,6 +9,12 @@ pub struct AttendanceLog {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UserInfo {
+    pub employee_id: i32,
+    pub name: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum DeviceBrand {
     ZKTeco,
     Hikvision,

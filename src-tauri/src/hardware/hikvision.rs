@@ -15,8 +15,8 @@ pub struct HikvisionDriver;
 impl DeviceDriver for HikvisionDriver {
     fn brand_name(&self) -> &'static str { "Hikvision" }
 
-    async fn sync_logs(&self, ip: &str, device_id: i32) -> Result<Vec<AttendanceLog>, AppError> {
-        let url = format!("http://{}/ISAPI/AccessControl/AcsEvent?format=json", ip);
+    async fn sync_logs(&self, ip: &str, port: u16, device_id: i32) -> Result<Vec<AttendanceLog>, AppError> {
+        let url = format!("http://{}:{}/ISAPI/AccessControl/AcsEvent?format=json", ip, port);
         let client = Client::builder()
             .timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
             .build()
@@ -44,6 +44,32 @@ impl DeviceDriver for HikvisionDriver {
             }
         }
         Ok(attendance_logs)
+    }
+
+    async fn get_all_user_info(&self, ip: &str, port: u16) -> Result<Vec<crate::models::UserInfo>, AppError> {
+        let url = format!("http://{}:{}/ISAPI/AccessControl/UserInfo/Search?format=json", ip, port);
+        let client = Client::builder().timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS)).build().map_err(|e| AppError::ConnectionError(e.to_string()))?;
+        
+        // Simple mock because ISAPI structure is huge. We just try to hit the endpoint.
+        let response = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .body(r#"{"UserInfoSearchCond":{"searchID":"1","searchResultPosition":0,"maxResults":100}}"#)
+            .send()
+            .await
+            .map_err(|e| AppError::ConnectionError(e.to_string()))?;
+
+        let json: Value = response.json().await.unwrap_or(serde_json::json!({}));
+        let mut users = Vec::new();
+
+        if let Some(user_list) = json["UserInfoSearch"]["UserInfo"].as_array() {
+            for u in user_list {
+                let id = u["employeeNo"].as_str().and_then(|s| s.parse::<i32>().ok()).unwrap_or(0);
+                let name = u["name"].as_str().unwrap_or(&format!("User {}", id)).to_string();
+                if id > 0 { users.push(crate::models::UserInfo { employee_id: id, name }); }
+            }
+        }
+        Ok(users)
     }
 
     async fn test_connectivity(&self, ip: &str, port: u16) -> Result<(), AppError> {

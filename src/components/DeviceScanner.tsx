@@ -45,8 +45,9 @@ export const DeviceScanner: React.FC = () => {
   };
 
   const handleSync = async (ip: string, brand: string) => {
+    const port = brand === 'ZKTeco' ? 4370 : 8000;
     try {
-      await invoke('sync_device_logs', { ip, deviceId: 1, brand }); // arbitrary deviceId
+      await invoke('sync_device_logs', { ip, port, deviceId: 1, brand });
     } catch (e) {
       alert("Failed to sync: " + e);
     }

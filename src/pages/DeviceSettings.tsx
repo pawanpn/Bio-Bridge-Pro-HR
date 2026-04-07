@@ -174,14 +174,16 @@ export const DeviceSettings: React.FC = () => {
     try {
       const result = await invoke<string>('sync_device_logs', {
         ip: dev.ip,
+        port: Number(dev.port),
         deviceId: dev.id,
         brand: dev.brand,
       });
       setSyncStatus(prev => ({ ...prev, [dev.id]: `✅ ${result}` }));
     } catch (e) {
+      // Show the real error (Timeout, Connection Refused, etc.)
       setSyncStatus(prev => ({ ...prev, [dev.id]: `❌ ${e}` }));
     }
-    setTimeout(() => setSyncStatus(prev => ({ ...prev, [dev.id]: '' })), 4000);
+    setTimeout(() => setSyncStatus(prev => ({ ...prev, [dev.id]: '' })), 6000);
   };
 
   const handleScan = async () => {
