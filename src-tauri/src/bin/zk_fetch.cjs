@@ -42,7 +42,7 @@ async function main() {
 
         if (action === "unlock") {
             // Unlocks the physical door
-            await zkInstance.executeCmd(9, ''); 
+            await zkInstance.executeCmd(9, '');
             console.log(JSON.stringify({ status: "unlocked" }));
             await zkInstance.disconnect();
             process.exit(0);
@@ -88,7 +88,7 @@ async function main() {
                 users: users,
                 attendances: attendances
             }));
-            
+
             await zkInstance.disconnect();
             process.exit(0);
         }
