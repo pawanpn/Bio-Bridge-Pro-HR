@@ -1,12 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Download, Search, RefreshCw, Calculator, Fingerprint, ScanFace, Database } from 'lucide-react';
+import { Download, Search, RefreshCw, Calculator, Fingerprint, ScanFace, Database, FolderOpen } from 'lucide-react';
 
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { AppConfig } from '../config/appConfig';
+
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
 
 // Types
 interface DailyAttendance {
@@ -50,6 +65,13 @@ interface Branch {
   name: string;
 }
 
+const tabs = [
+  { key: 'daily' as const, label: 'Daily Attendance' },
+  { key: 'ledger' as const, label: 'Monthly Ledger' },
+  { key: 'salary' as const, label: 'Salary Sheet' },
+  { key: 'raw' as const, label: 'Attendance Logs' },
+];
+
 export const Reports: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'daily' | 'ledger' | 'salary' | 'raw' | 'absent'>('daily');
   const [fromDate, setFromDate] = useState(new Date().toISOString().split('T')[0]);
@@ -59,12 +81,12 @@ export const Reports: React.FC = () => {
   const [branch, setBranch] = useState<number | null>(null);
   const [gate, setGate] = useState<number | null>(null);
   const [search, setSearch] = useState('');
-  
+
   const [branches, setBranches] = useState<Branch[]>([]);
   const [gates, setGates] = useState<{id: number, name: string}[]>([]);
   const [departments, setDepartments] = useState<string[]>(['All']);
   const [loading, setLoading] = useState(false);
-  
+
   const [dailyData, setDailyData] = useState<DailyAttendance[]>([]);
   const [ledgerData, setLedgerData] = useState<MonthlyLedger[]>([]);
   const [salaryData, setSalaryData] = useState<SalarySheet[]>([]);
@@ -134,7 +156,7 @@ export const Reports: React.FC = () => {
 
   const exportPDF = () => {
     const doc = new jsPDF('l', 'mm', 'a4') as any; // Landscape
-    
+
     // Company Header
     doc.setFontSize(18);
     doc.setTextColor(44, 62, 80);
@@ -151,13 +173,13 @@ export const Reports: React.FC = () => {
     doc.setFontSize(9);
     doc.text(`Generated: ${new Date().toLocaleString()}`, 230, 20);
 
-    const tableHeaders = 
+    const tableHeaders =
         activeTab === 'daily' ? [['Name', 'Dept', 'Date', 'In', 'Out', 'Late', 'Early', 'Hours', 'Status']] :
         activeTab === 'ledger' ? [['Name', ...Array.from({length: 31}, (_, i) => (i+1).toString())]] :
         activeTab === 'salary' ? [['Name', 'Dept', 'Present', 'Leaves', 'Payable Days']] :
         [['Name', 'Timestamp', 'Device']];
 
-    const tableData = 
+    const tableData =
         activeTab === 'daily' ? dailyData.map(d => [d.name, d.department, d.date, d.check_in, d.check_out, d.late_entry, d.early_exit, d.working_hours, d.status]) :
         activeTab === 'ledger' ? ledgerData.map(l => [l.name, ...Array.from({length: 31}, (_, i) => l.attendance[(i+1).toString().padStart(2, '0')] || 'A')]) :
         activeTab === 'salary' ? salaryData.map(s => [s.name, s.department, s.present_days, s.paid_leaves, s.payable_days]) :
@@ -176,7 +198,7 @@ export const Reports: React.FC = () => {
 
   const exportExcel = () => {
     const ws = XLSX.utils.json_to_sheet(
-        activeTab === 'daily' ? dailyData : 
+        activeTab === 'daily' ? dailyData :
         activeTab === 'ledger' ? ledgerData.map(l => ({ Employee: l.name, ...l.attendance })) :
         activeTab === 'salary' ? salaryData : rawData
     );
@@ -203,314 +225,315 @@ export const Reports: React.FC = () => {
     return new Date(y, m, 0).getDate();
   };
 
+  const getStatusBadgeVariant = (status: string): 'default' | 'success' | 'warning' | 'destructive' => {
+    if (status === 'On-time' || status === 'P') return 'success';
+    if (status === 'Late' || status === 'L') return 'warning';
+    return 'destructive';
+  };
 
   return (
-    <div style={{ padding: '24px' }}>
+    <div className="p-6 space-y-6">
       {/* Page Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-           <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: 'var(--text-color)' }}>HR Reporting Engine</h1>
-           <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: '13px' }}>Enterprise attendance analysis and payroll reconciliation</p>
+           <h1 className="text-2xl font-bold tracking-tight">HR Reporting Engine</h1>
+           <p className="text-sm text-muted-foreground mt-1">Enterprise attendance analysis and payroll reconciliation</p>
         </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
-             <button onClick={fetchData} style={secondaryBtnStyle} disabled={loading}><RefreshCw size={14} className={loading?"animate-spin":""} /> Recalculate</button>
+        <div className="flex flex-wrap gap-2">
+             <Button variant="outline" onClick={fetchData} disabled={loading}>
+               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Recalculate
+             </Button>
              {activeTab === 'raw' && (
-                <button onClick={exportUSB} style={{...secondaryBtnStyle, borderColor: '#3b82f6', color: '#3b82f6'}} disabled={loading}>
-                  <Database size={14} /> Export to USB (.db)
-                </button>
+                <Button variant="outline" className="text-blue-500 border-blue-500/30 hover:bg-blue-500/10" onClick={exportUSB} disabled={loading}>
+                  <Database className="h-4 w-4" /> Export to USB (.db)
+                </Button>
              )}
-             <button onClick={exportExcel} style={primaryBtnStyle}><Download size={14} /> XLSX</button>
-             <button onClick={exportPDF} style={primaryBtnStyle}><Download size={14} /> PDF</button>
+             <Button variant="secondary" onClick={exportExcel}>
+               <Download className="h-4 w-4" /> XLSX
+             </Button>
+             <Button onClick={exportPDF}>
+               <Download className="h-4 w-4" /> PDF
+             </Button>
         </div>
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '24px', padding: '4px', backgroundColor: 'var(--bg-color)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-       <Tab active={activeTab === 'daily'} onClick={() => setActiveTab('daily')}>Daily Attendance</Tab>
-         <Tab active={activeTab === 'ledger'} onClick={() => setActiveTab('ledger')}>Monthly Ledger</Tab>
-         <Tab active={activeTab === 'salary'} onClick={() => setActiveTab('salary')}>Salary Sheet</Tab>
-         <Tab active={activeTab === 'raw'} onClick={() => setActiveTab('raw')}>Attendance Logs</Tab>
+      <div className="inline-flex items-center gap-1 p-1 bg-muted rounded-lg border">
+        {tabs.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+              activeTab === tab.key
+                ? 'bg-background text-primary shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Filters Card */}
-      <div style={{ backgroundColor: 'var(--surface-color)', borderRadius: '12px', padding: '20px', marginBottom: '24px', border: '1px solid var(--border-color)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '20px', alignItems: 'flex-end' }}>
-          <div>
-            <label style={labelStyle}>Branch</label>
-            <select style={inputStyle} value={branch || ''} onChange={e => setBranch(Number(e.target.value) || null)}>
+      <Card>
+        <CardContent className="p-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 items-end">
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-wide">Branch</Label>
+              <Select value={branch?.toString() || ''} onChange={e => setBranch(Number(e.target.value) || null)}>
                 <option value="">All Branches</option>
                 {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Gate / Location</label>
-            <select style={inputStyle} value={gate || ''} onChange={e => setGate(Number(e.target.value) || null)} disabled={!branch}>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-wide">Gate / Location</Label>
+              <Select value={gate?.toString() || ''} onChange={e => setGate(Number(e.target.value) || null)} disabled={!branch}>
                 <option value="">All Gates</option>
                 {gates.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label style={labelStyle}>Department</label>
-            <select style={inputStyle} value={department} onChange={e => setDepartment(e.target.value)}>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-wide">Department</Label>
+              <Select value={department} onChange={e => setDepartment(e.target.value)}>
                 {departments.map(d => <option key={d} value={d}>{d}</option>)}
-            </select>
-          </div>
-          
-          {activeTab === 'ledger' || activeTab === 'salary' ? (
-              <div>
-                <label style={labelStyle}>Month</label>
-                <input type="month" style={inputStyle} value={month} onChange={e => setMonth(e.target.value)} />
-              </div>
-          ) : (
-              <>
-                <div>
-                  <label style={labelStyle}>From {calendarMode==='BS'?'(AD)':''}</label>
-                  <input type="date" style={inputStyle} value={fromDate} onChange={e => setFromDate(e.target.value)} />
-                </div>
-                <div>
-                  <label style={labelStyle}>To {calendarMode==='BS'?'(AD)':''}</label>
-                  <input type="date" style={inputStyle} value={toDate} onChange={e => setToDate(e.target.value)} />
-                </div>
-              </>
-          )}
+              </Select>
+            </div>
 
-          <div>
-             <label style={labelStyle}>Employee Search</label>
-             <div style={{ position: 'relative' }}>
-                <Search size={14} style={{ position: 'absolute', left: '10px', top: '12px', color: 'var(--text-muted)' }} />
-                <input style={{ ...inputStyle, paddingLeft: '32px' }} placeholder="Name or ID..." value={search} onChange={e => setSearch(e.target.value)} />
-             </div>
+            {activeTab === 'ledger' || activeTab === 'salary' ? (
+                <div className="space-y-2">
+                  <Label className="text-xs uppercase tracking-wide">Month</Label>
+                  <Input type="month" value={month} onChange={e => setMonth(e.target.value)} />
+                </div>
+            ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label className="text-xs uppercase tracking-wide">From {calendarMode === 'BS' ? '(AD)' : ''}</Label>
+                    <Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs uppercase tracking-wide">To {calendarMode === 'BS' ? '(AD)' : ''}</Label>
+                    <Input type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
+                  </div>
+                </>
+            )}
+
+            <div className="space-y-2">
+               <Label className="text-xs uppercase tracking-wide">Employee Search</Label>
+               <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Name or ID..."
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                  />
+               </div>
+            </div>
           </div>
-      </div>
+        </CardContent>
+      </Card>
 
       {/* Data Section */}
-      <div style={{ backgroundColor: 'var(--surface-color)', borderRadius: '12px', border: '1px solid var(--border-color)', boxShadow: '0 4px 20px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
-          {loading ? (
-              <div style={{ height: '300px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '16px' }}>
-                  <RefreshCw size={40} color="var(--primary-color)" className="animate-spin" />
-                  <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>Crunching attendance data...</span>
-              </div>
-          ) : (
-              <div style={{ overflowX: 'auto' }}>
-                   {activeTab === 'daily' && (
-                      dailyData.length === 0 ? (
-                        <NoDataView message="No daily attendance logs found for selected filters." />
-                      ) : (
-                        <table style={tableStyle}>
-                            <thead>
-                                <tr style={rowStyle}>
-                                    <th style={thStyle}>Employee</th>
-                                    <th style={thStyle}>In Time</th>
-                                    <th style={thStyle}>Out Time</th>
-                                    <th style={thStyle}>Work Hrs</th>
-                                    <th style={thStyle}>Late</th>
-                                    <th style={thStyle}>Early</th>
-                                    <th style={thStyle}>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {dailyData.map((d, i) => (
-                                    <tr key={i} style={trStyle}>
-                                        <td style={tdStyle}>
-                                            <div style={{ fontWeight: '600' }}>{d.name}</div>
-                                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{d.department}</div>
-                                        </td>
-                                        <td style={tdStyle}>{d.check_in.split(' ')[1] || d.check_in}</td>
-                                        <td style={tdStyle}>{d.check_out.split(' ')[1] || d.check_out}</td>
-                                        <td style={{ ...tdStyle, fontWeight: '700' }}>{d.working_hours}</td>
-                                        <td style={{ ...tdStyle, color: d.late_entry==='Yes'?'var(--error)':'var(--success)' }}>{d.late_entry}</td>
-                                        <td style={{ ...tdStyle, color: d.early_exit==='Yes'?'var(--error)':'var(--success)' }}>{d.early_exit}</td>
-                                        <td style={tdStyle}>
-                                            <Badge type={d.status}>{d.status}</Badge>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                      )
-                  )}
+      <Card className="shadow-sm">
+        {loading ? (
+          <CardContent className="flex flex-col items-center justify-center h-64 gap-4">
+            <RefreshCw className="h-10 w-10 text-primary animate-spin" />
+            <span className="text-sm text-muted-foreground">Crunching attendance data...</span>
+          </CardContent>
+        ) : (
+          <CardContent className="p-0">
+            <div className="overflow-x-auto">
+              {activeTab === 'daily' && (
+                dailyData.length === 0 ? (
+                  <NoDataView message="No daily attendance logs found for selected filters." />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Employee</TableHead>
+                        <TableHead>In Time</TableHead>
+                        <TableHead>Out Time</TableHead>
+                        <TableHead>Work Hrs</TableHead>
+                        <TableHead>Late</TableHead>
+                        <TableHead>Early</TableHead>
+                        <TableHead>Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {dailyData.map((d, i) => (
+                        <TableRow key={i}>
+                          <TableCell>
+                            <div>
+                              <div className="font-semibold">{d.name}</div>
+                              <div className="text-xs text-muted-foreground">{d.department}</div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono text-sm">{d.check_in.split(' ')[1] || d.check_in}</TableCell>
+                          <TableCell className="font-mono text-sm">{d.check_out.split(' ')[1] || d.check_out}</TableCell>
+                          <TableCell className="font-bold">{d.working_hours}</TableCell>
+                          <TableCell className={d.late_entry === 'Yes' ? 'text-red-500 font-medium' : 'text-green-500 font-medium'}>
+                            {d.late_entry}
+                          </TableCell>
+                          <TableCell className={d.early_exit === 'Yes' ? 'text-red-500 font-medium' : 'text-green-500 font-medium'}>
+                            {d.early_exit}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={getStatusBadgeVariant(d.status)} className="uppercase text-xs">
+                              {d.status}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )
+              )}
 
-                  {activeTab === 'ledger' && (
-                      ledgerData.length === 0 ? (
-                        <NoDataView message="No monthly statistics found for this month." />
-                      ) : (
-                        <table style={{ ...tableStyle, tableLayout: 'fixed' }}>
-                            <thead>
-                                <tr style={rowStyle}>
-                                    <th style={{ ...thStyle, width: '150px', position: 'sticky', left: 0, backgroundColor: 'var(--bg-color)', zIndex: 10 }}>Employee</th>
-                                    {Array.from({ length: getDaysInMonth() }).map((_, i) => (
-                                        <th key={i} style={{ ...thStyle, width: '35px', textAlign: 'center' }}>{(i + 1).toString().padStart(2, '0')}</th>
-                                    ))}
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {ledgerData.map((l, i) => (
-                                    <tr key={i} style={trStyle}>
-                                        <td style={{ ...tdStyle, position: 'sticky', left: 0, backgroundColor: 'var(--surface-color)', zIndex: 5, borderRight: '1px solid var(--border-color)' }}>
-                                            <div style={{ fontWeight: '600', fontSize: '12px' }}>{l.name}</div>
-                                        </td>
-                                        {Array.from({ length: getDaysInMonth() }).map((_, di) => {
-                                            const day = (di + 1).toString().padStart(2, '0');
-                                            const status = l.attendance[day] || 'A';
-                                            return (
-                                                <td key={di} style={{ ...tdStyle, padding: '4px', textAlign: 'center' }}>
-                                                    <div style={{ 
-                                                        width: '24px', height: '24px', borderRadius: '4px', margin: '0 auto',
-                                                        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: 'bold',
-                                                        backgroundColor: status === 'P' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                                                        color: status === 'P' ? 'var(--success)' : 'var(--error)'
-                                                    }}>
-                                                        {status}
-                                                    </div>
-                                                </td>
-                                            );
-                                        })}
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                      )
-                  )}
+              {activeTab === 'ledger' && (
+                ledgerData.length === 0 ? (
+                  <NoDataView message="No monthly statistics found for this month." />
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="sticky left-0 bg-muted z-10 min-w-[150px]">Employee</TableHead>
+                          {Array.from({ length: getDaysInMonth() }).map((_, i) => (
+                            <TableHead key={i} className="w-[35px] text-center p-2">
+                              {(i + 1).toString().padStart(2, '0')}
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {ledgerData.map((l, i) => (
+                          <TableRow key={i}>
+                            <TableCell className="sticky left-0 bg-card z-5 border-r min-w-[150px]">
+                              <div className="font-semibold text-sm">{l.name}</div>
+                            </TableCell>
+                            {Array.from({ length: getDaysInMonth() }).map((_, di) => {
+                              const day = (di + 1).toString().padStart(2, '0');
+                              const status = l.attendance[day] || 'A';
+                              return (
+                                <TableCell key={di} className="p-1 text-center">
+                                  <div className={`inline-flex items-center justify-center w-6 h-6 rounded text-[10px] font-bold ${
+                                    status === 'P'
+                                      ? 'bg-green-500/10 text-green-500'
+                                      : 'bg-red-500/10 text-red-500'
+                                  }`}>
+                                    {status}
+                                  </div>
+                                </TableCell>
+                              );
+                            })}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )
+              )}
 
-                  {activeTab === 'salary' && (
-                      salaryData.length === 0 ? (
-                        <NoDataView message="No salary sheet data available for selected month." />
-                      ) : (
-                        <table style={tableStyle}>
-                            <thead>
-                                <tr style={rowStyle}>
-                                    <th style={thStyle}>Employee</th>
-                                    <th style={thStyle}>Present Days</th>
-                                    <th style={thStyle}>Paid Leaves</th>
-                                    <th style={thStyle}>Total Payable</th>
-                                    <th style={thStyle}>Remarks</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {salaryData.map((s, i) => (
-                                    <tr key={i} style={trStyle}>
-                                        <td style={tdStyle}>
-                                           <div style={{ fontWeight: '600' }}>{s.name}</div>
-                                           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.department}</div>
-                                        </td>
-                                        <td style={tdStyle}>{s.present_days}</td>
-                                        <td style={tdStyle}>{s.paid_leaves}</td>
-                                        <td style={{ ...tdStyle, fontSize: '16px', fontWeight: 'bold', color: 'var(--primary-color)' }}>{s.payable_days}</td>
-                                        <td style={tdStyle}>
-                                            <button style={{ background: 'transparent', border: 'none', color: 'var(--primary-color)', fontSize: '11px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                <Calculator size={12} /> Adjustment
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                      )
-                  )}
+              {activeTab === 'salary' && (
+                salaryData.length === 0 ? (
+                  <NoDataView message="No salary sheet data available for selected month." />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Employee</TableHead>
+                        <TableHead>Present Days</TableHead>
+                        <TableHead>Paid Leaves</TableHead>
+                        <TableHead>Total Payable</TableHead>
+                        <TableHead>Remarks</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {salaryData.map((s, i) => (
+                        <TableRow key={i}>
+                          <TableCell>
+                            <div className="font-semibold">{s.name}</div>
+                            <div className="text-xs text-muted-foreground">{s.department}</div>
+                          </TableCell>
+                          <TableCell>{s.present_days}</TableCell>
+                          <TableCell>{s.paid_leaves}</TableCell>
+                          <TableCell className="text-lg font-bold text-primary">{s.payable_days}</TableCell>
+                          <TableCell>
+                            <Button variant="ghost" size="sm" className="text-primary font-semibold text-xs gap-1 h-7">
+                              <Calculator className="h-3 w-3" /> Adjustment
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )
+              )}
 
-                  {activeTab === 'raw' && (
-                      rawData.length === 0 ? (
-                        <NoDataView message="No attendance logs found. Sync your device to populate records." />
-                      ) : (
-                        <table style={tableStyle}>
-                            <thead>
-                                 <tr style={rowStyle}>
-                                     <th style={thStyle}>#</th>
-                                     <th style={thStyle}>Employee Name</th>
-                                     <th style={thStyle}>Date</th>
-                                     <th style={thStyle}>Time</th>
-                                     <th style={thStyle}>Punch Method</th>
-                                     <th style={thStyle}>Device</th>
-                                 </tr>
-                            </thead>
-                            <tbody>
-                                 {rawData.map((r, i) => {
-                                   const dt = r.timestamp || '';
-                                   const datePart = dt.length >= 10 ? dt.substring(0, 10) : dt;
-                                   const timePart = dt.length >= 16 ? dt.substring(11, 16) : '';
-                                   const method = (r.type || 'FINGER').toUpperCase();
-                                   const isFace = method.includes('FACE') || method === '1';
-                                   return (
-                                     <tr key={i} style={trStyle}>
-                                         <td style={{ ...tdStyle, color: 'var(--text-muted)', fontSize: '11px', width: '40px' }}>{i + 1}</td>
-                                         <td style={tdStyle}>
-                                           <div style={{ fontWeight: 700 }}>{r.name}</div>
-                                           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>ID #{r.id}</div>
-                                         </td>
-                                         <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: '12px' }}>{datePart}</td>
-                                         <td style={{ ...tdStyle, fontFamily: 'monospace', fontWeight: 700, color: 'var(--primary-color)' }}>{timePart}</td>
-                                         <td style={tdStyle}>
-                                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px',
-                                             padding: '4px 10px', borderRadius: '20px', width: 'fit-content',
-                                             backgroundColor: isFace ? 'rgba(59,130,246,0.1)' : 'rgba(16,185,129,0.1)',
-                                             color: isFace ? '#3b82f6' : 'var(--success)'
-                                           }}>
-                                             {isFace
-                                               ? <><ScanFace size={14} /><span style={{ fontSize: '11px', fontWeight: 700 }}>Face</span></>
-                                               : <><Fingerprint size={14} /><span style={{ fontSize: '11px', fontWeight: 700 }}>Finger</span></>
-                                             }
-                                           </div>
-                                         </td>
-                                         <td style={{ ...tdStyle, fontSize: '12px', color: 'var(--text-muted)' }}>{r.device}</td>
-                                     </tr>
-                                   );
-                                 })}
-                            </tbody>
-                        </table>
-                      )
-                  )}
-              </div>
-          )}
-      </div>
+              {activeTab === 'raw' && (
+                rawData.length === 0 ? (
+                  <NoDataView message="No attendance logs found. Sync your device to populate records." />
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[40px]">#</TableHead>
+                        <TableHead>Employee Name</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Time</TableHead>
+                        <TableHead>Punch Method</TableHead>
+                        <TableHead>Device</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {rawData.map((r, i) => {
+                        const dt = r.timestamp || '';
+                        const datePart = dt.length >= 10 ? dt.substring(0, 10) : dt;
+                        const timePart = dt.length >= 16 ? dt.substring(11, 16) : '';
+                        const method = (r.type || 'FINGER').toUpperCase();
+                        const isFace = method.includes('FACE') || method === '1';
+                        return (
+                          <TableRow key={i}>
+                            <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
+                            <TableCell>
+                              <div className="font-bold">{r.name}</div>
+                              <div className="text-xs text-muted-foreground">ID #{r.id}</div>
+                            </TableCell>
+                            <TableCell className="font-mono text-sm">{datePart}</TableCell>
+                            <TableCell className="font-mono font-bold text-primary">{timePart}</TableCell>
+                            <TableCell>
+                              <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
+                                isFace
+                                  ? 'bg-blue-500/10 text-blue-500'
+                                  : 'bg-green-500/10 text-green-500'
+                              }`}>
+                                {isFace
+                                  ? <><ScanFace className="h-3.5 w-3.5" /> Face</>
+                                  : <><Fingerprint className="h-3.5 w-3.5" /> Finger</>
+                                }
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">{r.device}</TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )
+              )}
+            </div>
+          </CardContent>
+        )}
+      </Card>
     </div>
   );
 };
 
 // UI Components
-const Tab = ({ active, onClick, children }: any) => (
-    <button 
-        onClick={onClick}
-        style={{
-            flex: 1, padding: '10px 16px', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold',
-            backgroundColor: active ? 'white' : 'transparent',
-            color: active ? 'var(--primary-color)' : 'var(--text-muted)',
-            boxShadow: active ? '0 2px 8px rgba(0,0,0,0.1)' : 'none',
-            transition: '0.2s'
-        }}
-    >{children}</button>
-);
-
 const NoDataView = ({ message }: { message: string }) => (
-    <div style={{ 
-        padding: '60px 20px', textAlign: 'center', 
-        backgroundColor: 'var(--surface-color)', borderRadius: '12px',
-        border: '1px dashed var(--border-color)', margin: '20px 0'
-    }}>
-        <div style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.5 }}>📂</div>
-        <h3 style={{ margin: 0, color: 'var(--text-color)' }}>No Records Found</h3>
-        <p style={{ margin: '8px 0 0', color: 'var(--text-muted)', fontSize: '14px' }}>{message}</p>
-    </div>
+  <div className="flex flex-col items-center justify-center py-16 px-5 text-center border border-dashed border-border m-5 rounded-lg">
+    <FolderOpen className="h-12 w-12 text-muted-foreground/50 mb-4" />
+    <h3 className="text-lg font-semibold">No Records Found</h3>
+    <p className="text-sm text-muted-foreground mt-2">{message}</p>
+  </div>
 );
-
-const Badge = ({ type, children }: any) => {
-    const isP = type === 'On-time' || type === 'P';
-    const isL = type === 'Late';
-    return (
-        <span style={{ 
-            padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase',
-            backgroundColor: isP ? 'rgba(16,185,129,0.1)' : (isL ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)'),
-            color: isP ? 'var(--success)' : (isL ? 'var(--warning)' : 'var(--error)')
-        }}>{children}</span>
-    );
-};
-
-// Styles
-const labelStyle: React.CSSProperties = { display: 'block', fontSize: '10px', fontWeight: 'bold', color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' };
-const inputStyle: React.CSSProperties = { width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-color)', color: 'var(--text-color)', fontSize: '13px', outline: 'none' };
-const secondaryBtnStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderRadius: '6px', border: '1px solid var(--primary-color)', backgroundColor: 'transparent', color: 'var(--primary-color)', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' };
-const primaryBtnStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderRadius: '6px', border: 'none', backgroundColor: 'var(--primary-color)', color: 'white', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' };
-
-const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collapse' };
-const rowStyle: React.CSSProperties = { textAlign: 'left', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-color)' };
-const thStyle: React.CSSProperties = { padding: '16px', fontSize: '12px', fontWeight: 'bold', color: 'var(--text-muted)' };
-const trStyle: React.CSSProperties = { borderBottom: '1px solid var(--border-color)', transition: '0.1s' };
-const tdStyle: React.CSSProperties = { padding: '16px', fontSize: '13px' };

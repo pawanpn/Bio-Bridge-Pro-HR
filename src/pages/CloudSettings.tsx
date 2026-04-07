@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { PrimaryButton } from '../components/common/PrimaryButton';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import { AppConfig } from '../config/appConfig';
 import { SuperAdminGuard } from '../components/SuperAdminGuard';
 import { useAdminAuth } from '../context/AdminAuthContext';
@@ -136,22 +137,23 @@ const CloudSettingsContent: React.FC = () => {
           </p>
         </div>
 
-        <div style={{ marginBottom: '24px' }}>
-          <span style={labelStyle}>Service Account Key (JSON)</span>
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-            <PrimaryButton label={jsonText ? "✅ File Loaded" : "Upload JSON Key File"} onClick={() => fileInputRef.current?.click()} />
-            <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+        <div className="mb-6">
+          <Label className="block mb-2">Service Account Key (JSON)</Label>
+          <div className="flex items-center gap-3">
+            <Button onClick={() => fileInputRef.current?.click()}>
+              {jsonText ? "✅ File Loaded" : "Upload JSON Key File"}
+            </Button>
+            <span className="text-sm text-muted-foreground">
               {jsonText ? 'Press save to apply' : (config?.configured ? 'Existing key active' : 'Request from Google Cloud Console')}
             </span>
           </div>
-          <input type="file" accept=".json" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileUpload} />
+          <input type="file" accept=".json" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
         </div>
 
         {/* Save triggers re-verify */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <PrimaryButton
-            isAccent
-            label={isLoading ? 'initializing Structure...' : '🚀 Initialize Cloud Lifecycle'}
+        <div className="flex items-center gap-3">
+          <Button
+            variant="accent"
             disabled={isLoading || (!jsonText && !config?.configured)}
             onClick={handleSaveRequest}
           />

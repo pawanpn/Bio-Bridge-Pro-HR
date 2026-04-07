@@ -1,10 +1,17 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AnalyticalCard } from '../components/AnalyticalCard';
 import { DeviceScanner } from '../components/DeviceScanner';
 import { invoke } from '@tauri-apps/api/core';
 import { Users, UserCheck, UserMinus, Cloud, CloudOff, Clock, X, CalendarCheck, Fingerprint, ScanFace, ArrowLeft } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Table, TableHeader, TableBody, TableRow, TableCell, TableHead } from '@/components/ui/table';
+import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 
 interface Staff {
   id: number;
@@ -53,12 +60,41 @@ interface CloudConfig {
   projectId?: string;
 }
 
+// Stat Card Component with gradient backgrounds
+const StatCard: React.FC<{
+  title: string;
+  value: number;
+  icon: React.ReactNode;
+  gradient: string;
+  iconColor: string;
+  onClick?: () => void;
+}> = ({ title, value, icon, gradient, iconColor, onClick }) => (
+  <Card
+    className="cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 overflow-hidden border-0"
+    onClick={onClick}
+  >
+    <div className={`relative p-6 bg-gradient-to-br ${gradient}`}>
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-1">{title}</p>
+          <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{value}</p>
+        </div>
+        <div className={`p-3 rounded-xl bg-white/20 backdrop-blur-sm ${iconColor}`}>
+          {icon}
+        </div>
+      </div>
+    </div>
+  </Card>
+);
+
 // Summary Mini Card for Punch Detail Modal
 const SummaryMini: React.FC<{ label: string; value: string; color: string }> = ({ label, value, color }) => (
-  <div style={{ backgroundColor: 'var(--bg-color)', padding: '12px', borderRadius: '8px', textAlign: 'center' }}>
-    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{label}</div>
-    <div style={{ fontSize: '16px', fontWeight: 'bold', color }}>{value}</div>
-  </div>
+  <Card className="border-0 shadow-sm">
+    <CardContent className="p-3 text-center">
+      <p className="text-xs text-muted-foreground mb-1">{label}</p>
+      <p className="text-lg font-bold" style={{ color }}>{value}</p>
+    </CardContent>
+  </Card>
 );
 
 export const Dashboard: React.FC = () => {
@@ -248,7 +284,7 @@ export const Dashboard: React.FC = () => {
     if (!confirm('Pull ALL attendance logs from device?\n\nThis will fetch every log from day one to now.\nDuplicates will be auto-skipped.')) return;
     setIsSyncing(true);
     setSyncError(null);
-    setSyncProgress('📥 Pulling ALL logs from device...');
+    setSyncProgress('Pulling ALL logs from device...');
     try {
       await invoke('pull_all_logs', {
         ip: device.ip,
@@ -286,152 +322,146 @@ export const Dashboard: React.FC = () => {
   };
 
   return (
-    <div style={{ padding: '24px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <h1 style={{ margin: 0 }}>Dashboard Overview</h1>
-            <div style={{
-              width: '12px', height: '12px', borderRadius: '50%',
-              backgroundColor: Date.now() - lastPulse < 2000 ? 'var(--success)' : (isRealtimeEnabled ? '#22c55e44' : '#6b728044'),
-              boxShadow: Date.now() - lastPulse < 2000 ? '0 0 12px var(--success)' : 'none',
-              transition: '0.3s'
-            }} title="Live Pulse (Flashes on activity)" />
+    <div className="p-6 space-y-6">
+      {/* Header Section */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold">Dashboard Overview</h1>
+            <div
+              className={`w-3 h-3 rounded-full transition-all duration-300 ${
+                Date.now() - lastPulse < 2000
+                  ? 'bg-green-500 shadow-lg shadow-green-500/50'
+                  : isRealtimeEnabled
+                  ? 'bg-green-500/25'
+                  : 'bg-gray-500/25'
+              }`}
+              title="Live Pulse (Flashes on activity)"
+            />
           </div>
 
           {device && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '8px',
-              padding: '6px 12px', borderRadius: '4px',
-              backgroundColor: isDeviceOnline ? 'rgba(16,185,129,0.1)' : isDeviceOnline === false ? 'rgba(239,68,68,0.1)' : 'rgba(156,163,175,0.1)',
-              border: `1px solid ${isDeviceOnline ? 'var(--success)' : isDeviceOnline === false ? 'var(--error)' : 'var(--border-color)'}`
-            }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: isDeviceOnline ? 'var(--success)' : isDeviceOnline === false ? 'var(--error)' : 'var(--text-muted)' }} />
-              <span style={{ fontSize: '12px', fontWeight: '600', color: isDeviceOnline ? 'var(--success)' : isDeviceOnline === false ? 'var(--error)' : 'var(--text-muted)' }}>
-                {device.is_default && <span style={{ fontSize: 9, backgroundColor: 'var(--primary-color)', color: '#fff', padding: '1px 5px', borderRadius: 3, marginRight: 6 }}>DEFAULT</span>}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${
+              isDeviceOnline
+                ? 'bg-green-50 border-green-500 dark:bg-green-950/20 dark:border-green-500'
+                : isDeviceOnline === false
+                ? 'bg-red-50 border-red-500 dark:bg-red-950/20 dark:border-red-500'
+                : 'bg-gray-50 border-gray-300 dark:bg-gray-900/20 dark:border-gray-600'
+            }`}>
+              <div className={`w-2 h-2 rounded-full ${
+                isDeviceOnline ? 'bg-green-500' : isDeviceOnline === false ? 'bg-red-500' : 'bg-gray-400'
+              }`} />
+              <span className={`text-xs font-semibold ${
+                isDeviceOnline ? 'text-green-600 dark:text-green-400' : isDeviceOnline === false ? 'text-red-600 dark:text-red-400' : 'text-gray-500'
+              }`}>
+                {device.is_default && (
+                  <Badge variant="default" className="text-[9px] px-1.5 py-0 mr-1.5">DEFAULT</Badge>
+                )}
                 {device.name}: {isDeviceOnline ? 'CONNECTED' : isDeviceOnline === false ? 'OFFLINE' : 'CHECKING...'}
               </span>
             </div>
           )}
 
-          {/* Real-Time Push Toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '8px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', color: isRealtimeEnabled ? 'var(--success)' : 'var(--text-muted)' }} onClick={handleToggleRealtime}>
-              LIVE PUSH {isRealtimeEnabled ? 'ON' : 'OFF'}
-            </label>
-            <div
-              onClick={handleToggleRealtime}
-              style={{
-                width: '40px', height: '20px', borderRadius: '10px',
-                backgroundColor: isRealtimeEnabled ? 'var(--success)' : 'var(--border-color)',
-                position: 'relative', cursor: 'pointer', transition: '0.3s'
-              }}
-            >
-              <div style={{
-                width: '16px', height: '16px', borderRadius: '50%', backgroundColor: 'white',
-                position: 'absolute', top: '2px', left: isRealtimeEnabled ? '22px' : '2px',
-                transition: '0.3s'
-              }} />
+          {/* Toggles Row */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2.5">
+              <Label
+                htmlFor="realtime-toggle"
+                className={`text-xs font-bold cursor-pointer ${
+                  isRealtimeEnabled ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'
+                }`}
+              >
+                LIVE PUSH {isRealtimeEnabled ? 'ON' : 'OFF'}
+              </Label>
+              <Switch
+                id="realtime-toggle"
+                checked={isRealtimeEnabled}
+                onCheckedChange={handleToggleRealtime}
+              />
+            </div>
+
+            <div className="flex items-center gap-2.5">
+              <Label
+                htmlFor="quicksync-toggle"
+                className={`text-xs font-bold cursor-pointer ${
+                  isQuickSyncEnabled ? 'text-primary' : 'text-muted-foreground'
+                }`}
+              >
+                QUICK-SYNC {isQuickSyncEnabled ? 'ON' : 'OFF'}
+              </Label>
+              <Switch
+                id="quicksync-toggle"
+                checked={isQuickSyncEnabled}
+                onCheckedChange={handleToggleQuickSync}
+              />
+              {isQuickSyncEnabled && (
+                <span className="text-[11px] text-muted-foreground font-mono">
+                  {isSyncing ? 'SYNCING...' : `NEXT IN ${secondsUntilSync}s`}
+                </span>
+              )}
             </div>
           </div>
 
-          {/* Quick-Sync Toggle */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: '8px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', color: isQuickSyncEnabled ? 'var(--primary-color)' : 'var(--text-muted)' }} onClick={handleToggleQuickSync}>
-              QUICK-SYNC {isQuickSyncEnabled ? 'ON' : 'OFF'}
-            </label>
-            <div
-              onClick={handleToggleQuickSync}
-              style={{
-                width: '40px', height: '20px', borderRadius: '10px',
-                backgroundColor: isQuickSyncEnabled ? 'var(--primary-color)' : 'var(--border-color)',
-                position: 'relative', cursor: 'pointer', transition: '0.3s'
-              }}
-            >
-              <div style={{
-                width: '16px', height: '16px', borderRadius: '50%', backgroundColor: 'white',
-                position: 'absolute', top: '2px', left: isQuickSyncEnabled ? '22px' : '2px',
-                transition: '0.3s'
-              }} />
-            </div>
-            {isQuickSyncEnabled && (
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-                {isSyncing ? 'SYNCING...' : `NEXT IN ${secondsUntilSync}s`}
-              </span>
-            )}
-          </div>
-
-          {/* Manual Sync Button */}
-          <div style={{ marginLeft: '12px', display: 'flex', flexDirection: 'column', gap: '6px', minWidth: '180px' }}>
-            <button
+          {/* Action Buttons */}
+          <div className="flex flex-col gap-1.5 min-w-[180px]">
+            <Button
               onClick={triggerAutoSync}
               disabled={isSyncing || !isDeviceOnline}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '4px',
-                border: '1px solid var(--primary-color)',
-                backgroundColor: isSyncing ? 'transparent' : 'var(--primary-color)',
-                color: isSyncing ? 'var(--primary-color)' : 'white',
-                fontSize: '11px',
-                fontWeight: 'bold',
-                cursor: isSyncing || !isDeviceOnline ? 'not-allowed' : 'pointer',
-                opacity: isSyncing || !isDeviceOnline ? 0.6 : 1,
-                transition: '0.2s',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                width: '100%',
-                justifyContent: 'center'
-              }}
+              variant="outline"
+              size="sm"
+              className={`text-xs font-bold w-full ${
+                isSyncing || !isDeviceOnline ? 'opacity-60 cursor-not-allowed' : ''
+              } ${!isSyncing && isDeviceOnline ? 'bg-primary text-primary-foreground hover:bg-primary/90' : ''}`}
             >
-              {isSyncing ? '↻ SYNCING...' : '⟳ SYNC NOW'}
-            </button>
-            <button
+              {isSyncing ? (
+                <><Clock className="w-3.5 h-3.5 mr-1.5 animate-spin" /> SYNCING...</>
+              ) : (
+                <><Clock className="w-3.5 h-3.5 mr-1.5" /> SYNC NOW</>
+              )}
+            </Button>
+            <Button
               onClick={triggerPullAllLogs}
               disabled={isSyncing || !isDeviceOnline}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '4px',
-                border: '1px solid #059669',
-                backgroundColor: isSyncing ? 'transparent' : '#059669',
-                color: isSyncing ? '#059669' : 'white',
-                fontSize: '11px',
-                fontWeight: 'bold',
-                cursor: isSyncing || !isDeviceOnline ? 'not-allowed' : 'pointer',
-                opacity: isSyncing || !isDeviceOnline ? 0.6 : 1,
-                transition: '0.2s',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                width: '100%',
-                justifyContent: 'center'
-              }}
+              variant="outline"
+              size="sm"
+              className={`text-xs font-bold w-full ${
+                isSyncing || !isDeviceOnline ? 'opacity-60 cursor-not-allowed' : ''
+              } ${!isSyncing && isDeviceOnline ? 'bg-emerald-600 text-white hover:bg-emerald-700 border-emerald-600' : ''}`}
             >
-              {isSyncing ? '↻ SYNCING...' : '📥 PULL ALL LOGS'}
-            </button>
+              {isSyncing ? (
+                <><Clock className="w-3.5 h-3.5 mr-1.5 animate-spin" /> SYNCING...</>
+              ) : (
+                <><Cloud className="w-3.5 h-3.5 mr-1.5" /> PULL ALL LOGS</>
+              )}
+            </Button>
             {syncProgress && (
-              <div style={{ fontSize: '10px', color: 'var(--primary-color)', fontWeight: 600, textAlign: 'center', lineHeight: 1.3 }}>
+              <p className="text-[10px] text-primary font-semibold text-center leading-tight">
                 {syncProgress}
-              </div>
+              </p>
             )}
           </div>
         </div>
 
         {cloud && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '10px',
-              padding: '8px 16px', borderRadius: '24px',
-              backgroundColor: cloud.configured ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-              border: `1px solid ${cloud.configured ? 'var(--success)' : 'var(--error)'}`
-            }}>
-              {cloud.configured ? <Cloud size={18} color="var(--success)" /> : <CloudOff size={18} color="var(--error)" />}
-              <span style={{ fontSize: '13px', fontWeight: '500', color: cloud.configured ? 'var(--success)' : 'var(--error)' }}>
+          <div className="flex flex-col items-end gap-1">
+            <div className={`flex items-center gap-2.5 px-4 py-2 rounded-full border ${
+              cloud.configured
+                ? 'bg-green-50 border-green-500 dark:bg-green-950/20 dark:border-green-500'
+                : 'bg-red-50 border-red-500 dark:bg-red-950/20 dark:border-red-500'
+            }`}>
+              {cloud.configured ? (
+                <Cloud className="w-4 h-4 text-green-600 dark:text-green-400" />
+              ) : (
+                <CloudOff className="w-4 h-4 text-red-600 dark:text-red-400" />
+              )}
+              <span className={`text-sm font-medium ${
+                cloud.configured ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+              }`}>
                 {cloud.configured ? 'Cloud Sync Active' : 'Cloud Not Configured'}
               </span>
             </div>
             {stats?.lastDeviceSync && (
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, paddingRight: '8px' }}>
+              <span className="text-[11px] text-muted-foreground font-semibold pr-2">
                 Last Device Sync: {stats.lastDeviceSync}
               </span>
             )}
@@ -439,272 +469,383 @@ export const Dashboard: React.FC = () => {
         )}
       </div>
 
-      <p style={{ color: 'var(--text-muted)', marginBottom: syncError ? '12px' : '32px' }}>Real-time statistics for Head Office</p>
+      <p className="text-muted-foreground">Real-time statistics for Head Office</p>
 
-      {/* Sync Error Banner — shows real hardware errors instead of fake success */}
+      {/* Sync Error Banner */}
       {syncError && (
-        <div style={{
-          marginBottom: '24px', padding: '12px 18px', borderRadius: '8px',
-          backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid #ef4444',
-          color: '#ef4444', fontSize: '13px', fontWeight: 600,
-          display: 'flex', alignItems: 'center', gap: '10px'
-        }}>
-          <span>⚠️</span>
-          <span>{syncError}</span>
-          <button onClick={() => setSyncError(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
-        </div>
+        <Card className="border-red-500 bg-red-50 dark:bg-red-950/20">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2.5 text-red-600 dark:text-red-400">
+              <span className="text-lg">⚠️</span>
+              <span className="text-sm font-semibold flex-1">{syncError}</span>
+              <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-600 dark:text-red-400" onClick={() => setSyncError(null)}>
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {stats && stats.totalStaff > 0 ? (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '20px', marginBottom: '40px' }}>
-            <div onClick={() => setActiveListModal({ title: 'Total Employees', data: [...stats.presentStaff, ...stats.absentStaff, ...stats.leaveStaff], type: 'total' })} style={{ cursor: 'pointer' }}><AnalyticalCard title="Total Employees" value={stats.totalStaff} icon={<Users size={32} />} /></div>
-            <div onClick={() => setActiveListModal({ title: 'Present Today', data: stats.presentStaff, type: 'present' })} style={{ cursor: 'pointer' }}><AnalyticalCard title="Present Today" value={stats.presentToday} icon={<UserCheck size={32} />} color="var(--success)" /></div>
-            <div onClick={() => setActiveListModal({ title: 'Late Today', data: stats.lateStaff, type: 'late' })} style={{ cursor: 'pointer' }}><AnalyticalCard title="Late Today" value={stats.lateToday} icon={<Clock size={32} />} color="var(--error)" /></div>
-            <div onClick={() => navigate('/leave-management')} style={{ cursor: 'pointer' }}><AnalyticalCard title="Leave Requests" value={stats.onLeave} icon={<CalendarCheck size={32} />} color="var(--warning)" /></div>
-            <div onClick={() => setActiveListModal({ title: 'Absent', data: stats.absentStaff, type: 'absent' })} style={{ cursor: 'pointer' }}><AnalyticalCard title="Absent" value={stats.absent} icon={<UserMinus size={32} />} color="var(--error)" /></div>
+          {/* Stats Cards Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
+            <StatCard
+              title="Total Employees"
+              value={stats.totalStaff}
+              icon={<Users size={28} />}
+              gradient="from-blue-50 to-blue-100 dark:from-blue-950/30 dark:to-blue-900/20"
+              iconColor="text-blue-600 dark:text-blue-400"
+              onClick={() => setActiveListModal({ title: 'Total Employees', data: [...stats.presentStaff, ...stats.absentStaff, ...stats.leaveStaff], type: 'total' })}
+            />
+            <StatCard
+              title="Present Today"
+              value={stats.presentToday}
+              icon={<UserCheck size={28} />}
+              gradient="from-green-50 to-green-100 dark:from-green-950/30 dark:to-green-900/20"
+              iconColor="text-green-600 dark:text-green-400"
+              onClick={() => setActiveListModal({ title: 'Present Today', data: stats.presentStaff, type: 'present' })}
+            />
+            <StatCard
+              title="Late Today"
+              value={stats.lateToday}
+              icon={<Clock size={28} />}
+              gradient="from-amber-50 to-amber-100 dark:from-amber-950/30 dark:to-amber-900/20"
+              iconColor="text-amber-600 dark:text-amber-400"
+              onClick={() => setActiveListModal({ title: 'Late Today', data: stats.lateStaff, type: 'late' })}
+            />
+            <StatCard
+              title="Leave Requests"
+              value={stats.onLeave}
+              icon={<CalendarCheck size={28} />}
+              gradient="from-yellow-50 to-yellow-100 dark:from-yellow-950/30 dark:to-yellow-900/20"
+              iconColor="text-yellow-600 dark:text-yellow-400"
+              onClick={() => navigate('/leave-management')}
+            />
+            <StatCard
+              title="Absent"
+              value={stats.absent}
+              icon={<UserMinus size={28} />}
+              gradient="from-red-50 to-red-100 dark:from-red-950/30 dark:to-red-900/20"
+              iconColor="text-red-600 dark:text-red-400"
+              onClick={() => setActiveListModal({ title: 'Absent', data: stats.absentStaff, type: 'absent' })}
+            />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.5fr', gap: '32px', marginBottom: '40px' }}>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Charts Column */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div className="lg:col-span-2 space-y-6">
               {/* Pie Chart */}
-              <div style={{ backgroundColor: 'var(--surface-color)', padding: '24px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 700 }}>Today's Overview</h3>
-                <div style={{ height: '220px' }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={[
-                          { name: 'On-time', value: stats.presentToday - stats.lateToday, color: '#10b981' },
-                          { name: 'Late', value: stats.lateToday, color: '#f59e0b' },
-                          { name: 'Leave', value: stats.onLeave, color: '#3b82f6' },
-                          { name: 'Absent', value: stats.absent, color: '#ef4444' }
-                        ].filter(d => d.value > 0)}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={85}
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {[
-                          { name: 'On-time', value: stats.presentToday - stats.lateToday, color: '#10b981' },
-                          { name: 'Late', value: stats.lateToday, color: '#f59e0b' },
-                          { name: 'Leave', value: stats.onLeave, color: '#3b82f6' },
-                          { name: 'Absent', value: stats.absent, color: '#ef4444' }
-                        ].filter(d => d.value > 0).map((entry, index) => (
-                          <Cell
-                            key={`cell-${index}`}
-                            fill={entry.color}
-                            style={{ cursor: 'pointer', outline: 'none' }}
-                            onClick={() => {
-                              if (entry.name === 'On-time') setActiveListModal({ title: 'On-time Today', data: stats.presentStaff.filter(s => !stats.lateStaff.find(l => l.id === s.id)), type: 'present' });
-                              if (entry.name === 'Late') setActiveListModal({ title: 'Late Today', data: stats.lateStaff, type: 'late' });
-                              if (entry.name === 'Leave') navigate('/leave-management');
-                              if (entry.name === 'Absent') setActiveListModal({ title: 'Absent', data: stats.absentStaff, type: 'absent' });
-                            }}
-                          />
-                        ))}
-                      </Pie>
-                      <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-color)' }} itemStyle={{ color: 'var(--text-color)', fontWeight: 'bold' }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                {/* Legend */}
-                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '8px' }}>
-                  {[{ label: 'On-time', color: '#10b981' }, { label: 'Late', color: '#f59e0b' }, { label: 'Leave', color: '#3b82f6' }, { label: 'Absent', color: '#ef4444' }].map(l => (
-                    <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px' }}>
-                      <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: l.color }} />
-                      <span style={{ color: 'var(--text-muted)' }}>{l.label}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-bold">Today's Overview</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[220px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={[
+                            { name: 'On-time', value: stats.presentToday - stats.lateToday, color: '#10b981' },
+                            { name: 'Late', value: stats.lateToday, color: '#f59e0b' },
+                            { name: 'Leave', value: stats.onLeave, color: '#3b82f6' },
+                            { name: 'Absent', value: stats.absent, color: '#ef4444' }
+                          ].filter(d => d.value > 0)}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={50}
+                          outerRadius={85}
+                          paddingAngle={5}
+                          dataKey="value"
+                        >
+                          {[
+                            { name: 'On-time', value: stats.presentToday - stats.lateToday, color: '#10b981' },
+                            { name: 'Late', value: stats.lateToday, color: '#f59e0b' },
+                            { name: 'Leave', value: stats.onLeave, color: '#3b82f6' },
+                            { name: 'Absent', value: stats.absent, color: '#ef4444' }
+                          ].filter(d => d.value > 0).map((entry, index) => (
+                            <Cell
+                              key={`cell-${index}`}
+                              fill={entry.color}
+                              className="cursor-pointer outline-none"
+                              onClick={() => {
+                                if (entry.name === 'On-time') setActiveListModal({ title: 'On-time Today', data: stats.presentStaff.filter(s => !stats.lateStaff.find(l => l.id === s.id)), type: 'present' });
+                                if (entry.name === 'Late') setActiveListModal({ title: 'Late Today', data: stats.lateStaff, type: 'late' });
+                                if (entry.name === 'Leave') navigate('/leave-management');
+                                if (entry.name === 'Absent') setActiveListModal({ title: 'Absent', data: stats.absentStaff, type: 'absent' });
+                              }}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{ borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-color)' }}
+                          itemStyle={{ color: 'var(--text-color)', fontWeight: 'bold' }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  {/* Legend */}
+                  <div className="flex gap-3 flex-wrap justify-center mt-2">
+                    {[{ label: 'On-time', color: '#10b981' }, { label: 'Late', color: '#f59e0b' }, { label: 'Leave', color: '#3b82f6' }, { label: 'Absent', color: '#ef4444' }].map(l => (
+                      <div key={l.label} className="flex items-center gap-1.5 text-xs">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: l.color }} />
+                        <span className="text-muted-foreground">{l.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
               {/* Weekly Bar Chart */}
-              <div style={{ backgroundColor: 'var(--surface-color)', padding: '24px', borderRadius: '12px', border: '1px solid var(--border-color)' }}>
-                <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 700 }}>Weekly Attendance</h3>
-                <div style={{ height: '160px' }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={weeklyChart} barSize={14}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                      <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
-                      <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
-                      <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-color)' }} />
-                      <Legend wrapperStyle={{ fontSize: '11px' }} />
-                      <Bar dataKey="present" fill="#10b981" name="Present" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="absent" fill="#ef4444" name="Absent" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-bold">Weekly Attendance</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[160px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={weeklyChart} barSize={14}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                        <XAxis dataKey="day" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
+                        <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
+                        <Tooltip contentStyle={{ borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--surface-color)' }} />
+                        <Legend wrapperStyle={{ fontSize: '11px' }} />
+                        <Bar dataKey="present" fill="#10b981" name="Present" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="absent" fill="#ef4444" name="Absent" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
             {/* List Section */}
-            <div style={{ backgroundColor: 'var(--surface-color)', padding: '24px', borderRadius: '12px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '24px', overflowY: 'auto', maxHeight: '380px' }}>
-              <div>
-                <h3 style={{ margin: '0 0 12px', color: 'var(--text-color)', display: 'flex', justifyContent: 'space-between' }}>
-                  Present Today <span style={{ color: 'var(--success)', fontSize: '14px' }}>{stats.presentToday}</span>
-                </h3>
-                {stats.presentStaff.length === 0 ? <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>No one present yet.</p> : (
-                  <div style={{ display: 'grid', gap: '8px' }}>
-                    {stats.presentStaff.map(s => (
-                      <div key={s.id} onClick={() => handleShowTodayPunches(s.id)} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', transition: '0.2s', borderLeft: '3px solid var(--success)' }} className="hover-list-item">
-                        <span style={{ fontWeight: '600' }}>{s.name}</span>
-                        <span style={{ color: 'var(--text-muted)' }}>In: {s.time || 'N/A'}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+            <div className="space-y-6 max-h-[420px] overflow-y-auto">
+              {/* Present Today */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-bold flex justify-between items-center">
+                    <span>Present Today</span>
+                    <Badge variant="default" className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-100">
+                      {stats.presentToday}
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  {stats.presentStaff.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No one present yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {stats.presentStaff.map(s => (
+                        <div
+                          key={s.id}
+                          onClick={() => handleShowTodayPunches(s.id)}
+                          className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-900/30 rounded-lg cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-800/50 border-l-4 border-green-500"
+                        >
+                          <span className="text-sm font-semibold">{s.name}</span>
+                          <span className="text-xs text-muted-foreground">In: {s.time || 'N/A'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
 
-              <div>
-                <h3 style={{ margin: '0 0 12px', color: 'var(--text-color)', display: 'flex', justifyContent: 'space-between' }}>
-                  Absent <span style={{ color: 'var(--error)', fontSize: '14px' }}>{stats.absent}</span>
-                </h3>
-                {stats.absentStaff.length === 0 ? <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Everyone is present or on leave!</p> : (
-                  <div style={{ display: 'grid', gap: '8px' }}>
-                    {stats.absentStaff.map(s => (
-                      <div key={s.id} onClick={() => handleEmployeeClick(s.id)} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', backgroundColor: 'var(--bg-color)', borderRadius: '6px', fontSize: '13px', cursor: 'pointer', transition: '0.2s', borderLeft: '3px solid var(--error)' }} className="hover-list-item">
-                        <span style={{ fontWeight: '600' }}>{s.name}</span>
-                        <span style={{ color: 'var(--error)' }}>Missing</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {/* Absent */}
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-bold flex justify-between items-center">
+                    <span>Absent</span>
+                    <Badge variant="destructive" className="hover:bg-destructive/90">
+                      {stats.absent}
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  {stats.absentStaff.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Everyone is present or on leave!</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {stats.absentStaff.map(s => (
+                        <div
+                          key={s.id}
+                          onClick={() => handleEmployeeClick(s.id)}
+                          className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-900/30 rounded-lg cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-800/50 border-l-4 border-red-500"
+                        >
+                          <span className="text-sm font-semibold">{s.name}</span>
+                          <Badge variant="destructive" className="text-xs">Missing</Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
             </div>
           </div>
         </>
       ) : (
-        <div style={{
-          padding: '40px', borderRadius: '12px', border: '1px dashed var(--border-color)',
-          textAlign: 'center', backgroundColor: 'var(--surface-color)', marginBottom: '40px'
-        }}>
-          <div style={{ fontSize: '32px', marginBottom: '12px' }}>📊</div>
-          <h3 style={{ margin: 0 }}>No Data Available</h3>
-          <p style={{ color: 'var(--text-muted)', fontSize: '14px', margin: '8px 0 0' }}>Sync your device to see real-time workforce statistics.</p>
-        </div>
+        <Card className="border-dashed">
+          <CardContent className="p-10 text-center">
+            <div className="text-4xl mb-3">📊</div>
+            <h3 className="text-lg font-semibold mb-2">No Data Available</h3>
+            <p className="text-sm text-muted-foreground">Sync your device to see real-time workforce statistics.</p>
+          </CardContent>
+        </Card>
       )}
 
       <DeviceScanner />
 
-      {/* List Modal */}
-      {activeListModal && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ backgroundColor: 'var(--surface-color)', padding: '24px', borderRadius: '12px', width: '90%', maxWidth: '500px', maxHeight: '80vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <h2 style={{ margin: 0, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                {activeListModal.type === 'present' ? <UserCheck color="var(--success)" /> :
-                  activeListModal.type === 'late' ? <Clock color="var(--warning)" /> :
-                    <UserMinus color="var(--error)" />}
-                {activeListModal.title} ({activeListModal.data.length})
-              </h2>
-              <button onClick={() => setActiveListModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X /></button>
+      {/* List Modal - using shadcn Dialog */}
+      <Dialog open={!!activeListModal} onOpenChange={() => setActiveListModal(null)}>
+        <DialogContent className="max-w-[500px] max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2.5 text-lg">
+              {activeListModal?.type === 'present' ? (
+                <UserCheck className="w-5 h-5 text-green-600 dark:text-green-400" />
+              ) : activeListModal?.type === 'late' ? (
+                <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              ) : (
+                <UserMinus className="w-5 h-5 text-red-600 dark:text-red-400" />
+              )}
+              {activeListModal?.title} ({activeListModal?.data.length})
+            </DialogTitle>
+          </DialogHeader>
+
+          {!activeListModal || activeListModal.data.length === 0 ? (
+            <p className="text-center text-muted-foreground py-4">No records found.</p>
+          ) : (
+            <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+              {activeListModal.data.map(s => {
+                let info = "";
+                if (activeListModal.type === 'late') {
+                  const inTime = s.time || "09:30";
+                  info = `Late by ${isNaN(Date.parse(`1970-01-01T${inTime}`)) ? "Unknown" : Math.floor((Date.parse(`1970-01-01T${inTime}`) - Date.parse(`1970-01-01T09:15:00`)) / 60000)} mins`;
+                } else if (s.time) {
+                  info = `In: ${s.time}`;
+                } else {
+                  info = activeListModal.type === 'absent' ? 'Missing' : 'On Leave';
+                }
+
+                const borderColor = activeListModal.type === 'present'
+                  ? 'border-green-500'
+                  : activeListModal.type === 'late'
+                  ? 'border-amber-500'
+                  : 'border-red-500';
+
+                const textColor = activeListModal.type === 'present'
+                  ? 'text-muted-foreground'
+                  : activeListModal.type === 'late'
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-red-600 dark:text-red-400';
+
+                return (
+                  <div
+                    key={s.id}
+                    onClick={() => { handleEmployeeClick(s.id); setActiveListModal(null); }}
+                    className={`flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-900/30 rounded-lg cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-800/50 border-l-4 ${borderColor}`}
+                  >
+                    <span className="font-semibold">{s.name}</span>
+                    <span className={`text-sm font-bold ${textColor}`}>{info}</span>
+                  </div>
+                );
+              })}
             </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
-            {activeListModal.data.length === 0 ? (
-              <p style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No records found.</p>
-            ) : (
-              <div style={{ display: 'grid', gap: '8px' }}>
-                {activeListModal.data.map(s => {
-                  let info = "";
-                  if (activeListModal.type === 'late') {
-                    // Calculate late time assuming 09:15 is the threshold
-                    const inTime = s.time || "09:30";
-                    info = `Late by ${isNaN(Date.parse(`1970-01-01T${inTime}`)) ? "Unknown" : Math.floor((Date.parse(`1970-01-01T${inTime}`) - Date.parse(`1970-01-01T09:15:00`)) / 60000)} mins`;
-                  } else if (s.time) {
-                    info = `In: ${s.time}`;
-                  } else {
-                    info = activeListModal.type === 'absent' ? 'Missing' : 'On Leave';
-                  }
-
-                  return (
-                    <div key={s.id} onClick={() => { handleEmployeeClick(s.id); setActiveListModal(null); }} style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', backgroundColor: 'var(--bg-color)', borderRadius: '8px', fontSize: '14px', cursor: 'pointer', transition: '0.2s', borderLeft: `4px solid ${activeListModal.type === 'present' ? 'var(--success)' : activeListModal.type === 'late' ? 'var(--warning)' : 'var(--error)'}` }} className="hover-list-item">
-                      <span style={{ fontWeight: '600' }}>{s.name}</span>
-                      <span style={{ color: activeListModal.type === 'present' ? 'var(--text-muted)' : (activeListModal.type === 'late' ? 'var(--warning)' : 'var(--error)'), fontWeight: 'bold' }}>
-                        {info}
-                      </span>
-                    </div>
-                  );
-                })}
+      {/* Today's Punch Detail Modal - using shadcn Dialog */}
+      <Dialog open={!!todayPunchDetail} onOpenChange={() => setTodayPunchDetail(null)}>
+        <DialogContent className="max-w-[700px] max-h-[85vh]">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-9 h-9 p-0"
+                onClick={() => setTodayPunchDetail(null)}
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </Button>
+              <div>
+                <DialogTitle className="text-lg">{todayPunchDetail?.name}</DialogTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {todayPunchDetail?.date} • {todayPunchDetail?.totalPunches} punches
+                </p>
               </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Today's Punch Detail Modal */}
-      {todayPunchDetail && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ backgroundColor: 'var(--surface-color)', borderRadius: '16px', width: '90%', maxWidth: '700px', maxHeight: '85vh', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
-            {/* Header */}
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <button onClick={() => setTodayPunchDetail(null)} style={{ background: 'var(--bg-color)', border: '1px solid var(--border-color)', borderRadius: '8px', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--text-color)' }}>
-                  <ArrowLeft size={18} />
-                </button>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: '18px' }}>{todayPunchDetail.name}</h2>
-                  <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-muted)' }}>{todayPunchDetail.date} • {todayPunchDetail.totalPunches} punches</p>
-                </div>
-              </div>
-              <button onClick={() => setTodayPunchDetail(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X /></button>
             </div>
+          </DialogHeader>
 
-            {/* Summary Cards */}
-            <div style={{ padding: '16px 24px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', borderBottom: '1px solid var(--border-color)' }}>
-              <SummaryMini label="Status" value={todayPunchDetail.status} color={todayPunchDetail.status === 'Present' ? 'var(--success)' : todayPunchDetail.status === 'Late' ? 'var(--warning)' : 'var(--error)'} />
+          {/* Summary Cards */}
+          {todayPunchDetail && (
+            <div className="grid grid-cols-4 gap-3">
+              <SummaryMini
+                label="Status"
+                value={todayPunchDetail.status}
+                color={
+                  todayPunchDetail.status === 'Present' ? 'var(--success)' :
+                  todayPunchDetail.status === 'Late' ? 'var(--warning)' : 'var(--error)'
+                }
+              />
               <SummaryMini label="First In" value={todayPunchDetail.firstIn || 'N/A'} color="var(--success)" />
               <SummaryMini label="Last Out" value={todayPunchDetail.lastOut || 'N/A'} color="var(--error)" />
               <SummaryMini label="Working Hrs" value={todayPunchDetail.workingHours} color="var(--primary-color)" />
             </div>
+          )}
 
-            {/* Punch Log Table */}
-            <div style={{ overflowY: 'auto', maxHeight: '400px' }}>
-              {punchDetailLoading ? (
-                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>Loading punches...</div>
-              ) : todayPunchDetail.punches.length === 0 ? (
-                <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No punches recorded today.</div>
-              ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ backgroundColor: 'var(--bg-color)', position: 'sticky', top: 0 }}>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>#</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Time</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Method</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', color: 'var(--text-muted)', fontWeight: '600', textTransform: 'uppercase' }}>Device</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {todayPunchDetail.punches.map((punch, idx) => {
-                      const isFace = punch.method.toUpperCase().includes('FACE') || punch.method === '1';
-                      return (
-                        <tr key={idx} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-muted)' }}>{idx + 1}</td>
-                          <td style={{ padding: '12px 16px', fontWeight: '600', fontFamily: 'monospace', fontSize: '14px', color: 'var(--primary-color)' }}>
-                            {punch.time || 'N/A'}
-                          </td>
-                          <td style={{ padding: '12px 16px' }}>
-                            <span style={{
-                              display: 'inline-flex', alignItems: 'center', gap: '6px',
-                              padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600',
-                              backgroundColor: isFace ? 'rgba(59,130,246,0.1)' : 'rgba(16,185,129,0.1)',
-                              color: isFace ? '#3b82f6' : 'var(--success)'
-                            }}>
-                              {isFace ? <><ScanFace size={12} /> Face</> : <><Fingerprint size={12} /> Finger</>}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-muted)' }}>{punch.device}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
+          <Separator />
+
+          {/* Punch Log Table */}
+          <div className="max-h-[400px] overflow-y-auto">
+            {punchDetailLoading ? (
+              <div className="py-10 text-center text-muted-foreground">Loading punches...</div>
+            ) : !todayPunchDetail || todayPunchDetail.punches.length === 0 ? (
+              <div className="py-10 text-center text-muted-foreground">No punches recorded today.</div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase">#</TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase">Time</TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase">Method</TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase">Device</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {todayPunchDetail.punches.map((punch, idx) => {
+                    const isFace = punch.method.toUpperCase().includes('FACE') || punch.method === '1';
+                    return (
+                      <TableRow key={idx}>
+                        <TableCell className="text-xs text-muted-foreground">{idx + 1}</TableCell>
+                        <TableCell className="font-mono text-sm font-semibold text-primary">
+                          {punch.time || 'N/A'}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="secondary"
+                            className={`text-xs font-semibold ${
+                              isFace
+                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-100'
+                                : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 hover:bg-green-100'
+                            }`}
+                          >
+                            {isFace ? (
+                              <><ScanFace className="w-3 h-3 mr-1" /> Face</>
+                            ) : (
+                              <><Fingerprint className="w-3 h-3 mr-1" /> Finger</>
+                            )}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{punch.device}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
           </div>
-        </div>
-      );
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 };
-

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { PrimaryButton } from '../components/common/PrimaryButton';
+import { Button } from '@/components/ui/button';
 import { AppConfig } from '../config/appConfig';
 import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, Trash2, UserPlus, UserCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -415,7 +415,7 @@ const MasterSettingsContent: React.FC<{ onLock: () => void }> = ({ onLock }) => 
         <div style={{ marginBottom: 24 }}>
           <label style={labelStyle}>Service Account Key (JSON)</label>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <PrimaryButton label="📂 Choose JSON File" onClick={() => fileInputRef.current?.click()} />
+            <Button onClick={() => fileInputRef.current?.click()}>📂 Choose JSON File</Button>
             <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
               {jsonText ? '✅ New key loaded' : config?.configured ? 'Existing key active' : 'No key selected'}
             </span>
@@ -423,12 +423,9 @@ const MasterSettingsContent: React.FC<{ onLock: () => void }> = ({ onLock }) => 
           <input type="file" accept=".json" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileUpload} />
         </div>
 
-        <PrimaryButton
-          isAccent
-          label={isLoading ? 'Saving...' : '💾 Save Cloud Settings'}
-          disabled={isLoading}
-          onClick={handleSave}
-        />
+        <Button variant="accent" onClick={handleSave} disabled={isLoading}>
+          {isLoading ? 'Saving...' : '💾 Save Cloud Settings'}
+        </Button>
 
         {status && (
           <div style={{
@@ -630,7 +627,7 @@ const EmployeeDirectory: React.FC = () => {
             {status && <p style={{ color: 'var(--success)', fontSize: 13, marginBottom: 12 }}>{status}</p>}
 
             <div style={{ display: 'flex', gap: 12 }}>
-              <PrimaryButton label="Save Changes" isAccent onClick={handleUpdate} />
+              <Button variant="accent" onClick={handleUpdate}>Save Changes</Button>
               <button onClick={() => setEditingEmp(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>Discard</button>
             </div>
           </div>
@@ -765,7 +762,9 @@ const UserManagement: React.FC = () => {
             </div>
           </div>
           
-          <PrimaryButton label={loading ? 'Creating...' : 'Create User'} isAccent onClick={handleAddUser} disabled={loading} />
+          <Button variant="accent" onClick={handleAddUser} disabled={loading}>
+            {loading ? 'Creating...' : 'Create User'}
+          </Button>
           {status && <p style={{ marginTop: 12, fontSize: 13, color: status.includes('❌') ? '#ef4444' : '#10b981' }}>{status}</p>}
         </div>
       )}

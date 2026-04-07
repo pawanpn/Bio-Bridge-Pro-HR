@@ -5,7 +5,20 @@ import { AttendanceConsole } from '../components/AttendanceConsole';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { useAuth } from '../context/AuthContext';
 import { AppConfig } from '../config/appConfig';
-import { Calendar, Search, LayoutDashboard, Monitor, FileText, Settings, LogOut, User as UserIcon, CalendarCheck } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { 
+  Calendar, 
+  Search, 
+  LayoutDashboard, 
+  Monitor, 
+  FileText, 
+  Settings, 
+  LogOut, 
+  User as UserIcon, 
+  CalendarCheck 
+} from 'lucide-react';
 
 export const MainLayout: React.FC = () => {
   useShortcuts();
@@ -18,7 +31,7 @@ export const MainLayout: React.FC = () => {
 
   useEffect(() => {
     invoke<any[]>('list_branches').then(setBranches).catch(console.error);
-    
+
     // Set initial branch if user is branch-locked
     if (user?.branchId) {
       setSelectedBranch(user.branchId);
@@ -44,29 +57,49 @@ export const MainLayout: React.FC = () => {
   const isOperator = user?.role === 'OPERATOR';
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw' }}>
+    <div className="flex h-screen w-screen overflow-hidden">
       {/* Sidebar */}
-      <div style={{ width: '250px', backgroundColor: 'var(--sidebar-bg)', color: 'white', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '8px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-          <div style={{ fontSize: '18px', fontWeight: 'bold' }}>{AppConfig.appName}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'rgba(255,255,255,0.6)' }}>
-             <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#10b981' }} />
-             {user?.username} ({user?.role})
+      <aside className="w-64 bg-sidebar-bg text-white flex flex-col shadow-xl">
+        <div className="px-6 py-6 border-b border-white/10">
+          <h1 className="text-lg font-bold">{AppConfig.appName}</h1>
+          <div className="flex items-center gap-2 mt-2 text-xs text-white/60">
+            <div className="w-2 h-2 rounded-full bg-green-500" />
+            <span>{user?.username} ({user?.role})</span>
           </div>
         </div>
 
-        <div style={{ flex: 1, padding: '16px 0' }}>
-          <SidebarItem icon={<LayoutDashboard size={18} />} label="Dashboard Overview" active={activeTab === 'Overview'} onClick={() => go('Overview', '/dashboard')} />
+        <nav className="flex-1 py-4 space-y-1">
+          <SidebarItem 
+            icon={<LayoutDashboard size={18} />} 
+            label="Dashboard Overview" 
+            active={activeTab === 'Overview'} 
+            onClick={() => go('Overview', '/dashboard')} 
+          />
           {!isOperator && (
-            <SidebarItem icon={<CalendarCheck size={18} />} label="Leave Management" active={activeTab === 'Leave'} onClick={() => go('Leave', '/leave-management')} />
+            <SidebarItem 
+              icon={<CalendarCheck size={18} />} 
+              label="Leave Management" 
+              active={activeTab === 'Leave'} 
+              onClick={() => go('Leave', '/leave-management')} 
+            />
           )}
           {!isOperator && (
-            <SidebarItem icon={<Monitor size={18} />} label="Device Management" active={activeTab === 'Devices'} onClick={() => go('Devices', '/device-settings')} />
+            <SidebarItem 
+              icon={<Monitor size={18} />} 
+              label="Device Management" 
+              active={activeTab === 'Devices'} 
+              onClick={() => go('Devices', '/device-settings')} 
+            />
           )}
-          <SidebarItem icon={<FileText size={18} />} label="Reports" active={activeTab === 'Reports'} onClick={() => go('Reports', '/reports')} />
-        </div>
+          <SidebarItem 
+            icon={<FileText size={18} />} 
+            label="Reports" 
+            active={activeTab === 'Reports'} 
+            onClick={() => go('Reports', '/reports')} 
+          />
+        </nav>
 
-        <div style={{ padding: '16px 0', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
+        <div className="py-4 border-t border-white/10 space-y-1">
           {!isOperator && (
             <SidebarItem
               icon={<Settings size={18} />}
@@ -82,24 +115,27 @@ export const MainLayout: React.FC = () => {
             onClick={handleLogout}
           />
         </div>
-      </div>
+      </aside>
 
       {/* Main Area */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+      <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top Header */}
-        <div style={{ height: '70px', backgroundColor: 'var(--surface-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-color)', padding: '8px 12px', borderRadius: '4px', width: '300px' }}>
-            <Search size={18} color="var(--text-muted)" style={{ marginRight: '8px' }} />
-            <input placeholder="Search..." style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', marginBottom: 0, padding: 0 }} />
+        <header className="h-16 bg-card shadow-sm flex items-center justify-between px-6 space-x-4">
+          <div className="relative w-72">
+            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input 
+              placeholder="Search..." 
+              className="pl-10 bg-muted/50" 
+            />
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+          <div className="flex items-center gap-6">
             {/* Branch Selector - Locked for Branch Admins/Operators */}
-            <select 
-              value={selectedBranch} 
+            <select
+              value={selectedBranch}
               disabled={!!user?.branchId}
               onChange={(e) => setSelectedBranch(e.target.value)}
-              style={{ marginBottom: 0, padding: '8px', minWidth: '150px' }}
+              className="h-10 px-3 rounded-md border border-input bg-background text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value="all">Global (All Branches)</option>
               {branches.map(b => (
@@ -107,21 +143,28 @@ export const MainLayout: React.FC = () => {
               ))}
             </select>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }} onClick={toggleCalendar}>
-              <Calendar size={20} color="var(--primary-color)" />
-              <span style={{ fontWeight: '500' }}>{calendarMode} Mode</span>
-            </div>
-            
-            <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: 'var(--primary-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
-               <UserIcon size={18} />
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleCalendar}
+              className="flex items-center gap-2"
+            >
+              <Calendar size={20} className="text-primary" />
+              <span className="font-medium">{calendarMode} Mode</span>
+            </Button>
+
+            <Avatar className="h-8 w-8 bg-primary text-primary-foreground">
+              <AvatarFallback>
+                <UserIcon size={18} />
+              </AvatarFallback>
+            </Avatar>
           </div>
-        </div>
+        </header>
 
         {/* Page Content */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <main className="flex-1 overflow-y-auto bg-muted/20 p-6">
           <Outlet />
-        </div>
+        </main>
 
         <AttendanceConsole />
       </div>
@@ -129,20 +172,23 @@ export const MainLayout: React.FC = () => {
   );
 };
 
-const SidebarItem = ({ icon, label, active, onClick }: { icon: React.ReactNode; label: string; active: boolean; onClick: () => void }) => (
+interface SidebarItemProps {
+  icon: React.ReactNode;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}
+
+const SidebarItem = ({ icon, label, active, onClick }: SidebarItemProps) => (
   <div
     onClick={onClick}
-    style={{
-      padding: '12px 24px',
-      display: 'flex', alignItems: 'center', gap: '12px',
-      cursor: 'pointer',
-      backgroundColor: active ? 'rgba(79, 70, 229, 0.15)' : 'transparent',
-      borderLeft: active ? '4px solid #4f46e5' : '4px solid transparent',
-      transition: 'all 0.2s',
-      color: active ? 'white' : 'rgba(255,255,255,0.7)',
-    }}
+    className={`flex items-center gap-3 px-6 py-3 cursor-pointer transition-all duration-200 ${
+      active 
+        ? 'bg-primary/20 border-l-4 border-primary text-white' 
+        : 'text-white/70 hover:bg-white/5 hover:text-white'
+    }`}
   >
     {icon}
-    <span style={{ fontSize: '14px', fontWeight: active ? '600' : '400' }}>{label}</span>
+    <span className={`text-sm ${active ? 'font-semibold' : 'font-normal'}`}>{label}</span>
   </div>
 );
