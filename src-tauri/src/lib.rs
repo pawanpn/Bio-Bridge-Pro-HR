@@ -3,6 +3,9 @@ mod hardware;
 mod cloud;
 mod errors;
 mod models;
+mod crud;
+mod security;
+mod sync_service;
 
 use tauri::{AppHandle, Manager, State, Emitter, Listener};
 use std::sync::Mutex;
@@ -35,6 +38,7 @@ pub struct AppState {
     pub current_user_id:     Mutex<Option<i64>>,
     pub current_user_role:   Mutex<Option<String>>,
     pub current_user_branch_id: Mutex<Option<i64>>,
+    pub supabase_config:     Mutex<Option<sync_service::SyncConfig>>,
 }
 
 fn lock_err<T>(_: T) -> AppError {
@@ -2450,6 +2454,33 @@ pub fn run() {
             get_all_notifications,
             delete_notification,
             get_unread_count,
+            // ERP CRUD Commands
+            crud::create_employee,
+            crud::get_employee,
+            crud::list_employees,
+            crud::update_employee,
+            crud::delete_employee,
+            crud::create_leave_request,
+            crud::list_leave_requests,
+            crud::update_leave_status,
+            crud::create_manual_attendance,
+            crud::get_attendance_logs,
+            crud::create_salary_structure,
+            crud::get_salary_structure,
+            crud::create_invoice,
+            crud::list_invoices,
+            crud::create_item,
+            crud::list_items,
+            crud::update_stock,
+            crud::create_project,
+            crud::list_projects,
+            crud::create_task,
+            // Supabase Sync Commands
+            sync_service::initialize_supabase_sync,
+            sync_service::sync_to_supabase,
+            sync_service::pull_from_supabase,
+            sync_service::resolve_sync_conflict,
+            sync_service::get_sync_stats,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Bio Bridge Pro HR");

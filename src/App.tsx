@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { EnhancedSetupWizard } from './components/EnhancedSetupWizard';
 import { MainLayout } from './layout/MainLayout';
-import { Dashboard } from './pages/Dashboard';
+import { ERPDashboard } from './pages/ERPDashboard';
 import { DeviceSettings } from './pages/DeviceSettings';
 import { DynamicSystemSettings } from './pages/DynamicSystemSettings';
 import { Reports } from './pages/Reports';
@@ -46,7 +46,7 @@ function AppContent() {
     <Routes>
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/" element={<MainLayout />}>
-        <Route path="dashboard" element={<Dashboard />} />
+        <Route path="dashboard" element={<ERPDashboard />} />
         <Route path="employee/:employeeId" element={<EmployeeDetail />} />
         <Route path="employees" element={<EmployeeManagement />} />
         <Route path="employee-hierarchy" element={<EmployeeHierarchyTree />} />
