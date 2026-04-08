@@ -2687,21 +2687,29 @@ fn send_notification(
     branch_id: Option<i64>,
     notification_type: String,
     expires_at: Option<String>,
+    sender_id: Option<i64>,
+    sender_name: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<i64, AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    
-    let sender_id = state.current_user_id.lock().map_err(lock_err)?.ok_or_else(|| AppError::Unknown("Not logged in".into()))?;
-    let sender_name: String = conn.query_row(
-        "SELECT username FROM Users WHERE id = ?1", [sender_id], |r| r.get(0)
-    ).unwrap_or_else(|_| "Unknown".to_string());
+
+    // Use provided sender info, or fallback to backend state
+    let final_sender_id = sender_id.or_else(|| {
+        state.current_user_id.lock().map_err(lock_err).ok().and_then(|g| *g)
+    }).ok_or_else(|| AppError::Unknown("Not logged in".into()))?;
+
+    let final_sender_name = sender_name.unwrap_or_else(|| {
+        conn.query_row(
+            "SELECT username FROM Users WHERE id = ?1", [final_sender_id], |r| r.get(0)
+        ).unwrap_or_else(|_| "Unknown".to_string())
+    });
 
     conn.execute(
         "INSERT INTO Notifications (sender_id, sender_name, receiver_id, receiver_type, branch_id, title, message, notification_type, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![sender_id, sender_name, receiver_id, receiver_type, branch_id, title, message, notification_type, expires_at],
+        params![final_sender_id, final_sender_name, receiver_id, receiver_type, branch_id, title, message, notification_type, expires_at],
     )?;
-    
+
     Ok(conn.last_insert_rowid())
 }
 
