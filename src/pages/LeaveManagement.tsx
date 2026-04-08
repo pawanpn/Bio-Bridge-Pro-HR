@@ -45,12 +45,12 @@ interface LeaveStats {
 }
 
 const leaveTypeIcons: Record<string, string> = {
-  'Sick Leave': '\ud83e\udd12',
-  'Casual Leave': '\ud83c\udfd6\ufe0f',
-  'Paid Leave': '\ud83d\udcb0',
-  'Maternity Leave': '\ud83d\udc76',
-  'Paternity Leave': '\ud83d\udc68\u200d',
-  'Emergency Leave': '\ud83d\udea8',
+  'Sick Leave': '🤒',
+  'Casual Leave': '🏖️',
+  'Paid Leave': '💰',
+  'Maternity Leave': '👶',
+  'Paternity Leave': '👨‍',
+  'Emergency Leave': '🚨',
 };
 
 export const LeaveManagement: React.FC = () => {

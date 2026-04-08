@@ -249,6 +249,42 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     );
 
+    // Multi-branch access table: allows ADMIN users to access multiple branches
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS UserBranchAccess (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            branch_id INTEGER NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES Users(id),
+            FOREIGN KEY(branch_id) REFERENCES Branches(id),
+            UNIQUE(user_id, branch_id)
+        )",
+        [],
+    );
+
+    // Notification System table
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS Notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sender_id INTEGER NOT NULL,
+            sender_name TEXT,
+            receiver_id INTEGER,
+            receiver_type TEXT DEFAULT 'USER', -- USER, BRANCH, ALL
+            branch_id INTEGER,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            notification_type TEXT DEFAULT 'GENERAL', -- GENERAL, URGENT, ANNOUNCEMENT, REMINDER
+            is_read INTEGER DEFAULT 0,
+            read_at TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            expires_at TEXT,
+            FOREIGN KEY(sender_id) REFERENCES Users(id),
+            FOREIGN KEY(receiver_id) REFERENCES Users(id),
+            FOREIGN KEY(branch_id) REFERENCES Branches(id)
+        )",
+        [],
+    );
+
     // Ensure uniqueness constraint for offline-first permanent sync
     let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_attendancelogs_emp_time ON AttendanceLogs (employee_id, timestamp)", []);
 

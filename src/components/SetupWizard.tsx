@@ -389,9 +389,20 @@ export const SetupWizard: React.FC = () => {
           <div className="text-xs text-muted-foreground">
             {step === 5 ? 'Final step' : `${5 - step} steps remaining`}
           </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <FileText size={14} />
-            <span>BioBridge Pro HR Setup</span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => {
+                localStorage.setItem('setupComplete', 'true');
+                window.location.reload();
+              }}
+              className="text-xs text-muted-foreground hover:text-primary underline"
+            >
+              Skip Setup & Go to Login
+            </button>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <FileText size={14} />
+              <span>BioBridge Pro HR Setup</span>
+            </div>
           </div>
         </CardFooter>
       </Card>

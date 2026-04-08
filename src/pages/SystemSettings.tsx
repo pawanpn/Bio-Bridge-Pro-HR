@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { AppConfig } from '../config/appConfig';
-import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, Trash2, UserPlus, UserCircle } from 'lucide-react';
+import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, UserPlus, UserCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { EmployeeProfileSidebar } from '../components/EmployeeProfileSidebar';
 
@@ -651,13 +651,15 @@ const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<any[]>([]);
   const [branches, setBranches] = useState<any[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
-  
-  // New User Form
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+
+  // New/Edit User Form
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('ADMIN');
   const [branchId, setBranchId] = useState<number | null>(null);
-  
+  const [branchAccess, setBranchAccess] = useState<number[]>([]);
+
   const [status, setStatus] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -684,23 +686,71 @@ const UserManagement: React.FC = () => {
     }
   };
 
+  const resetForm = () => {
+    setUsername('');
+    setPassword('');
+    setRole('ADMIN');
+    setBranchId(null);
+    setBranchAccess([]);
+    setEditingUser(null);
+    setShowAddForm(false);
+  };
+
+  const handleEditUser = (user: any) => {
+    setEditingUser(user);
+    setUsername(user.username);
+    setPassword('');
+    setRole(user.role);
+    setBranchId(user.branchId);
+    setBranchAccess(user.branchAccess?.map((b: any) => b.id) || []);
+    setShowAddForm(true);
+  };
+
   const handleAddUser = async () => {
-    if (!username || !password) {
+    if (!username || (!editingUser && !password)) {
       setStatus('❌ Username and Password are required.');
       return;
     }
     setLoading(true);
     setStatus('');
     try {
-      await invoke('add_user', { username, password, role, branchId: role === 'SUPER_ADMIN' ? null : branchId });
-      setStatus('✅ User created successfully!');
-      setUsername(''); setPassword(''); setRole('ADMIN'); setBranchId(null);
-      setShowAddForm(false);
+      if (editingUser) {
+        await invoke('update_user', {
+          id: editingUser.id,
+          username,
+          role,
+          branchId: role === 'SUPER_ADMIN' ? null : branchId,
+          branchIds: role === 'SUPER_ADMIN' ? [] : branchAccess,
+          isActive: editingUser.isActive
+        });
+        setStatus('✅ User updated successfully!');
+      } else {
+        await invoke('add_user', {
+          username,
+          password,
+          role,
+          branchId: role === 'SUPER_ADMIN' ? null : branchId,
+          branchIds: role === 'SUPER_ADMIN' ? [] : branchAccess
+        });
+        setStatus('✅ User created successfully!');
+      }
+      resetForm();
       loadUsers();
     } catch (e) {
       setStatus('❌ ' + e);
     }
     setLoading(false);
+  };
+
+  const handleResetPassword = async (user: any) => {
+    const newPass = prompt(`Enter new password for ${user.username}:`);
+    if (!newPass) return;
+    try {
+      await invoke('reset_user_password', { id: user.id, newPassword: newPass });
+      alert('✅ Password reset successfully!');
+    } catch (e) {
+      alert('❌ Error: ' + e);
+    }
   };
 
   const handleDeleteUser = async (id: number) => {
@@ -713,14 +763,22 @@ const UserManagement: React.FC = () => {
     }
   };
 
+  const toggleBranchAccess = (branchId: number) => {
+    setBranchAccess(prev =>
+      prev.includes(branchId)
+        ? prev.filter(id => id !== branchId)
+        : [...prev, branchId]
+    );
+  };
+
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <h3 style={{ margin: 0 }}>Active Users</h3>
-        <button 
+        <button
           onClick={() => setShowAddForm(!showAddForm)}
-          style={{ 
-            display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', 
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px',
             borderRadius: 8, border: 'none', background: 'var(--primary-color)', color: 'white', cursor: 'pointer', fontWeight: 600
           }}
         >
@@ -730,92 +788,169 @@ const UserManagement: React.FC = () => {
 
       {showAddForm && (
         <div style={{ ...cardStyle, marginBottom: 24, border: '1px dashed var(--primary-color)' }}>
-          <h4 style={{ marginTop: 0, marginBottom: 16 }}>Create New User</h4>
+          <h4 style={{ marginTop: 0, marginBottom: 16 }}>
+            {editingUser ? 'Edit User' : 'Create New User'}
+          </h4>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             <div>
               <label style={labelStyle}>Username</label>
               <input type="text" value={username} onChange={e => setUsername(e.target.value)} style={inputStyle} placeholder="john_doe" />
             </div>
-            <div>
-              <label style={labelStyle}>Temporary Password</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} placeholder="••••••" />
-            </div>
+            {!editingUser && (
+              <div>
+                <label style={labelStyle}>Temporary Password</label>
+                <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} placeholder="••••••" />
+              </div>
+            )}
             <div>
               <label style={labelStyle}>Access Role</label>
               <select value={role} onChange={e => setRole(e.target.value)} style={inputStyle}>
                 <option value="SUPER_ADMIN">Super Admin (Full Access)</option>
                 <option value="ADMIN">Admin (Branch Limited)</option>
-                <option value="OPERATOR">Operator (ReadOnly/Branch)</option>
+                <option value="OPERATOR">Operator (Read Only/Branch)</option>
               </select>
             </div>
-            <div>
-              <label style={labelStyle}>Assign Branch {role === 'SUPER_ADMIN' && '(Global)'}</label>
-              <select 
-                disabled={role === 'SUPER_ADMIN'}
-                value={branchId || ''} 
-                onChange={e => setBranchId(Number(e.target.value) || null)} 
-                style={inputStyle}
-              >
-                <option value="">No specific branch</option>
-                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            </div>
+            {role !== 'SUPER_ADMIN' && (
+              <div>
+                <label style={labelStyle}>Primary Branch</label>
+                <select value={branchId || ''} onChange={e => setBranchId(e.target.value ? Number(e.target.value) : null)} style={inputStyle}>
+                  <option value="">Select Primary Branch</option>
+                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+            )}
           </div>
-          
-          <Button variant="accent" onClick={handleAddUser} disabled={loading}>
-            {loading ? 'Creating...' : 'Create User'}
-          </Button>
-          {status && <p style={{ marginTop: 12, fontSize: 13, color: status.includes('❌') ? '#ef4444' : '#10b981' }}>{status}</p>}
+
+          {role !== 'SUPER_ADMIN' && (
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Branch Access (Multi-Select)</label>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
+                Select which branches this user can access data from
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {branches.map(branch => (
+                  <button
+                    key={branch.id}
+                    onClick={() => toggleBranchAccess(branch.id)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: 6,
+                      border: branchAccess.includes(branch.id) ? '2px solid var(--primary-color)' : '1px solid var(--border-color)',
+                      background: branchAccess.includes(branch.id) ? 'var(--primary-color)' : 'transparent',
+                      color: branchAccess.includes(branch.id) ? 'white' : 'var(--text-muted)',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      fontSize: 13,
+                    }}
+                  >
+                    {branchAccess.includes(branch.id) ? '✓ ' : ''}{branch.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {status && <p style={{ color: status.includes('❌') ? 'var(--error)' : 'var(--success)', fontSize: 13, marginBottom: 12 }}>{status}</p>}
+
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button
+              onClick={handleAddUser}
+              disabled={loading}
+              style={{
+                padding: '9px 20px', borderRadius: 7, border: 'none',
+                background: 'var(--primary-color)', color: 'white', fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer', fontSize: 14,
+              }}
+            >
+              {loading ? 'Saving...' : editingUser ? 'Update User' : 'Create User'}
+            </button>
+            <button onClick={resetForm} style={{ border: '1px solid var(--border-color)', background: 'transparent', padding: '9px 20px', borderRadius: 7, cursor: 'pointer' }}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
+      {/* User List */}
       <div style={cardStyle}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border-color)' }}>
-              <th style={{ padding: '12px 8px', fontSize: 12, color: 'var(--text-muted)' }}>USERNAME</th>
-              <th style={{ padding: '12px 8px', fontSize: 12, color: 'var(--text-muted)' }}>ROLE</th>
-              <th style={{ padding: '12px 8px', fontSize: 12, color: 'var(--text-muted)' }}>BRANCH</th>
-              <th style={{ padding: '12px 8px', fontSize: 12, color: 'var(--text-muted)' }}>STATUS</th>
-              <th style={{ padding: '12px 8px', fontSize: 12, color: 'var(--text-muted)' }}>ACTIONS</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map(u => (
-              <tr key={u.id} style={{ borderBottom: '1px solid var(--bg-color)' }}>
-                <td style={{ padding: '14px 8px', fontWeight: 600 }}>{u.username}</td>
-                <td style={{ padding: '14px 8px' }}>
-                   <span style={{ 
-                     fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 4,
-                     background: u.role === 'SUPER_ADMIN' ? 'rgba(79,70,229,0.1)' : 'rgba(100,116,139,0.1)',
-                     color: u.role === 'SUPER_ADMIN' ? 'var(--primary-color)' : 'var(--text-muted)'
-                   }}>
-                     {u.role}
-                   </span>
-                </td>
-                <td style={{ padding: '14px 8px', fontSize: 14 }}>
-                  {u.branchId ? branches.find(b => b.id === u.branchId)?.name || 'Branch '+u.branchId : 'Global'}
-                </td>
-                <td style={{ padding: '14px 8px' }}>
-                   <span style={{ color: u.isActive ? '#10b981' : '#ef4444', fontSize: 13 }}>
-                     {u.isActive ? '● Active' : '○ Inactive'}
-                   </span>
-                </td>
-                <td style={{ padding: '14px 8px' }}>
-                  {u.username !== 'admin' && (
-                    <button 
-                      onClick={() => handleDeleteUser(u.id)}
-                      style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', opacity: 0.7 }}
-                      title="Delete User"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
-                </td>
+        {users.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+            No users found. Create your first user above.
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--border-color)' }}>
+                <th style={{ padding: '12px 8px', fontSize: 11, color: 'var(--text-muted)' }}>USERNAME</th>
+                <th style={{ padding: '12px 8px', fontSize: 11, color: 'var(--text-muted)' }}>ROLE</th>
+                <th style={{ padding: '12px 8px', fontSize: 11, color: 'var(--text-muted)' }}>BRANCH ACCESS</th>
+                <th style={{ padding: '12px 8px', fontSize: 11, color: 'var(--text-muted)' }}>STATUS</th>
+                <th style={{ padding: '12px 8px', fontSize: 11, color: 'var(--text-muted)' }}>ACTIONS</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {users.map(user => (
+                <tr key={user.id} style={{ borderBottom: '1px solid var(--bg-color)' }}>
+                  <td style={{ padding: '12px 8px', fontWeight: 600 }}>{user.username}</td>
+                  <td style={{ padding: '12px 8px' }}>
+                    <span style={{
+                      padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700,
+                      background: user.role === 'SUPER_ADMIN' ? 'rgba(99,102,241,0.1)' : user.role === 'ADMIN' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
+                      color: user.role === 'SUPER_ADMIN' ? '#6366f1' : user.role === 'ADMIN' ? '#10b981' : '#f59e0b',
+                    }}>
+                      {user.role}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px 8px', fontSize: 12 }}>
+                    {user.role === 'SUPER_ADMIN' ? (
+                      <span style={{ color: 'var(--text-muted)' }}>All Branches</span>
+                    ) : user.branchAccess?.length > 0 ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {user.branchAccess.map((b: any) => (
+                          <span key={b.id} style={{ padding: '2px 6px', borderRadius: 3, background: 'var(--bg-color)', fontSize: 11 }}>
+                            {b.name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ color: 'var(--text-muted)' }}>Primary Only</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '12px 8px' }}>
+                    <span style={{
+                      padding: '3px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+                      background: user.isActive ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
+                      color: user.isActive ? '#10b981' : '#ef4444',
+                    }}>
+                      {user.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '12px 8px' }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button
+                        onClick={() => handleEditUser(user)}
+                        style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border-color)', background: 'transparent', cursor: 'pointer', fontSize: 12 }}
+                      >
+                        ✏️ Edit
+                      </button>
+                      <button
+                        onClick={() => handleResetPassword(user)}
+                        style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border-color)', background: 'transparent', cursor: 'pointer', fontSize: 12 }}
+                      >
+                        🔑 Reset Pass
+                      </button>
+                      <button
+                        onClick={() => handleDeleteUser(user.id)}
+                        style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.05)', color: '#ef4444', cursor: 'pointer', fontSize: 12 }}
+                      >
+                        🗑️ Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
