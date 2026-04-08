@@ -10,7 +10,9 @@
       "Bash(findstr *)",
       "Bash(tasklist)",
       "Bash(timeout *)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(powershell *)",
+      "Bash(select-object *)"
     ]
   },
   "$version": 3
