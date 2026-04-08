@@ -17,6 +17,10 @@ import { PayrollManagement } from './pages/PayrollManagement';
 import { FinanceManagement } from './pages/FinanceManagement';
 import { PermissionManagement } from './components/PermissionManagement';
 import { EmployeeHierarchyTree } from './components/EmployeeHierarchyTree';
+import { InventoryManagement } from './pages/InventoryManagement';
+import { ProjectsManagement } from './pages/ProjectsManagement';
+import { CRMManagement } from './pages/CRMManagement';
+import { AssetsManagement } from './pages/AssetsManagement';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -60,6 +64,10 @@ function AppContent() {
         <Route path="system-settings" element={<DynamicSystemSettings />} />
         <Route path="permissions" element={<PermissionManagement />} />
         <Route path="reports" element={<Reports />} />
+        <Route path="inventory" element={<InventoryManagement />} />
+        <Route path="projects" element={<ProjectsManagement />} />
+        <Route path="crm" element={<CRMManagement />} />
+        <Route path="assets" element={<AssetsManagement />} />
         <Route path="cloud-settings" element={<Navigate to="/system-settings" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
