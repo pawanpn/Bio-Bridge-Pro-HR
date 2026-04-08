@@ -1,12 +1,46 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Supabase Configuration
-// These will be configured by user in System Settings
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// These will be configured by user in System Settings or Setup Wizard
+let SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+let SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+// Check if user has completed setup
+const isSetupComplete = localStorage.getItem('setupComplete') === 'true';
+
+// Override with setup wizard values if available
+if (isSetupComplete) {
+  SUPABASE_URL = localStorage.getItem('supabaseUrl') || SUPABASE_URL;
+  SUPABASE_ANON_KEY = localStorage.getItem('supabaseAnonKey') || SUPABASE_ANON_KEY;
+}
 
 // Create Supabase client (singleton)
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+let supabaseClient: SupabaseClient;
+
+export const initializeSupabase = (url: string, anonKey: string): SupabaseClient => {
+  SUPABASE_URL = url;
+  SUPABASE_ANON_KEY = anonKey;
+  localStorage.setItem('supabaseUrl', url);
+  localStorage.setItem('supabaseAnonKey', anonKey);
+  
+  supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: false,
+    },
+    realtime: {
+      params: {
+        eventsPerSecond: 10,
+      },
+    },
+  });
+  
+  return supabaseClient;
+};
+
+// Initialize with current values
+supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: {
     autoRefreshToken: true,
     persistSession: true,
@@ -18,6 +52,8 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     },
   },
 });
+
+export const supabase = supabaseClient;
 
 // Sync Configuration
 export const SYNC_CONFIG = {

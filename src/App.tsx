@@ -1,10 +1,10 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { SetupWizard } from './components/SetupWizard';
+import { EnhancedSetupWizard } from './components/EnhancedSetupWizard';
 import { MainLayout } from './layout/MainLayout';
 import { Dashboard } from './pages/Dashboard';
 import { DeviceSettings } from './pages/DeviceSettings';
-import { SystemSettings } from './pages/SystemSettings';
+import { DynamicSystemSettings } from './pages/DynamicSystemSettings';
 import { Reports } from './pages/Reports';
 import { LeaveManagement } from './pages/LeaveManagement';
 import { EmployeeDetail } from './pages/EmployeeDetail';
@@ -15,13 +15,15 @@ import { BranchGateDeviceManagement } from './pages/BranchGateDeviceManagement';
 import { EmployeeManagement } from './pages/EmployeeManagement';
 import { PayrollManagement } from './pages/PayrollManagement';
 import { FinanceManagement } from './pages/FinanceManagement';
+import { PermissionManagement } from './components/PermissionManagement';
+import { EmployeeHierarchyTree } from './components/EmployeeHierarchyTree';
 
 function AppContent() {
   const { user } = useAuth();
   const isSetupComplete = localStorage.getItem('setupComplete') === 'true';
 
   if (!isSetupComplete) {
-    return <SetupWizard />;
+    return <EnhancedSetupWizard />;
   }
 
   if (!user) {
@@ -35,6 +37,7 @@ function AppContent() {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="employee/:employeeId" element={<EmployeeDetail />} />
         <Route path="employees" element={<EmployeeManagement />} />
+        <Route path="employee-hierarchy" element={<EmployeeHierarchyTree />} />
         <Route path="leave-management" element={<LeaveManagement />} />
         <Route path="attendance" element={<AttendanceManagement />} />
         <Route path="payroll" element={<PayrollManagement />} />
@@ -42,7 +45,8 @@ function AppContent() {
         <Route path="organization" element={<BranchGateDeviceManagement />} />
         <Route path="device-settings" element={<DeviceSettings />} />
         <Route path="notifications" element={<NotificationSystem />} />
-        <Route path="system-settings" element={<SystemSettings />} />
+        <Route path="system-settings" element={<DynamicSystemSettings />} />
+        <Route path="permissions" element={<PermissionManagement />} />
         <Route path="reports" element={<Reports />} />
         <Route path="cloud-settings" element={<Navigate to="/system-settings" replace />} />
       </Route>
