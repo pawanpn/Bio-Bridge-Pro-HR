@@ -46,8 +46,8 @@ export const MainLayout: React.FC = () => {
     invoke<any[]>('list_branches').then(setBranches).catch(console.error);
 
     // Set initial branch if user is branch-locked
-    if (user?.branchId) {
-      setSelectedBranch(user.branchId);
+    if (user?.branch_id) {
+      setSelectedBranch(user.branch_id);
     }
   }, [user]);
 
