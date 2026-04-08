@@ -1939,98 +1939,8 @@ fn get_employee_monthly_attendance(
 
 // ── Leave Management Commands ──────────────────────────────────────────────
 
-#[tauri::command]
-fn list_leave_requests(
-    state: State<'_, AppState>,
-    employee_id: Option<i64>,
-    status: Option<String>,
-) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(lock_err)?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-
-    // RBAC
-    let u_role = state.current_user_role.lock().map_err(lock_err)?.clone();
-    let u_branch = state.current_user_branch_id.lock().map_err(lock_err)?.clone();
-
-    let mut query = String::from(
-        "SELECT lr.id, lr.employee_id, e.name, lr.leave_type, lr.start_date, lr.end_date, lr.status, lr.reason, lr.approved_by
-         FROM LeaveRequests lr JOIN Employees e ON lr.employee_id = e.id WHERE 1=1"
-    );
-
-    // Branch filter for ADMIN/OPERATOR
-    if u_role == Some("ADMIN".to_string()) || u_role == Some("OPERATOR".to_string()) {
-        if let Some(branch) = u_branch {
-            query.push_str(&format!(" AND e.branch_id = {}", branch));
-        }
-    }
-
-    if let Some(eid) = employee_id {
-        query.push_str(&format!(" AND lr.employee_id = {}", eid));
-    }
-    if let Some(s) = status {
-        if s != "all" {
-            query.push_str(&format!(" AND lr.status = '{}'", s.replace('\'', "''")));
-        }
-    }
-
-    query.push_str(" ORDER BY lr.start_date DESC");
-
-    let mut stmt = conn.prepare(&query)?;
-    let rows: Vec<serde_json::Value> = stmt.query_map([], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "employeeId": row.get::<_, i64>(1)?,
-            "employeeName": row.get::<_, String>(2)?,
-            "leaveType": row.get::<_, String>(3)?,
-            "startDate": row.get::<_, String>(4)?,
-            "endDate": row.get::<_, String>(5)?,
-            "status": row.get::<_, String>(6)?,
-            "reason": row.get::<_, Option<String>>(7)?.unwrap_or_default(),
-            "approvedBy": row.get::<_, Option<String>>(8)?.unwrap_or_default(),
-        }))
-    })?.filter_map(|r| r.ok()).collect();
-
-    Ok(serde_json::to_value(rows).unwrap())
-}
-
-#[tauri::command]
-fn add_leave_request(
-    state: State<'_, AppState>,
-    employee_id: i64,
-    leave_type: String,
-    start_date: String,
-    end_date: String,
-    reason: Option<String>,
-) -> Result<i64, AppError> {
-    let db_guard = state.db.lock().map_err(lock_err)?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-
-    let status = "pending".to_string();
-    conn.execute(
-        "INSERT INTO LeaveRequests (employee_id, leave_type, start_date, end_date, status, reason) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![employee_id, leave_type, start_date, end_date, status, reason.unwrap_or_default()],
-    )?;
-
-    Ok(conn.last_insert_rowid())
-}
-
-#[tauri::command]
-fn update_leave_status(
-    state: State<'_, AppState>,
-    leave_id: i64,
-    status: String,
-    approved_by: Option<String>,
-) -> Result<(), AppError> {
-    let db_guard = state.db.lock().map_err(lock_err)?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-
-    conn.execute(
-        "UPDATE LeaveRequests SET status = ?1, approved_by = ?2 WHERE id = ?3",
-        params![status, approved_by.unwrap_or_default(), leave_id],
-    )?;
-
-    Ok(())
-}
+// Note: list_leave_requests and update_leave_status are now in crud.rs
+// The old simple implementations have been moved to the crud module
 
 #[tauri::command]
 fn delete_leave_request(
@@ -2270,6 +2180,7 @@ pub fn run() {
             current_user_id:     Mutex::new(None),
             current_user_role:   Mutex::new(None),
             current_user_branch_id: Mutex::new(None),
+            supabase_config:     Mutex::new(None),
         })
         .setup(|app| {
             let app_dir = app.path().app_data_dir().expect("Failed to resolve app data dir");
@@ -2427,9 +2338,6 @@ pub fn run() {
             reset_user_password,
             delete_user,
             change_password,
-            list_employees,
-            update_employee,
-            delete_employee,
             set_default_device,
             check_port_conflict,
             import_hardware_files,
@@ -2437,9 +2345,6 @@ pub fn run() {
             list_employee_documents,
             get_document_preview,
             generate_payroll_slip,
-            list_leave_requests,
-            add_leave_request,
-            update_leave_status,
             delete_leave_request,
             get_leave_stats,
             get_leave_types,
@@ -2505,66 +2410,8 @@ async fn get_device_users(
     }))
 }
 
-#[tauri::command]
-fn list_employees(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(lock_err)?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
-    
-    // RBAC: If ADMIN/OPERATOR, filter by branch
-    let u_role = state.current_user_role.lock().map_err(lock_err)?.clone();
-    let u_branch = state.current_user_branch_id.lock().map_err(lock_err)?.clone();
-    
-    let mut stmt = if u_role == Some("SUPER_ADMIN".to_string()) {
-        conn.prepare("SELECT id, name, department, branch_id, status FROM Employees")?
-    } else {
-        conn.prepare("SELECT id, name, department, branch_id, status FROM Employees WHERE branch_id = ?1")?
-    };
-
-    let employees: Vec<serde_json::Value> = if u_role == Some("SUPER_ADMIN".to_string()) {
-        stmt.query_map([], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i32>(0)?,
-                "name": row.get::<_, String>(1)?,
-                "department": row.get::<_, Option<String>>(2)?,
-                "branch_id": row.get::<_, Option<i64>>(3)?,
-                "status": row.get::<_, String>(4)?
-            }))
-        })?.filter_map(|r| r.ok()).collect()
-    } else {
-        stmt.query_map([u_branch], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i32>(0)?,
-                "name": row.get::<_, String>(1)?,
-                "department": row.get::<_, Option<String>>(2)?,
-                "branch_id": row.get::<_, Option<i64>>(3)?,
-                "status": row.get::<_, String>(4)?
-            }))
-        })?.filter_map(|r| r.ok()).collect()
-    };
-    
-    Ok(serde_json::to_value(employees).unwrap())
-}
-
-#[tauri::command]
-fn update_employee(id: i32, name: String, department: String, branch_id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
-    let db_guard = state.db.lock().map_err(lock_err)?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
-    
-    conn.execute(
-        "UPDATE Employees SET name = ?1, department = ?2, branch_id = ?3 WHERE id = ?4",
-        params![name, department, branch_id, id],
-    )?;
-    Ok(())
-}
-
-#[tauri::command]
-fn delete_employee(id: i32, state: State<'_, AppState>) -> Result<(), AppError> {
-    let db_guard = state.db.lock().map_err(lock_err)?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
-    
-    conn.execute("DELETE FROM Employees WHERE id = ?1", [id])?;
-    Ok(())
-}
+// Note: list_employees, update_employee, delete_employee are now in crud.rs
+// The old simple implementations have been moved to the crud module
 
 #[tauri::command]
 fn login(username: String, password: String, state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {

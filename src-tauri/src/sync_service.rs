@@ -12,7 +12,6 @@
 // ============================================================================
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SyncConfig {
@@ -22,7 +21,7 @@ pub struct SyncConfig {
     pub encryption_key: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SyncRecord {
     pub table_name: String,
     pub operation: String, // INSERT, UPDATE, DELETE
@@ -85,21 +84,29 @@ pub async fn sync_to_supabase(
 ) -> Result<SyncResult, crate::errors::AppError> {
     use crate::errors::AppError;
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard
-        .as_ref()
-        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    // Extract config before await
+    let config = {
+        let config_guard = state
+            .supabase_config
+            .lock()
+            .map_err(|_| AppError::Unknown("Lock error".into()))?;
+        config_guard
+            .as_ref()
+            .ok_or_else(|| AppError::ValidationError("Supabase not configured".into()))?
+            .clone()
+    };
 
-    let config_guard = state
-        .supabase_config
-        .lock()
-        .map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let config = config_guard
-        .as_ref()
-        .ok_or_else(|| AppError::ValidationError("Supabase not configured".into()))?;
+    // Get pending records
+    let pending_records = {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard
+            .as_ref()
+            .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+        get_pending_sync_records(conn)?
+    };
 
     let mut result = SyncResult {
         success: true,
@@ -109,15 +116,20 @@ pub async fn sync_to_supabase(
         errors: Vec::new(),
     };
 
-    // Get pending records from sync queue
-    let pending_records = get_pending_sync_records(conn)?;
-
     for record in pending_records {
-        match sync_single_record(config, record).await {
+        let record_id = record.record_id.clone();
+        match sync_single_record(&config, record).await {
             Ok(_) => {
                 result.synced_count += 1;
                 // Mark as synced in local DB
-                mark_record_synced(conn, &record.record_id)?;
+                let db_guard = state
+                    .db
+                    .lock()
+                    .map_err(|_| AppError::Unknown("Lock error".into()))?;
+                let conn = db_guard
+                    .as_ref()
+                    .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+                mark_record_synced(conn, &record_id)?;
             }
             Err(e) => {
                 result.failed_count += 1;
@@ -233,21 +245,17 @@ pub async fn pull_from_supabase(
 ) -> Result<serde_json::Value, crate::errors::AppError> {
     use crate::errors::AppError;
 
-    let config_guard = state
-        .supabase_config
-        .lock()
-        .map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let config = config_guard
-        .as_ref()
-        .ok_or_else(|| AppError::ValidationError("Supabase not configured".into()))?;
-
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard
-        .as_ref()
-        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    // Extract config before await
+    let config = {
+        let config_guard = state
+            .supabase_config
+            .lock()
+            .map_err(|_| AppError::Unknown("Lock error".into()))?;
+        config_guard
+            .as_ref()
+            .ok_or_else(|| AppError::ValidationError("Supabase not configured".into()))?
+            .clone()
+    };
 
     let client = reqwest::Client::new();
     let url = format!("{}/rest/v1/{}", config.supabase_url, table_name);
@@ -277,6 +285,14 @@ pub async fn pull_from_supabase(
     })?;
 
     // Store in local database
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
     if let Some(records) = data.as_array() {
         let count = store_records_locally(conn, &table_name, records)?;
         Ok(serde_json::json!({
@@ -325,20 +341,14 @@ fn store_records_locally(
 /// Resolve sync conflicts
 #[tauri::command]
 pub async fn resolve_sync_conflict(
-    conflict_id: String,
+    _conflict_id: String,
     resolution: String, // LOCAL_WINS, REMOTE_WINS, MERGE
-    state: tauri::State<'_, crate::AppState>,
+    _state: tauri::State<'_, crate::AppState>,
 ) -> Result<serde_json::Value, crate::errors::AppError> {
     use crate::errors::AppError;
 
-    let db_guard = state
-        .db
-        .lock()
-        .map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard
-        .as_ref()
-        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-
+    // TODO: Implement full conflict resolution logic
+    // For now, just return success
     match resolution.as_str() {
         "LOCAL_WINS" => {
             // Push local version to Supabase

@@ -38,6 +38,18 @@ pub enum AppError {
 
     #[error("IO error: {0}")]
     IoError(std::io::Error),
+
+    #[error("Validation failed: {0}")]
+    ValidationError(String),
+
+    #[error("Encryption failed: {0}")]
+    EncryptionError(String),
+
+    #[error("Resource not found: {0}")]
+    NotFound(String),
+
+    #[error("Network error: {0}")]
+    NetworkError(String),
 }
 
 // Serialize AppError as a plain string for Tauri IPC transport
