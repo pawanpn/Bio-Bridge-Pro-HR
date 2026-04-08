@@ -7,7 +7,6 @@
 
 use rusqlite::{Connection, params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
 use crate::AppState;
 use crate::errors::AppError;
 use crate::security::{encrypt_data, decrypt_data, sanitize_input, validate_email, validate_date};
@@ -294,7 +293,7 @@ pub async fn update_employee(
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     // Fetch old values for audit
-    let old_values = get_employee_for_audit(conn, employee_id)?;
+    let _old_values = get_employee_for_audit(conn, employee_id)?;
 
     let mut updates = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
