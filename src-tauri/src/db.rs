@@ -285,6 +285,85 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     );
 
+    // Inventory Items table
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS Items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_code TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            category TEXT DEFAULT 'General',
+            quantity INTEGER DEFAULT 0,
+            unit_price REAL DEFAULT 0,
+            reorder_level INTEGER DEFAULT 10,
+            supplier TEXT,
+            location TEXT,
+            is_active INTEGER DEFAULT 1,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )",
+        [],
+    );
+
+    // Projects table
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS Projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_code TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            status TEXT DEFAULT 'Planning',
+            priority TEXT DEFAULT 'Medium',
+            start_date TEXT,
+            end_date TEXT,
+            budget REAL DEFAULT 0,
+            progress INTEGER DEFAULT 0,
+            team_size INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )",
+        [],
+    );
+
+    // CRM Leads table
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS Leads (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_code TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            company TEXT,
+            email TEXT,
+            phone TEXT,
+            status TEXT DEFAULT 'New',
+            source TEXT DEFAULT 'Website',
+            value REAL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )",
+        [],
+    );
+
+    // Assets table
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS Assets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_code TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            category TEXT DEFAULT 'Electronics',
+            status TEXT DEFAULT 'Active',
+            purchase_date TEXT,
+            purchase_cost REAL DEFAULT 0,
+            assigned_to TEXT,
+            location TEXT,
+            warranty_expiry TEXT,
+            condition TEXT DEFAULT 'Good',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        )",
+        [],
+    );
+
     // Ensure uniqueness constraint for offline-first permanent sync
     let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_attendancelogs_emp_time ON AttendanceLogs (employee_id, timestamp)", []);
 
