@@ -12,6 +12,238 @@ use crate::errors::AppError;
 use crate::security::{encrypt_data, decrypt_data, sanitize_input, validate_email, validate_date};
 
 // ============================================================================
+// INVENTORY CRUD OPERATIONS
+// ============================================================================
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CreateItemRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub category: String,
+    pub quantity: i32,
+    pub unit_price: f64,
+    pub reorder_level: i32,
+    pub supplier: Option<String>,
+    pub location: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UpdateItemRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub category: Option<String>,
+    pub quantity: Option<i32>,
+    pub unit_price: Option<f64>,
+    pub reorder_level: Option<i32>,
+    pub supplier: Option<String>,
+    pub location: Option<String>,
+}
+
+/// CREATE: Add new inventory item
+#[tauri::command]
+pub async fn create_item(
+    request: CreateItemRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let item_code = format!("ITM-{:06}", chrono::Utc::now().timestamp() % 1000000);
+
+    conn.execute(
+        "INSERT INTO Items (item_code, name, description, category, quantity, unit_price, reorder_level, supplier, location, is_active, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, datetime('now'))",
+        params![
+            item_code,
+            sanitize_input(&request.name),
+            request.description.as_ref().map(|s| sanitize_input(s)),
+            request.category,
+            request.quantity,
+            request.unit_price,
+            request.reorder_level,
+            request.supplier.as_ref().map(|s| sanitize_input(s)),
+            request.location.as_ref().map(|s| sanitize_input(s)),
+        ],
+    ).map_err(|e| AppError::DatabaseError(format!("Failed to create item: {}", e)))?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Item created successfully",
+        "item_code": item_code
+    }))
+}
+
+/// READ: Get all inventory items
+#[tauri::command]
+pub async fn list_items(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, item_code, name, description, category, quantity, unit_price, reorder_level, supplier, location, is_active, created_at
+         FROM Items WHERE is_active = 1 ORDER BY item_code"
+    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+
+    let items: Vec<serde_json::Value> = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "item_code": row.get::<_, String>(1)?,
+                "name": row.get::<_, String>(2)?,
+                "description": row.get::<_, Option<String>>(3)?,
+                "category": row.get::<_, String>(4)?,
+                "quantity": row.get::<_, i32>(5)?,
+                "unit_price": row.get::<_, f64>(6)?,
+                "reorder_level": row.get::<_, i32>(7)?,
+                "supplier": row.get::<_, Option<String>>(8)?,
+                "location": row.get::<_, Option<String>>(9)?,
+                "is_active": row.get::<_, bool>(10)?,
+                "created_at": row.get::<_, String>(11)?,
+            }))
+        })
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(items)
+}
+
+/// UPDATE: Modify inventory item
+#[tauri::command]
+pub async fn update_item(
+    item_id: i64,
+    request: UpdateItemRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut updates = Vec::new();
+    let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(name) = request.name {
+        updates.push("name = ?");
+        values.push(Box::new(sanitize_input(&name)));
+    }
+    if let Some(description) = request.description {
+        updates.push("description = ?");
+        values.push(Box::new(sanitize_input(&description)));
+    }
+    if let Some(category) = request.category {
+        updates.push("category = ?");
+        values.push(Box::new(category));
+    }
+    if let Some(quantity) = request.quantity {
+        updates.push("quantity = ?");
+        values.push(Box::new(quantity));
+    }
+    if let Some(unit_price) = request.unit_price {
+        updates.push("unit_price = ?");
+        values.push(Box::new(unit_price));
+    }
+    if let Some(reorder_level) = request.reorder_level {
+        updates.push("reorder_level = ?");
+        values.push(Box::new(reorder_level));
+    }
+    if let Some(supplier) = request.supplier {
+        updates.push("supplier = ?");
+        values.push(Box::new(sanitize_input(&supplier)));
+    }
+    if let Some(location) = request.location {
+        updates.push("location = ?");
+        values.push(Box::new(sanitize_input(&location)));
+    }
+
+    if updates.is_empty() {
+        return Err(AppError::ValidationError("No fields to update".into()));
+    }
+
+    updates.push("updated_at = datetime('now')");
+    values.push(Box::new(item_id));
+
+    let set_clause = updates.join(", ");
+    let query = format!("UPDATE Items SET {} WHERE id = ?", set_clause);
+
+    let params_vec: Vec<&dyn rusqlite::ToSql> = values.iter().map(|v| v.as_ref()).collect();
+
+    conn.execute(&query, &params_vec[..])
+        .map_err(|e| AppError::DatabaseError(format!("Update failed: {}", e)))?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Item updated successfully"
+    }))
+}
+
+/// DELETE: Soft delete inventory item
+#[tauri::command]
+pub async fn delete_item(
+    item_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "UPDATE Items SET is_active = 0 WHERE id = ?1",
+        params![item_id],
+    ).map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Item deleted successfully"
+    }))
+}
+
+/// UPDATE STOCK: Adjust item quantity
+#[tauri::command]
+pub async fn update_stock(
+    item_id: i64,
+    adjustment: i32,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "UPDATE Items SET quantity = quantity + ?1, updated_at = datetime('now') WHERE id = ?2",
+        params![adjustment, item_id],
+    ).map_err(|e| AppError::DatabaseError(format!("Stock update failed: {}", e)))?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Stock updated successfully"
+    }))
+}
+
+/// GET INVENTORY STATS
+#[tauri::command]
+pub async fn get_inventory_stats(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let total_items: i64 = conn.query_row("SELECT COUNT(*) FROM Items WHERE is_active = 1", [], |r| r.get(0))?;
+    let total_value: f64 = conn.query_row("SELECT COALESCE(SUM(quantity * unit_price), 0) FROM Items WHERE is_active = 1", [], |r| r.get(0))?;
+    let low_stock: i64 = conn.query_row("SELECT COUNT(*) FROM Items WHERE quantity <= reorder_level AND quantity > 0 AND is_active = 1", [], |r| r.get(0))?;
+    let out_of_stock: i64 = conn.query_row("SELECT COUNT(*) FROM Items WHERE quantity = 0 AND is_active = 1", [], |r| r.get(0))?;
+
+    Ok(serde_json::json!({
+        "total_items": total_items,
+        "total_value": total_value,
+        "low_stock": low_stock,
+        "out_of_stock": out_of_stock
+    }))
+}
+
+// ============================================================================
+// PROJECTS CRUD OPERATIONS
+// ============================================================================
+
+// ============================================================================
 // EMPLOYEE CRUD OPERATIONS
 // ============================================================================
 
