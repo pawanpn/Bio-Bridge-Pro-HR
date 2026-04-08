@@ -217,15 +217,14 @@ export const EnhancedSetupWizard: React.FC = () => {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`,
 
-      // Roles (enhanced with hierarchy)
-      `CREATE TABLE IF NOT EXISTS roles (
+      // Roles (as system_settings - your schema uses role VARCHAR in users table)
+      `CREATE TABLE IF NOT EXISTS system_roles (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
-        name VARCHAR(100) NOT NULL,
-        code VARCHAR(50) UNIQUE NOT NULL,
+        role_name VARCHAR(100) NOT NULL,
+        role_code VARCHAR(50) UNIQUE NOT NULL,
         description TEXT,
         level INTEGER DEFAULT 1,
-        parent_role_id UUID REFERENCES roles(id),
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`,
@@ -233,6 +232,7 @@ export const EnhancedSetupWizard: React.FC = () => {
       // Permissions (granular)
       `CREATE TABLE IF NOT EXISTS permissions (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
         module VARCHAR(100) NOT NULL,
         permission VARCHAR(100) NOT NULL,
         description TEXT,
@@ -240,25 +240,27 @@ export const EnhancedSetupWizard: React.FC = () => {
         UNIQUE(module, permission)
       )`,
 
-      // Role-Permissions mapping
+      // Role-Permissions mapping (uses role VARCHAR, not role_id)
       `CREATE TABLE IF NOT EXISTS role_permissions (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
+        organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+        role VARCHAR(50) NOT NULL, -- SUPER_ADMIN, ADMIN, MANAGER, etc.
         permission_id UUID REFERENCES permissions(id) ON DELETE CASCADE,
-        UNIQUE(role_id, permission_id)
+        UNIQUE(role, permission_id)
       )`,
 
-      // Users (enhanced)
+      // Users (with role VARCHAR field - matches your schema)
       `CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+        auth_id UUID, -- Supabase auth.users.id
         username VARCHAR(100) UNIQUE NOT NULL,
         email VARCHAR(255) UNIQUE NOT NULL,
         password_hash VARCHAR(255),
         full_name VARCHAR(255),
         phone VARCHAR(50),
         avatar_url TEXT,
-        role_id UUID REFERENCES roles(id),
+        role VARCHAR(50) DEFAULT 'EMPLOYEE', -- SUPER_ADMIN, ADMIN, MANAGER, EMPLOYEE, OPERATOR
         branch_id UUID REFERENCES branches(id),
         department_id UUID REFERENCES departments(id),
         designation_id UUID REFERENCES designations(id),
@@ -266,10 +268,11 @@ export const EnhancedSetupWizard: React.FC = () => {
         is_active BOOLEAN DEFAULT TRUE,
         must_change_password BOOLEAN DEFAULT TRUE,
         last_login_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ DEFAULT NOW()
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
       )`,
 
-      // Employee Hierarchy (reporting structure)
+      // Employee Hierarchy (reporting structure) - matches your schema
       `CREATE TABLE IF NOT EXISTS employees (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
@@ -278,15 +281,15 @@ export const EnhancedSetupWizard: React.FC = () => {
         middle_name VARCHAR(100),
         last_name VARCHAR(100),
         full_name VARCHAR(255),
-        email VARCHAR(255),
-        phone VARCHAR(50),
+        personal_email VARCHAR(255),
+        personal_phone VARCHAR(50),
         branch_id UUID REFERENCES branches(id),
         department_id UUID REFERENCES departments(id),
         designation_id UUID REFERENCES designations(id),
-        role_id UUID REFERENCES roles(id),
-        reporting_manager_id UUID REFERENCES employees(id),
-        date_of_joining DATE,
+        employment_type VARCHAR(50) DEFAULT 'Full-time',
         employment_status VARCHAR(50) DEFAULT 'Active',
+        date_of_joining DATE,
+        reporting_manager_id UUID REFERENCES employees(id),
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMPTZ DEFAULT NOW()
       )`,
@@ -348,24 +351,7 @@ export const EnhancedSetupWizard: React.FC = () => {
   };
 
   const insertDefaultData = async (client: SupabaseClient, orgId: string) => {
-    // Insert default roles
-    const roles = [
-      { name: 'Super Admin', code: 'SUPER_ADMIN', level: 10, description: 'Full system access' },
-      { name: 'Admin', code: 'ADMIN', level: 8, description: 'Administrative access' },
-      { name: 'Manager', code: 'MANAGER', level: 6, description: 'Department manager' },
-      { name: 'Supervisor', code: 'SUPERVISOR', level: 4, description: 'Team supervisor' },
-      { name: 'Employee', code: 'EMPLOYEE', level: 2, description: 'Regular employee' },
-      { name: 'Viewer', code: 'VIEWER', level: 1, description: 'Read-only access' }
-    ];
-
-    const { data: insertedRoles, error: rolesError } = await client
-      .from('roles')
-      .insert(roles.map(r => ({ ...r, organization_id: orgId })))
-      .select();
-
-    if (rolesError) console.error('Error inserting roles:', rolesError);
-
-    // Insert default permissions
+    // Insert default permissions (your schema uses organization_id)
     const permissions = [
       // HR Module
       { module: 'hr', permission: 'view_employees', description: 'View employee details' },
@@ -409,51 +395,63 @@ export const EnhancedSetupWizard: React.FC = () => {
 
     const { data: insertedPermissions, error: permError } = await client
       .from('permissions')
-      .insert(permissions)
+      .insert(permissions.map(p => ({ ...p, organization_id: orgId })))
       .select();
 
     if (permError) console.error('Error inserting permissions:', permError);
 
-    // Assign permissions to roles
-    if (insertedRoles && insertedPermissions) {
-      const rolePermissions: { role_id: string; permission_id: string }[] = [];
-      const superAdminRole = insertedRoles.find((r: any) => r.code === 'SUPER_ADMIN');
-      const adminRole = insertedRoles.find((r: any) => r.code === 'ADMIN');
-      const managerRole = insertedRoles.find((r: any) => r.code === 'MANAGER');
-      const employeeRole = insertedRoles.find((r: any) => r.code === 'EMPLOYEE');
-      const viewerRole = insertedRoles.find((r: any) => r.code === 'VIEWER');
+    // Assign permissions to roles (using role VARCHAR, not role_id)
+    if (insertedPermissions) {
+      const rolePermissions = [];
+      
+      // Define role codes (matching your schema: SUPER_ADMIN, ADMIN, MANAGER, EMPLOYEE, OPERATOR)
+      const roles = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'SUPERVISOR', 'EMPLOYEE', 'OPERATOR', 'VIEWER'];
 
-      // Super Admin - all permissions
+      // SUPER_ADMIN - all permissions
       insertedPermissions.forEach((perm: any) => {
-        rolePermissions.push({ role_id: superAdminRole.id, permission_id: perm.id });
+        rolePermissions.push({ role: 'SUPER_ADMIN', permission_id: perm.id, organization_id: orgId });
       });
 
-      // Admin - most permissions
+      // ADMIN - most permissions (except delete_employees, manage_settings)
       insertedPermissions
         .filter((p: any) => !['delete_employees', 'manage_settings'].includes(p.permission))
         .forEach((perm: any) => {
-          rolePermissions.push({ role_id: adminRole.id, permission_id: perm.id });
+          rolePermissions.push({ role: 'ADMIN', permission_id: perm.id, organization_id: orgId });
         });
 
-      // Manager - department level
+      // MANAGER - department level
       insertedPermissions
         .filter((p: any) => ['view_employees', 'view_attendance', 'approve_attendance', 'view_leaves', 'approve_leave', 'view_payroll', 'view_reports', 'export_reports'].includes(p.permission))
         .forEach((perm: any) => {
-          rolePermissions.push({ role_id: managerRole.id, permission_id: perm.id });
+          rolePermissions.push({ role: 'MANAGER', permission_id: perm.id, organization_id: orgId });
         });
 
-      // Employee - basic
+      // SUPERVISOR - team level
+      insertedPermissions
+        .filter((p: any) => ['view_employees', 'view_attendance', 'view_leaves', 'view_reports'].includes(p.permission))
+        .forEach((perm: any) => {
+          rolePermissions.push({ role: 'SUPERVISOR', permission_id: perm.id, organization_id: orgId });
+        });
+
+      // EMPLOYEE - basic
       insertedPermissions
         .filter((p: any) => ['view_employees', 'apply_leave', 'view_attendance', 'view_reports'].includes(p.permission))
         .forEach((perm: any) => {
-          rolePermissions.push({ role_id: employeeRole.id, permission_id: perm.id });
+          rolePermissions.push({ role: 'EMPLOYEE', permission_id: perm.id, organization_id: orgId });
         });
 
-      // Viewer - read only
+      // OPERATOR - attendance operations only
+      insertedPermissions
+        .filter((p: any) => ['view_attendance', 'mark_attendance'].includes(p.permission))
+        .forEach((perm: any) => {
+          rolePermissions.push({ role: 'OPERATOR', permission_id: perm.id, organization_id: orgId });
+        });
+
+      // VIEWER - read only
       insertedPermissions
         .filter((p: any) => p.permission.startsWith('view_'))
         .forEach((perm: any) => {
-          rolePermissions.push({ role_id: viewerRole.id, permission_id: perm.id });
+          rolePermissions.push({ role: 'VIEWER', permission_id: perm.id, organization_id: orgId });
         });
 
       if (rolePermissions.length > 0) {

@@ -15,30 +15,24 @@ import {
   XCircle,
   Search,
   Save,
-  Loader2
+  Loader2,
+  Users,
+  GitBranch
 } from 'lucide-react';
 import { supabase } from '@/config/supabase';
-
-interface Role {
-  id: string;
-  name: string;
-  code: string;
-  description: string;
-  level: number;
-  parent_role_id?: string;
-  is_active: boolean;
-}
 
 interface Permission {
   id: string;
   module: string;
   permission: string;
   description: string;
+  organization_id?: string;
 }
 
 interface RolePermission {
-  role_id: string;
+  role: string;
   permission_id: string;
+  organization_id?: string;
 }
 
 interface PermissionModule {
@@ -46,17 +40,26 @@ interface PermissionModule {
   permissions: Permission[];
 }
 
+// Your schema's role types
+const ROLE_TYPES = [
+  { code: 'SUPER_ADMIN', name: 'Super Admin', description: 'Full system access', level: 10 },
+  { code: 'ADMIN', name: 'Admin', description: 'Administrative access', level: 8 },
+  { code: 'MANAGER', name: 'Manager', description: 'Department manager', level: 6 },
+  { code: 'SUPERVISOR', name: 'Supervisor', description: 'Team supervisor', level: 4 },
+  { code: 'EMPLOYEE', name: 'Employee', description: 'Regular employee', level: 2 },
+  { code: 'OPERATOR', name: 'Operator', description: 'Attendance operator', level: 3 },
+  { code: 'VIEWER', name: 'Viewer', description: 'Read-only access', level: 1 }
+];
+
 export const PermissionManagement: React.FC = () => {
-  const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   const [rolePermissions, setRolePermissions] = useState<RolePermission[]>([]);
-  const [selectedRoleId, setSelectedRoleId] = useState<string>('');
+  const [selectedRole, setSelectedRole] = useState<string>('SUPER_ADMIN');
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set(['hr', 'attendance', 'leave']));
-  const [showAddRole, setShowAddRole] = useState(false);
-  const [newRole, setNewRole] = useState({ name: '', code: '', description: '', level: 1, parent_role_id: '' });
+  const [showRoleInfo, setShowRoleInfo] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -66,14 +69,6 @@ export const PermissionManagement: React.FC = () => {
     try {
       setLoading(true);
       
-      const { data: rolesData, error: rolesError } = await supabase
-        .from('roles')
-        .select('*')
-        .eq('is_active', true)
-        .order('level', { ascending: false });
-
-      if (rolesError) throw rolesError;
-
       const { data: permsData, error: permsError } = await supabase
         .from('permissions')
         .select('*')
@@ -87,13 +82,8 @@ export const PermissionManagement: React.FC = () => {
 
       if (rolePermsError) throw rolePermsError;
 
-      setRoles(rolesData || []);
       setPermissions(permsData || []);
       setRolePermissions(rolePermsData || []);
-
-      if (rolesData && rolesData.length > 0) {
-        setSelectedRoleId(rolesData[0].id);
-      }
     } catch (error: any) {
       console.error('Error loading data:', error);
       alert('Failed to load permission data: ' + error.message);
@@ -114,23 +104,23 @@ export const PermissionManagement: React.FC = () => {
 
   const hasPermission = (permissionId: string) => {
     return rolePermissions.some(
-      rp => rp.role_id === selectedRoleId && rp.permission_id === permissionId
+      rp => rp.role === selectedRole && rp.permission_id === permissionId
     );
   };
 
   const togglePermission = (permissionId: string) => {
     const exists = rolePermissions.some(
-      rp => rp.role_id === selectedRoleId && rp.permission_id === permissionId
+      rp => rp.role === selectedRole && rp.permission_id === permissionId
     );
 
     if (exists) {
       setRolePermissions(prev => 
-        prev.filter(rp => !(rp.role_id === selectedRoleId && rp.permission_id === permissionId))
+        prev.filter(rp => !(rp.role === selectedRole && rp.permission_id === permissionId))
       );
     } else {
       setRolePermissions(prev => [
         ...prev,
-        { role_id: selectedRoleId, permission_id: permissionId }
+        { role: selectedRole, permission_id: permissionId }
       ]);
     }
   };
@@ -143,14 +133,14 @@ export const PermissionManagement: React.FC = () => {
       // Unselect all
       setRolePermissions(prev => 
         prev.filter(rp => 
-          !(rp.role_id === selectedRoleId && modulePerms.some(p => p.id === rp.permission_id))
+          !(rp.role === selectedRole && modulePerms.some(p => p.id === rp.permission_id))
         )
       );
     } else {
       // Select all
       const newPerms = modulePerms
         .filter(p => !hasPermission(p.id))
-        .map(p => ({ role_id: selectedRoleId, permission_id: p.id }));
+        .map(p => ({ role: selectedRole, permission_id: p.id }));
       setRolePermissions(prev => [...prev, ...newPerms]);
     }
   };
@@ -166,7 +156,7 @@ export const PermissionManagement: React.FC = () => {
   };
 
   const savePermissions = async () => {
-    if (!selectedRoleId) {
+    if (!selectedRole) {
       alert('Please select a role first');
       return;
     }
@@ -178,15 +168,16 @@ export const PermissionManagement: React.FC = () => {
       const { error: deleteError } = await supabase
         .from('role_permissions')
         .delete()
-        .eq('role_id', selectedRoleId);
+        .eq('role', selectedRole);
 
       if (deleteError) throw deleteError;
 
       // Insert new permissions
-      if (rolePermissions.filter(rp => rp.role_id === selectedRoleId).length > 0) {
+      const rolePermsToInsert = rolePermissions.filter(rp => rp.role === selectedRole);
+      if (rolePermsToInsert.length > 0) {
         const { error: insertError } = await supabase
           .from('role_permissions')
-          .insert(rolePermissions.filter(rp => rp.role_id === selectedRoleId));
+          .insert(rolePermsToInsert);
 
         if (insertError) throw insertError;
       }
@@ -200,66 +191,66 @@ export const PermissionManagement: React.FC = () => {
     }
   };
 
-  const createRole = async () => {
-    if (!newRole.name || !newRole.code) {
-      alert('Role name and code are required');
-      return;
-    }
+  const resetRolePermissions = async (roleCode: string) => {
+    if (!confirm(`Reset ${roleCode} permissions to default?`)) return;
 
     try {
-      const { data, error } = await supabase
-        .from('roles')
-        .insert({
-          name: newRole.name,
-          code: newRole.code,
-          description: newRole.description,
-          level: newRole.level,
-          parent_role_id: newRole.parent_role_id || null,
-          is_active: true
-        })
-        .select()
-        .single();
+      // Get all permissions
+      const { data: allPerms } = await supabase.from('permissions').select('id');
+      if (!allPerms) return;
 
-      if (error) throw error;
+      let permsToAssign: string[] = [];
 
-      setRoles([...roles, data]);
-      setShowAddRole(false);
-      setNewRole({ name: '', code: '', description: '', level: 1, parent_role_id: '' });
-      alert('Role created successfully!');
-    } catch (error: any) {
-      console.error('Error creating role:', error);
-      alert('Failed to create role: ' + error.message);
-    }
-  };
-
-  const deleteRole = async (roleId: string) => {
-    if (!confirm('Are you sure you want to delete this role? This cannot be undone.')) {
-      return;
-    }
-
-    try {
-      const { error } = await supabase
-        .from('roles')
-        .update({ is_active: false })
-        .eq('id', roleId);
-
-      if (error) throw error;
-
-      setRoles(roles.filter(r => r.id !== roleId));
-      if (selectedRoleId === roleId) {
-        setSelectedRoleId('');
+      // Default assignments based on role
+      switch(roleCode) {
+        case 'SUPER_ADMIN':
+          permsToAssign = allPerms.map(p => p.id);
+          break;
+        case 'ADMIN':
+          permsToAssign = allPerms
+            .filter((p: any) => !['delete_employees', 'manage_settings'].includes(p.permission))
+            .map((p: any) => p.id);
+          break;
+        case 'MANAGER':
+          permsToAssign = allPerms
+            .filter((p: any) => ['view_employees', 'view_attendance', 'approve_attendance', 'view_leaves', 'approve_leave', 'view_payroll', 'view_reports', 'export_reports'].includes(p.permission))
+            .map((p: any) => p.id);
+          break;
+        case 'EMPLOYEE':
+          permsToAssign = allPerms
+            .filter((p: any) => ['view_employees', 'apply_leave', 'view_attendance', 'view_reports'].includes(p.permission))
+            .map((p: any) => p.id);
+          break;
+        case 'VIEWER':
+          permsToAssign = allPerms
+            .filter((p: any) => p.permission.startsWith('view_'))
+            .map((p: any) => p.id);
+          break;
       }
-      alert('Role deleted successfully!');
+
+      // Delete existing
+      await supabase.from('role_permissions').delete().eq('role', roleCode);
+
+      // Insert new
+      if (permsToAssign.length > 0) {
+        await supabase.from('role_permissions')
+          .insert(permsToAssign.map(pid => ({ role: roleCode, permission_id: pid })));
+      }
+
+      alert(`${roleCode} permissions reset to default!`);
+      await loadData();
     } catch (error: any) {
-      console.error('Error deleting role:', error);
-      alert('Failed to delete role: ' + error.message);
+      console.error('Error resetting permissions:', error);
+      alert('Failed to reset: ' + error.message);
     }
   };
 
-  const filteredRoles = roles.filter(role => 
+  const filteredRoles = ROLE_TYPES.filter(role => 
     role.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     role.code.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const selectedRoleInfo = ROLE_TYPES.find(r => r.code === selectedRole);
 
   if (loading) {
     return (
@@ -274,12 +265,8 @@ export const PermissionManagement: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold">Role & Permission Management</h2>
-          <p className="text-muted-foreground">Configure role-based access control and permissions</p>
+          <p className="text-muted-foreground">Configure role-based access control (matches your Supabase schema)</p>
         </div>
-        <Button onClick={() => setShowAddRole(true)}>
-          <Plus size={16} />
-          Add Role
-        </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -291,7 +278,7 @@ export const PermissionManagement: React.FC = () => {
                 <Shield size={20} />
                 Roles
               </CardTitle>
-              <CardDescription>Select a role to manage permissions</CardDescription>
+              <CardDescription>Your schema uses role VARCHAR field in users table</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="relative">
@@ -309,13 +296,13 @@ export const PermissionManagement: React.FC = () => {
               <div className="space-y-2 max-h-[500px] overflow-y-auto">
                 {filteredRoles.map(role => (
                   <div
-                    key={role.id}
+                    key={role.code}
                     className={`p-3 rounded-lg border cursor-pointer transition-all ${
-                      selectedRoleId === role.id
+                      selectedRole === role.code
                         ? 'bg-primary/10 border-primary'
                         : 'hover:bg-muted'
                     }`}
-                    onClick={() => setSelectedRoleId(role.id)}
+                    onClick={() => setSelectedRole(role.code)}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
@@ -324,26 +311,11 @@ export const PermissionManagement: React.FC = () => {
                           <p className="font-semibold">{role.name}</p>
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">{role.code}</p>
-                        {role.description && (
-                          <p className="text-xs text-muted-foreground mt-1">{role.description}</p>
-                        )}
+                        <p className="text-xs text-muted-foreground mt-1">{role.description}</p>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <Badge variant="outline" className="text-xs">
-                          Level {role.level}
-                        </Badge>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            deleteRole(role.id);
-                          }}
-                        >
-                          <Trash2 size={14} className="text-red-500" />
-                        </Button>
-                      </div>
+                      <Badge variant="outline" className="text-xs">
+                        Level {role.level}
+                      </Badge>
                     </div>
                   </div>
                 ))}
@@ -365,20 +337,27 @@ export const PermissionManagement: React.FC = () => {
                   <CardTitle className="flex items-center gap-2">
                     <Shield size={20} />
                     Permissions
-                    {selectedRoleId && (
+                    {selectedRole && (
                       <Badge variant="outline">
-                        {roles.find(r => r.id === selectedRoleId)?.name}
+                        {selectedRoleInfo?.name} ({selectedRole})
                       </Badge>
                     )}
                   </CardTitle>
                   <CardDescription>
-                    {selectedRoleId 
-                      ? 'Toggle permissions for the selected role'
+                    {selectedRole 
+                      ? `Toggle permissions for ${selectedRoleInfo?.name}`
                       : 'Select a role to manage permissions'
                     }
                   </CardDescription>
                 </div>
-                {selectedRoleId && (
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => resetRolePermissions(selectedRole)}
+                  >
+                    Reset to Default
+                  </Button>
                   <Button onClick={savePermissions} disabled={saving}>
                     {saving ? (
                       <>
@@ -392,17 +371,33 @@ export const PermissionManagement: React.FC = () => {
                       </>
                     )}
                   </Button>
-                )}
+                </div>
               </div>
             </CardHeader>
             <CardContent>
-              {!selectedRoleId ? (
+              {!selectedRole ? (
                 <div className="flex items-center justify-center h-64 text-muted-foreground">
                   <Shield size={48} className="mb-4 opacity-50" />
                   <p>Select a role from the left panel to manage permissions</p>
                 </div>
               ) : (
                 <div className="space-y-4">
+                  {/* Role Info */}
+                  {selectedRoleInfo && (
+                    <div className="p-4 bg-muted rounded-lg mb-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Users size={16} />
+                        <h4 className="font-semibold">{selectedRoleInfo.name}</h4>
+                        <Badge>{selectedRoleInfo.code}</Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{selectedRoleInfo.description}</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Authority Level: {selectedRoleInfo.level}/10 | 
+                        Users with this role: <strong>users.role = '{selectedRoleInfo.code}'</strong>
+                      </p>
+                    </div>
+                  )}
+
                   {groupedPermissions.map(module => (
                     <div key={module.module} className="border rounded-lg">
                       <div
@@ -477,85 +472,6 @@ export const PermissionManagement: React.FC = () => {
           </Card>
         </div>
       </div>
-
-      {/* Add Role Dialog */}
-      {showAddRole && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <Card className="w-full max-w-md">
-            <CardHeader>
-              <CardTitle>Create New Role</CardTitle>
-              <CardDescription>Add a new role with custom permissions</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Role Name *</label>
-                <Input
-                  value={newRole.name}
-                  onChange={(e) => setNewRole({ ...newRole, name: e.target.value })}
-                  placeholder="e.g., Department Manager"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Role Code *</label>
-                <Input
-                  value={newRole.code}
-                  onChange={(e) => setNewRole({ ...newRole, code: e.target.value.toUpperCase().replace(/\s/g, '_') })}
-                  placeholder="e.g., DEPT_MANAGER"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Description</label>
-                <Input
-                  value={newRole.description}
-                  onChange={(e) => setNewRole({ ...newRole, description: e.target.value })}
-                  placeholder="Role description"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Level (Hierarchy)</label>
-                <Input
-                  type="number"
-                  value={newRole.level}
-                  onChange={(e) => setNewRole({ ...newRole, level: parseInt(e.target.value) })}
-                  min="1"
-                  max="10"
-                />
-                <p className="text-xs text-muted-foreground">Higher level = more authority (1-10)</p>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Parent Role (Optional)</label>
-                <select
-                  className="w-full px-3 py-2 border rounded-md"
-                  value={newRole.parent_role_id}
-                  onChange={(e) => setNewRole({ ...newRole, parent_role_id: e.target.value })}
-                >
-                  <option value="">None</option>
-                  {roles.map(role => (
-                    <option key={role.id} value={role.id}>{role.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex gap-2 pt-4">
-                <Button
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => setShowAddRole(false)}
-                >
-                  Cancel
-                </Button>
-                <Button className="flex-1" onClick={createRole}>
-                  Create Role
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
     </div>
   );
 };

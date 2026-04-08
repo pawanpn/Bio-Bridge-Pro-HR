@@ -4,6 +4,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // These will be configured by user in System Settings or Setup Wizard
 let SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 let SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+let SUPABASE_SERVICE_KEY = import.meta.env.VITE_SUPABASE_SERVICE_KEY || '';
 
 // Check if user has completed setup
 const isSetupComplete = localStorage.getItem('setupComplete') === 'true';
@@ -54,6 +55,9 @@ supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 export const supabase = supabaseClient;
+
+// Export service key for admin operations
+export const getServiceKey = () => SUPABASE_SERVICE_KEY;
 
 // Sync Configuration
 export const SYNC_CONFIG = {
