@@ -8,16 +8,20 @@ import { AppConfig } from '../config/appConfig';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { 
-  Calendar, 
-  Search, 
-  LayoutDashboard, 
-  Monitor, 
-  FileText, 
-  Settings, 
-  LogOut, 
-  User as UserIcon, 
-  CalendarCheck 
+import {
+  Calendar,
+  Search,
+  LayoutDashboard,
+  Monitor,
+  FileText,
+  Settings,
+  LogOut,
+  User as UserIcon,
+  CalendarCheck,
+  Bell,
+  ClipboardCheck,
+  DollarSign,
+  Users
 } from 'lucide-react';
 
 export const MainLayout: React.FC = () => {
@@ -59,7 +63,7 @@ export const MainLayout: React.FC = () => {
   return (
     <div className="flex h-screen w-screen overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-64 bg-sidebar-bg text-white flex flex-col shadow-xl">
+      <aside className="w-64 bg-sidebar text-sidebar-foreground flex flex-col shadow-xl">
         <div className="px-6 py-6 border-b border-white/10">
           <h1 className="text-lg font-bold">{AppConfig.appName}</h1>
           <div className="flex items-center gap-2 mt-2 text-xs text-white/60">
@@ -69,33 +73,71 @@ export const MainLayout: React.FC = () => {
         </div>
 
         <nav className="flex-1 py-4 space-y-1">
-          <SidebarItem 
-            icon={<LayoutDashboard size={18} />} 
-            label="Dashboard Overview" 
-            active={activeTab === 'Overview'} 
-            onClick={() => go('Overview', '/dashboard')} 
+          <SidebarItem
+            icon={<LayoutDashboard size={18} />}
+            label="Dashboard Overview"
+            active={activeTab === 'Overview'}
+            onClick={() => go('Overview', '/dashboard')}
           />
           {!isOperator && (
-            <SidebarItem 
-              icon={<CalendarCheck size={18} />} 
-              label="Leave Management" 
-              active={activeTab === 'Leave'} 
-              onClick={() => go('Leave', '/leave-management')} 
+            <SidebarItem
+              icon={<Users size={18} />}
+              label="Employees"
+              active={activeTab === 'Employees'}
+              onClick={() => go('Employees', '/employees')}
             />
           )}
           {!isOperator && (
-            <SidebarItem 
-              icon={<Monitor size={18} />} 
-              label="Device Management" 
-              active={activeTab === 'Devices'} 
-              onClick={() => go('Devices', '/device-settings')} 
+            <SidebarItem
+              icon={<CalendarCheck size={18} />}
+              label="Leave Management"
+              active={activeTab === 'Leave'}
+              onClick={() => go('Leave', '/leave-management')}
             />
           )}
-          <SidebarItem 
-            icon={<FileText size={18} />} 
-            label="Reports" 
-            active={activeTab === 'Reports'} 
-            onClick={() => go('Reports', '/reports')} 
+          {!isOperator && (
+            <SidebarItem
+              icon={<ClipboardCheck size={18} />}
+              label="Attendance"
+              active={activeTab === 'Attendance'}
+              onClick={() => go('Attendance', '/attendance')}
+            />
+          )}
+          {!isOperator && (
+            <SidebarItem
+              icon={<DollarSign size={18} />}
+              label="Payroll"
+              active={activeTab === 'Payroll'}
+              onClick={() => go('Payroll', '/payroll')}
+            />
+          )}
+          {!isOperator && (
+            <SidebarItem
+              icon={<FileText size={18} />}
+              label="Finance"
+              active={activeTab === 'Finance'}
+              onClick={() => go('Finance', '/finance')}
+            />
+          )}
+          {!isOperator && (
+            <SidebarItem
+              icon={<Monitor size={18} />}
+              label="Organization"
+              active={activeTab === 'Devices'}
+              onClick={() => go('Devices', '/organization')}
+            />
+          )}
+          <SidebarItem
+            icon={<Bell size={18} />}
+            label="Notifications"
+            active={activeTab === 'Notifications'}
+            onClick={() => go('Notifications', '/notifications')}
+          />
+          <SidebarItem
+            icon={<FileText size={18} />}
+            label="Reports"
+            active={activeTab === 'Reports'}
+            onClick={() => go('Reports', '/reports')}
           />
         </nav>
 

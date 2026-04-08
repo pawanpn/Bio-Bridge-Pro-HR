@@ -1111,6 +1111,127 @@ fn list_gates(branch_id: i64, state: State<'_, AppState>) -> Result<Vec<serde_js
 }
 
 #[tauri::command]
+fn update_branch(id: i64, name: String, location: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    conn.execute(
+        "UPDATE Branches SET name = ?1, location = ?2 WHERE id = ?3",
+        params![name, location, id],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_branch(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    // Cascade delete: devices, gates, then branch
+    conn.execute("DELETE FROM Devices WHERE branch_id = ?1", [id])?;
+    conn.execute("DELETE FROM Gates WHERE branch_id = ?1", [id])?;
+    conn.execute("DELETE FROM Branches WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+#[tauri::command]
+fn update_gate(id: i64, name: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    conn.execute("UPDATE Gates SET name = ?1 WHERE id = ?2", params![name, id])?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_gate(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    conn.execute("DELETE FROM Devices WHERE gate_id = ?1", [id])?;
+    conn.execute("DELETE FROM Gates WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+// ── User Branch Access Management ─────────────────────────────────────────
+
+#[tauri::command]
+fn get_user_branch_access(user_id: i64, state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let mut stmt = conn.prepare(
+        "SELECT b.id, b.name FROM UserBranchAccess uba JOIN Branches b ON uba.branch_id = b.id WHERE uba.user_id = ?1"
+    )?;
+    let rows = stmt.query_map([user_id], |row| {
+        Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)? }))
+    })?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[tauri::command]
+fn set_user_branch_access(user_id: i64, branch_ids: Vec<i64>, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    // Clear existing
+    conn.execute("DELETE FROM UserBranchAccess WHERE user_id = ?1", [user_id])?;
+    // Insert new
+    for branch_id in branch_ids {
+        conn.execute(
+            "INSERT OR IGNORE INTO UserBranchAccess (user_id, branch_id) VALUES (?1, ?2)",
+            params![user_id, branch_id],
+        )?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn get_accessible_branches(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    // Get current user
+    let user_id = state.current_user_id.lock().map_err(lock_err)?.clone();
+    let user_role = state.current_user_role.lock().map_err(lock_err)?.clone();
+    
+    match user_role.as_deref() {
+        Some("SUPER_ADMIN") => {
+            // Super admin sees all branches
+            let mut stmt = conn.prepare("SELECT id, name FROM Branches")?;
+            let rows = stmt.query_map([], |row| {
+                Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)? }))
+            })?;
+            Ok(rows.filter_map(|r| r.ok()).collect())
+        }
+        Some("ADMIN") | Some("OPERATOR") => {
+            if let Some(uid) = user_id {
+                // Check if user has multi-branch access
+                let mut stmt = conn.prepare(
+                    "SELECT b.id, b.name FROM UserBranchAccess uba JOIN Branches b ON uba.branch_id = b.id WHERE uba.user_id = ?1"
+                )?;
+                let rows: Vec<serde_json::Value> = stmt.query_map([uid], |row| {
+                    Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)? }))
+                })?.filter_map(|r| r.ok()).collect();
+                
+                if !rows.is_empty() {
+                    return Ok(rows);
+                }
+                
+                // Fallback to user's primary branch_id
+                let primary_branch: Option<i64> = conn.query_row(
+                    "SELECT branch_id FROM Users WHERE id = ?1", [uid], |r| r.get(0)
+                ).ok();
+                
+                if let Some(bid) = primary_branch {
+                    let mut stmt = conn.prepare("SELECT id, name FROM Branches WHERE id = ?1")?;
+                    let rows = stmt.query_map([bid], |row| {
+                        Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)? }))
+                    })?;
+                    return Ok(rows.filter_map(|r| r.ok()).collect());
+                }
+            }
+            Ok(vec![])
+        }
+        _ => Ok(vec![]),
+    }
+}
+
+#[tauri::command]
 fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
@@ -1704,11 +1825,12 @@ fn get_salary_sheet(
 fn list_branches(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    let mut stmt = conn.prepare("SELECT id, name FROM Branches")?;
+    let mut stmt = conn.prepare("SELECT id, name, location FROM Branches")?;
     let rows = stmt.query_map([], |row| {
         Ok(serde_json::json!({
             "id": row.get::<_, i64>(0)?,
             "name": row.get::<_, String>(1)?,
+            "location": row.get::<_, Option<String>>(2)?,
         }))
     })?;
     Ok(rows.filter_map(|r| r.ok()).collect())
@@ -2284,12 +2406,21 @@ pub fn run() {
             get_salary_sheet,
             add_branch,
             list_branches,
+            update_branch,
+            delete_branch,
             add_gate,
             list_gates,
+            update_gate,
+            delete_gate,
+            get_user_branch_access,
+            set_user_branch_access,
+            get_accessible_branches,
             login,
             logout,
             list_users,
             add_user,
+            update_user,
+            reset_user_password,
             delete_user,
             change_password,
             list_employees,
@@ -2312,6 +2443,13 @@ pub fn run() {
             import_csv_attendance,
             list_employees_for_select,
             get_localized_strings,
+            send_notification,
+            get_my_notifications,
+            mark_notification_read,
+            mark_all_notifications_read,
+            get_all_notifications,
+            delete_notification,
+            get_unread_count,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running Bio Bridge Pro HR");
@@ -2443,38 +2581,108 @@ fn list_users(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppE
     if state.current_user_role.lock().map_err(lock_err)?.as_deref() != Some("SUPER_ADMIN") {
         return Err(AppError::Unknown("Unauthorized".into()));
     }
-    
+
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
-    
+
     let mut stmt = conn.prepare("
         SELECT id, username, role, branch_id, is_active FROM Users
     ")?;
     let rows = stmt.query_map([], |row| {
+        let uid: i64 = row.get(0)?;
+        let username: String = row.get(1)?;
+        let role: String = row.get(2)?;
+        let branch_id: Option<i64> = row.get(3)?;
+        let is_active: i32 = row.get(4)?;
+        
+        // Get branch access list
+        let mut branch_stmt = conn.prepare(
+            "SELECT b.id, b.name FROM UserBranchAccess uba JOIN Branches b ON uba.branch_id = b.id WHERE uba.user_id = ?1"
+        )?;
+        let branches: Vec<serde_json::Value> = branch_stmt.query_map([uid], |brow| {
+            Ok(serde_json::json!({ "id": brow.get::<_, i64>(0)?, "name": brow.get::<_, String>(1)? }))
+        })?.filter_map(|r| r.ok()).collect();
+        
         Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "username": row.get::<_, String>(1)?,
-            "role": row.get::<_, String>(2)?,
-            "branchId": row.get::<_, Option<i64>>(3)?,
-            "isActive": row.get::<_, i32>(4)? == 1
+            "id": uid,
+            "username": username,
+            "role": role,
+            "branchId": branch_id,
+            "isActive": is_active == 1,
+            "branchAccess": branches
         }))
     })?;
-    
+
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 #[tauri::command]
-fn add_user(username: String, password: String, role: String, branch_id: Option<i64>, state: State<'_, AppState>) -> Result<(), AppError> {
+fn add_user(username: String, password: String, role: String, branch_id: Option<i64>, branch_ids: Vec<i64>, state: State<'_, AppState>) -> Result<(), AppError> {
     if state.current_user_role.lock().map_err(lock_err)?.as_deref() != Some("SUPER_ADMIN") {
         return Err(AppError::Unknown("Unauthorized".into()));
     }
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
-    
+
     let hash = hash_password(&password);
-    conn.execute(
+    let result = conn.execute(
         "INSERT INTO Users (username, password_hash, role, branch_id) VALUES (?1, ?2, ?3, ?4)",
         params![username, hash, role, branch_id],
+    );
+    
+    let user_id = conn.last_insert_rowid();
+    
+    // Set branch access if provided
+    if !branch_ids.is_empty() {
+        for bid in branch_ids {
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO UserBranchAccess (user_id, branch_id) VALUES (?1, ?2)",
+                params![user_id, bid],
+            );
+        }
+    }
+    
+    result?;
+    Ok(())
+}
+
+#[tauri::command]
+fn update_user(id: i64, username: String, role: String, branch_id: Option<i64>, branch_ids: Vec<i64>, is_active: bool, state: State<'_, AppState>) -> Result<(), AppError> {
+    if state.current_user_role.lock().map_err(lock_err)?.as_deref() != Some("SUPER_ADMIN") {
+        return Err(AppError::Unknown("Unauthorized".into()));
+    }
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+
+    conn.execute(
+        "UPDATE Users SET username = ?1, role = ?2, branch_id = ?3, is_active = ?4 WHERE id = ?5",
+        params![username, role, branch_id, is_active as i32, id],
+    )?;
+    
+    // Update branch access
+    conn.execute("DELETE FROM UserBranchAccess WHERE user_id = ?1", [id])?;
+    for bid in branch_ids {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO UserBranchAccess (user_id, branch_id) VALUES (?1, ?2)",
+            params![id, bid],
+        );
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+fn reset_user_password(id: i64, new_password: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    if state.current_user_role.lock().map_err(lock_err)?.as_deref() != Some("SUPER_ADMIN") {
+        return Err(AppError::Unknown("Unauthorized".into()));
+    }
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::Unknown("DB missing".into()))?;
+
+    let hash = hash_password(&new_password);
+    conn.execute(
+        "UPDATE Users SET password_hash = ?1, must_change_password = 1 WHERE id = ?2",
+        params![hash, id],
     )?;
     Ok(())
 }
@@ -2588,6 +2796,170 @@ fn verify_master_pin(app: AppHandle, pin: String) -> Result<bool, AppError> {
 #[tauri::command]
 fn is_master_pin_set(app: AppHandle) -> bool {
     app.path().app_data_dir().unwrap().join("master.pin").exists()
+}
+
+// ── Notification System ────────────────────────────────────────────────────
+
+#[tauri::command]
+fn send_notification(
+    title: String,
+    message: String,
+    receiver_type: String, // USER, BRANCH, ALL
+    receiver_id: Option<i64>,
+    branch_id: Option<i64>,
+    notification_type: String,
+    expires_at: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<i64, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    let sender_id = state.current_user_id.lock().map_err(lock_err)?.ok_or_else(|| AppError::Unknown("Not logged in".into()))?;
+    let sender_name: String = conn.query_row(
+        "SELECT username FROM Users WHERE id = ?1", [sender_id], |r| r.get(0)
+    ).unwrap_or_else(|_| "Unknown".to_string());
+
+    conn.execute(
+        "INSERT INTO Notifications (sender_id, sender_name, receiver_id, receiver_type, branch_id, title, message, notification_type, expires_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![sender_id, sender_name, receiver_id, receiver_type, branch_id, title, message, notification_type, expires_at],
+    )?;
+    
+    Ok(conn.last_insert_rowid())
+}
+
+#[tauri::command]
+fn get_my_notifications(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    let user_id = state.current_user_id.lock().map_err(lock_err)?.ok_or_else(|| AppError::Unknown("Not logged in".into()))?;
+    let _user_role = state.current_user_role.lock().map_err(lock_err)?.clone();
+    let user_branch = state.current_user_branch_id.lock().map_err(lock_err)?.clone();
+
+    let mut stmt = conn.prepare(
+        "SELECT n.id, n.sender_name, n.title, n.message, n.notification_type, n.is_read, n.created_at, n.expires_at
+         FROM Notifications n
+         WHERE (n.receiver_type = 'ALL')
+            OR (n.receiver_type = 'USER' AND n.receiver_id = ?1)
+            OR (n.receiver_type = 'BRANCH' AND n.branch_id = ?2)
+         ORDER BY n.created_at DESC
+         LIMIT 100"
+    )?;
+    
+    let rows = stmt.query_map(params![user_id, user_branch], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "senderName": row.get::<_, String>(1)?,
+            "title": row.get::<_, String>(2)?,
+            "message": row.get::<_, String>(3)?,
+            "type": row.get::<_, String>(4)?,
+            "isRead": row.get::<_, i32>(5)? == 1,
+            "createdAt": row.get::<_, String>(6)?,
+            "expiresAt": row.get::<_, Option<String>>(7)?,
+        }))
+    })?;
+    
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[tauri::command]
+fn mark_notification_read(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    conn.execute(
+        "UPDATE Notifications SET is_read = 1, read_at = datetime('now') WHERE id = ?1",
+        [id],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+fn mark_all_notifications_read(state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    let user_id = state.current_user_id.lock().map_err(lock_err)?.ok_or_else(|| AppError::Unknown("Not logged in".into()))?;
+    let user_branch = state.current_user_branch_id.lock().map_err(lock_err)?.clone();
+    
+    conn.execute(
+        "UPDATE Notifications SET is_read = 1, read_at = datetime('now')
+         WHERE (receiver_type = 'ALL')
+            OR (receiver_type = 'USER' AND receiver_id = ?1)
+            OR (receiver_type = 'BRANCH' AND branch_id = ?2)
+            AND is_read = 0",
+        params![user_id, user_branch],
+    )?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_all_notifications(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    // Super Admin only
+    if state.current_user_role.lock().map_err(lock_err)?.as_deref() != Some("SUPER_ADMIN") {
+        return Err(AppError::Unknown("Unauthorized. Super Admin only.".into()));
+    }
+
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    let mut stmt = conn.prepare(
+        "SELECT n.id, n.sender_name, n.receiver_type, n.receiver_id, n.branch_id, n.title, n.message, n.notification_type, n.is_read, n.created_at
+         FROM Notifications n
+         ORDER BY n.created_at DESC
+         LIMIT 200"
+    )?;
+    
+    let rows = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "senderName": row.get::<_, String>(1)?,
+            "receiverType": row.get::<_, String>(2)?,
+            "receiverId": row.get::<_, Option<i64>>(3)?,
+            "branchId": row.get::<_, Option<i64>>(4)?,
+            "title": row.get::<_, String>(5)?,
+            "message": row.get::<_, String>(6)?,
+            "type": row.get::<_, String>(7)?,
+            "isRead": row.get::<_, i32>(8)? == 1,
+            "createdAt": row.get::<_, String>(9)?,
+        }))
+    })?;
+    
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[tauri::command]
+fn delete_notification(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    if state.current_user_role.lock().map_err(lock_err)?.as_deref() != Some("SUPER_ADMIN") {
+        return Err(AppError::Unknown("Unauthorized. Super Admin only.".into()));
+    }
+
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    conn.execute("DELETE FROM Notifications WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_unread_count(state: State<'_, AppState>) -> Result<i64, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    let user_id = state.current_user_id.lock().map_err(lock_err)?.ok_or_else(|| AppError::Unknown("Not logged in".into()))?;
+    let user_branch = state.current_user_branch_id.lock().map_err(lock_err)?.clone();
+
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Notifications
+         WHERE is_read = 0
+         AND ((receiver_type = 'ALL')
+            OR (receiver_type = 'USER' AND receiver_id = ?1)
+            OR (receiver_type = 'BRANCH' AND branch_id = ?2))",
+        params![user_id, user_branch],
+        |r| r.get(0)
+    )?;
+    
+    Ok(count)
 }
 
 // ── Security Helpers ───────────────────────────────────────────────────────
