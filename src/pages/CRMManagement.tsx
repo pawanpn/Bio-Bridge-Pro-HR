@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import {
   Users, Plus, Search, Edit2, Trash2, Phone, Mail,
   Building2, TrendingUp, UserCheck, DollarSign
@@ -26,27 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-
-interface Lead {
-  id: number;
-  lead_code: string;
-  name: string;
-  company?: string;
-  email?: string;
-  phone?: string;
-  status: string;
-  source: string;
-  value?: number;
-  assigned_to?: string;
-  created_at: string;
-}
+import { crmService, type Lead } from '@/services/supabaseService';
 
 interface CRMStats {
   total_leads: number;
@@ -81,8 +60,8 @@ export const CRMManagement: React.FC = () => {
     try {
       setLoading(true);
       const [leadsData, statsData] = await Promise.all([
-        invoke<any[]>('list_leads'),
-        invoke<any>('get_crm_stats'),
+        crmService.getAll(),
+        crmService.getStats(),
       ]);
       setLeads(leadsData);
       setStats(statsData);
@@ -100,13 +79,24 @@ export const CRMManagement: React.FC = () => {
   const handleSave = async () => {
     try {
       if (editingLead) {
-        await invoke('update_lead', {
-          leadId: editingLead.id,
-          ...formData,
+        await crmService.update(editingLead.id, {
+          name: formData.name,
+          company: formData.company || null,
+          email: formData.email || null,
+          phone: formData.phone || null,
+          status: formData.status,
+          source: formData.source,
+          value: formData.value,
         });
       } else {
-        await invoke('create_lead', {
-          request: formData,
+        await crmService.create({
+          name: formData.name,
+          company: formData.company || null,
+          email: formData.email || null,
+          phone: formData.phone || null,
+          status: formData.status,
+          source: formData.source,
+          value: formData.value,
         });
       }
       setShowDialog(false);
@@ -141,10 +131,10 @@ export const CRMManagement: React.FC = () => {
     setShowDialog(true);
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Are you sure you want to delete this lead?')) {
       try {
-        await invoke('delete_lead', { leadId: id });
+        await crmService.delete(id);
         loadData();
       } catch (error) {
         console.error('Failed to delete lead:', error);
@@ -260,17 +250,16 @@ export const CRMManagement: React.FC = () => {
                 className="pl-10"
               />
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                {statuses.map(status => (
-                  <SelectItem key={status} value={status}>{status}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="flex h-10 w-[200px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <option value="all">All Statuses</option>
+              {statuses.map(status => (
+                <option key={status} value={status}>{status}</option>
+              ))}
+            </select>
           </div>
         </CardContent>
       </Card>
@@ -398,29 +387,27 @@ export const CRMManagement: React.FC = () => {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Status</Label>
-                <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {statuses.map(status => (
-                      <SelectItem key={status} value={status}>{status}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  value={formData.status}
+                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {statuses.map(status => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <Label>Source</Label>
-                <Select value={formData.source} onValueChange={(value) => setFormData({ ...formData, source: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sources.map(source => (
-                      <SelectItem key={source} value={source}>{source}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  value={formData.source}
+                  onChange={(e) => setFormData({ ...formData, source: e.target.value })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {sources.map(source => (
+                    <option key={source} value={source}>{source}</option>
+                  ))}
+                </select>
               </div>
             </div>
             <div>

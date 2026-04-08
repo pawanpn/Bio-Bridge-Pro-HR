@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import {
   FolderKanban, Plus, Search, Edit2, Trash2, Calendar,
   Users, Target, CheckCircle, Clock, AlertCircle
@@ -26,31 +25,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
-
-interface Project {
-  id: number;
-  project_code: string;
-  name: string;
-  description?: string;
-  status: string;
-  priority: string;
-  start_date: string;
-  end_date?: string;
-  budget?: number;
-  manager_id?: number;
-  manager_name?: string;
-  progress: number;
-  team_size: number;
-  created_at: string;
-}
+import { projectsService, type Project } from '@/services/supabaseService';
 
 interface ProjectStats {
   total_projects: number;
@@ -84,8 +60,8 @@ export const ProjectsManagement: React.FC = () => {
     try {
       setLoading(true);
       const [projectsData, statsData] = await Promise.all([
-        invoke<any[]>('list_projects'),
-        invoke<any>('get_project_stats'),
+        projectsService.getAll(),
+        projectsService.getStats(),
       ]);
       setProjects(projectsData);
       setStats(statsData);
@@ -103,13 +79,24 @@ export const ProjectsManagement: React.FC = () => {
   const handleSave = async () => {
     try {
       if (editingProject) {
-        await invoke('update_project', {
-          projectId: editingProject.id,
-          ...formData,
+        await projectsService.update(editingProject.id, {
+          name: formData.name,
+          description: formData.description || null,
+          status: formData.status,
+          priority: formData.priority,
+          start_date: formData.start_date,
+          end_date: formData.end_date || null,
+          budget: formData.budget,
         });
       } else {
-        await invoke('create_project', {
-          request: formData,
+        await projectsService.create({
+          name: formData.name,
+          description: formData.description || null,
+          status: formData.status,
+          priority: formData.priority,
+          start_date: formData.start_date,
+          end_date: formData.end_date || null,
+          budget: formData.budget,
         });
       }
       setShowDialog(false);
@@ -144,10 +131,10 @@ export const ProjectsManagement: React.FC = () => {
     setShowDialog(true);
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (confirm('Are you sure you want to delete this project?')) {
       try {
-        await invoke('delete_project', { projectId: id });
+        await projectsService.delete(id);
         loadData();
       } catch (error) {
         console.error('Failed to delete project:', error);
@@ -259,17 +246,16 @@ export const ProjectsManagement: React.FC = () => {
                 className="pl-10"
               />
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                {statuses.map(status => (
-                  <SelectItem key={status} value={status}>{status}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="flex h-10 w-[200px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              <option value="all">All Statuses</option>
+              {statuses.map(status => (
+                <option key={status} value={status}>{status}</option>
+              ))}
+            </select>
           </div>
         </CardContent>
       </Card>
@@ -358,29 +344,27 @@ export const ProjectsManagement: React.FC = () => {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Status</Label>
-                <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {statuses.map(status => (
-                      <SelectItem key={status} value={status}>{status}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  value={formData.status}
+                  onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {statuses.map(status => (
+                    <option key={status} value={status}>{status}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <Label>Priority</Label>
-                <Select value={formData.priority} onValueChange={(value) => setFormData({ ...formData, priority: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {priorities.map(priority => (
-                      <SelectItem key={priority} value={priority}>{priority}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  value={formData.priority}
+                  onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  {priorities.map(priority => (
+                    <option key={priority} value={priority}>{priority}</option>
+                  ))}
+                </select>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">

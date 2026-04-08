@@ -2,8 +2,8 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Supabase Configuration
 // These will be configured by user in System Settings or Setup Wizard
-let SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
-let SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+let SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
+let SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key';
 let SUPABASE_SERVICE_KEY = import.meta.env.VITE_SUPABASE_SERVICE_KEY || '';
 
 // Check if user has completed setup
@@ -41,18 +41,30 @@ export const initializeSupabase = (url: string, anonKey: string): SupabaseClient
 };
 
 // Initialize with current values
-supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-  realtime: {
-    params: {
-      eventsPerSecond: 10,
+try {
+  supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: false,
     },
-  },
-});
+    realtime: {
+      params: {
+        eventsPerSecond: 10,
+      },
+    },
+  });
+} catch (error) {
+  console.warn('⚠️ Failed to initialize Supabase client:', error);
+  // Create a dummy client that won't crash
+  supabaseClient = createClient('https://placeholder.supabase.co', 'placeholder', {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
 
 export const supabase = supabaseClient;
 

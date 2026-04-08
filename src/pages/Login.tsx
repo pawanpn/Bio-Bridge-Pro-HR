@@ -69,11 +69,11 @@ export const Login: React.FC = () => {
   };
 
   const clearSaved = () => {
-    localStorage.removeItem('saved_username');
+    localStorage.removeItem('saved_email');
     localStorage.removeItem('saved_password');
     localStorage.setItem('rememberMe', 'false');
     setRememberMe(false);
-    setUsername('');
+    setEmail('');
     setPassword('');
     setError('');
     setSuccess('Saved credentials cleared.');

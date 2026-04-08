@@ -285,6 +285,8 @@ pub struct UpdateEmployeeRequest {
     pub employment_status: Option<String>,
 }
 
+/// CREATE: Add new employee
+#[tauri::command]
 pub async fn create_employee(
     request: CreateEmployeeRequest,
     state: tauri::State<'_, AppState>,
