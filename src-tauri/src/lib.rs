@@ -2374,32 +2374,12 @@ pub fn run() {
             crud::get_salary_structure,
             crud::create_invoice,
             crud::list_invoices,
-            // Inventory Commands
             crud::create_item,
             crud::list_items,
-            crud::update_item,
-            crud::delete_item,
             crud::update_stock,
-            crud::get_inventory_stats,
-            // Projects Commands
             crud::create_project,
             crud::list_projects,
-            crud::update_project,
-            crud::delete_project,
-            crud::get_project_stats,
             crud::create_task,
-            // CRM Commands
-            crud::create_lead,
-            crud::list_leads,
-            crud::update_lead,
-            crud::delete_lead,
-            crud::get_crm_stats,
-            // Assets Commands
-            crud::create_asset,
-            crud::list_assets,
-            crud::update_asset,
-            crud::delete_asset,
-            crud::get_asset_stats,
             // Supabase Sync Commands
             sync_service::initialize_supabase_sync,
             sync_service::sync_to_supabase,
