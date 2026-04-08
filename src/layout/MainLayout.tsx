@@ -21,7 +21,9 @@ import {
   Bell,
   ClipboardCheck,
   DollarSign,
-  Users
+  Users,
+  Shield,
+  GitBranch
 } from 'lucide-react';
 
 export const MainLayout: React.FC = () => {
@@ -89,6 +91,14 @@ export const MainLayout: React.FC = () => {
           )}
           {!isOperator && (
             <SidebarItem
+              icon={<GitBranch size={18} />}
+              label="Employee Hierarchy"
+              active={activeTab === 'Hierarchy'}
+              onClick={() => go('Hierarchy', '/employee-hierarchy')}
+            />
+          )}
+          {!isOperator && (
+            <SidebarItem
               icon={<CalendarCheck size={18} />}
               label="Leave Management"
               active={activeTab === 'Leave'}
@@ -125,6 +135,14 @@ export const MainLayout: React.FC = () => {
               label="Organization"
               active={activeTab === 'Devices'}
               onClick={() => go('Devices', '/organization')}
+            />
+          )}
+          {!isOperator && (
+            <SidebarItem
+              icon={<Shield size={18} />}
+              label="Roles & Permissions"
+              active={activeTab === 'Permissions'}
+              onClick={() => go('Permissions', '/permissions')}
             />
           )}
           <SidebarItem
