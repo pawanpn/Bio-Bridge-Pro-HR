@@ -5,12 +5,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Lock, User as UserIcon, ShieldCheck, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Lock, Mail as MailIcon, ShieldCheck, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { AppConfig } from '../config/appConfig';
 
 export const Login: React.FC = () => {
-  const { login, changePassword } = useAuth();
-  const [username, setUsername] = useState('');
+  const { login, changePassword, loading: authLoading } = useAuth();
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -24,17 +24,17 @@ export const Login: React.FC = () => {
 
   React.useEffect(() => {
     if (localStorage.getItem('rememberMe') === 'true') {
-        const storedUser = localStorage.getItem('saved_username');
+        const storedEmail = localStorage.getItem('saved_email');
         const storedPass = localStorage.getItem('saved_password');
-        if (storedUser) setUsername(storedUser);
+        if (storedEmail) setEmail(storedEmail);
         if (storedPass) setPassword(storedPass);
     }
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username || !password) {
-      setError('Please enter both username and password.');
+    if (!email || !password) {
+      setError('Please enter both email and password.');
       return;
     }
 
@@ -42,23 +42,27 @@ export const Login: React.FC = () => {
     setError('');
     setSuccess('');
     try {
-      const { mustChange } = await login(username, password);
+      const result = await login(email, password);
+
+      if (!result.success) {
+        setError(result.error || 'Login failed. Please check your credentials.');
+        return;
+      }
 
       if (rememberMe) {
-          localStorage.setItem('saved_username', username);
+          localStorage.setItem('saved_email', email);
           localStorage.setItem('saved_password', password);
           localStorage.setItem('rememberMe', 'true');
       } else {
-          localStorage.removeItem('saved_username');
+          localStorage.removeItem('saved_email');
           localStorage.removeItem('saved_password');
           localStorage.setItem('rememberMe', 'false');
       }
 
-      if (mustChange) {
-        setIsChangingPass(true);
-      }
+      setSuccess('Login successful! Redirecting...');
+      // AuthContext handles navigation automatically
     } catch (err: any) {
-      setError(err.toString() || 'Invalid credentials');
+      setError(err.message || 'Invalid credentials. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -117,17 +121,17 @@ export const Login: React.FC = () => {
           {!isChangingPass ? (
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
+                <Label htmlFor="email">Email</Label>
                 <div className="relative">
-                  <UserIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <MailIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <Input
-                    id="username"
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Enter username"
+                    id="email"
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="admin@biobridge.com"
                     className="pl-10"
-                    autoFocus={!username}
+                    autoFocus={!email}
                   />
                 </div>
               </div>

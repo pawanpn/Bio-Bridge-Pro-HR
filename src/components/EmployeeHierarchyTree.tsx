@@ -9,7 +9,6 @@ import {
   ChevronDown, 
   Search, 
   UserPlus,
-  Edit2,
   Eye,
   MapPin,
   Mail,
@@ -25,20 +24,17 @@ interface Employee {
   id: string;
   employee_code: string;
   full_name: string;
-  email?: string;
-  phone?: string;
+  personal_email?: string;
+  personal_phone?: string;
   department_id?: string;
   designation_id?: string;
   branch_id?: string;
-  role_id?: string;
   reporting_manager_id?: string;
   employment_status: string;
   is_active: boolean;
-  // Relations
   department?: { name: string };
   designation?: { name: string; level: number };
   branch?: { name: string };
-  role?: { name: string; code: string };
   subordinates?: Employee[];
 }
 
@@ -70,7 +66,6 @@ const TreeNode: React.FC<TreeNodeProps> = ({ employee, expanded, onToggle, onSel
         }`}
         onClick={() => onSelect(employee)}
       >
-        {/* Expand/Collapse */}
         <button
           className="p-1 hover:bg-muted-foreground/20 rounded"
           onClick={(e) => {
@@ -85,20 +80,13 @@ const TreeNode: React.FC<TreeNodeProps> = ({ employee, expanded, onToggle, onSel
           )}
         </button>
 
-        {/* Avatar */}
         <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
           <UserCog size={20} className="text-primary" />
         </div>
 
-        {/* Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <p className="font-semibold truncate">{employee.full_name}</p>
-            {employee.role && (
-              <Badge variant="outline" className="text-xs">
-                {employee.role.name}
-              </Badge>
-            )}
             {!employee.is_active && (
               <Badge variant="destructive" className="text-xs">Inactive</Badge>
             )}
@@ -117,7 +105,6 @@ const TreeNode: React.FC<TreeNodeProps> = ({ employee, expanded, onToggle, onSel
           </div>
         </div>
 
-        {/* Actions */}
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
@@ -125,26 +112,13 @@ const TreeNode: React.FC<TreeNodeProps> = ({ employee, expanded, onToggle, onSel
             className="h-8 w-8"
             onClick={(e) => {
               e.stopPropagation();
-              // Navigate to employee detail
             }}
           >
             <Eye size={16} />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8"
-            onClick={(e) => {
-              e.stopPropagation();
-              // Edit employee
-            }}
-          >
-            <Edit2 size={16} />
-          </Button>
         </div>
       </div>
 
-      {/* Subordinates */}
       {isExpanded && hasSubordinates && (
         <div className="mt-2">
           {employee.subordinates!.map(sub => (
@@ -170,7 +144,6 @@ export const EmployeeHierarchyTree: React.FC = () => {
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'tree' | 'list'>('tree');
 
   useEffect(() => {
     loadEmployees();
@@ -194,7 +167,6 @@ export const EmployeeHierarchyTree: React.FC = () => {
 
       if (error) throw error;
 
-      // Build hierarchy
       const hierarchy = buildHierarchy(data || []);
       setEmployees(hierarchy);
     } catch (error: any) {
@@ -209,12 +181,10 @@ export const EmployeeHierarchyTree: React.FC = () => {
     const employeeMap = new Map<string, Employee>();
     const roots: Employee[] = [];
 
-    // Create map
     emps.forEach(emp => {
       employeeMap.set(emp.id, { ...emp, subordinates: [] });
     });
 
-    // Build tree
     emps.forEach(emp => {
       const employee = employeeMap.get(emp.id)!;
       if (emp.reporting_manager_id && employeeMap.has(emp.reporting_manager_id)) {
@@ -269,7 +239,6 @@ export const EmployeeHierarchyTree: React.FC = () => {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* Tree View */}
       <div className="lg:col-span-2">
         <Card>
           <CardHeader>
@@ -294,7 +263,6 @@ export const EmployeeHierarchyTree: React.FC = () => {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Search */}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" size={16} />
               <Input
@@ -305,7 +273,6 @@ export const EmployeeHierarchyTree: React.FC = () => {
               />
             </div>
 
-            {/* Tree */}
             <div className="space-y-2 max-h-[600px] overflow-y-auto">
               {employees.map(emp => (
                 <TreeNode
@@ -333,7 +300,6 @@ export const EmployeeHierarchyTree: React.FC = () => {
         </Card>
       </div>
 
-      {/* Employee Details Sidebar */}
       <div className="lg:col-span-1">
         <Card>
           <CardHeader>
@@ -345,20 +311,15 @@ export const EmployeeHierarchyTree: React.FC = () => {
           <CardContent>
             {selectedEmployee ? (
               <div className="space-y-4">
-                {/* Avatar & Name */}
                 <div className="text-center">
                   <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-3">
                     <UserCog size={40} className="text-primary" />
                   </div>
                   <h3 className="text-xl font-bold">{selectedEmployee.full_name}</h3>
                   <p className="text-sm text-muted-foreground">{selectedEmployee.employee_code}</p>
-                  {selectedEmployee.role && (
-                    <Badge className="mt-2">{selectedEmployee.role.name}</Badge>
-                  )}
                 </div>
 
                 <div className="space-y-3">
-                  {/* Department */}
                   {selectedEmployee.department && (
                     <div className="flex items-center gap-2 text-sm">
                       <Building2 size={16} className="text-muted-foreground" />
@@ -369,7 +330,6 @@ export const EmployeeHierarchyTree: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Designation */}
                   {selectedEmployee.designation && (
                     <div className="flex items-center gap-2 text-sm">
                       <UserCog size={16} className="text-muted-foreground" />
@@ -380,7 +340,6 @@ export const EmployeeHierarchyTree: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Branch */}
                   {selectedEmployee.branch && (
                     <div className="flex items-center gap-2 text-sm">
                       <MapPin size={16} className="text-muted-foreground" />
@@ -391,29 +350,26 @@ export const EmployeeHierarchyTree: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Email */}
-                  {selectedEmployee.email && (
+                  {selectedEmployee.personal_email && (
                     <div className="flex items-center gap-2 text-sm">
                       <Mail size={16} className="text-muted-foreground" />
                       <div>
                         <p className="text-muted-foreground">Email</p>
-                        <p className="font-medium">{selectedEmployee.email}</p>
+                        <p className="font-medium">{selectedEmployee.personal_email}</p>
                       </div>
                     </div>
                   )}
 
-                  {/* Phone */}
-                  {selectedEmployee.phone && (
+                  {selectedEmployee.personal_phone && (
                     <div className="flex items-center gap-2 text-sm">
                       <Phone size={16} className="text-muted-foreground" />
                       <div>
                         <p className="text-muted-foreground">Phone</p>
-                        <p className="font-medium">{selectedEmployee.phone}</p>
+                        <p className="font-medium">{selectedEmployee.personal_phone}</p>
                       </div>
                     </div>
                   )}
 
-                  {/* Status */}
                   <div className="flex items-center gap-2 text-sm">
                     <div>
                       <p className="text-muted-foreground">Status</p>
@@ -424,7 +380,6 @@ export const EmployeeHierarchyTree: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Actions */}
                 <div className="flex gap-2 pt-4">
                   <Button
                     className="flex-1"
@@ -432,10 +387,6 @@ export const EmployeeHierarchyTree: React.FC = () => {
                   >
                     <Eye size={16} />
                     View Full Profile
-                  </Button>
-                  <Button variant="outline" className="flex-1">
-                    <Edit2 size={16} />
-                    Edit
                   </Button>
                 </div>
               </div>

@@ -6,13 +6,13 @@ interface UsePermissionReturn {
   hasPermission: (permission: string) => boolean;
   hasAnyPermission: (permissions: string[]) => boolean;
   hasAllPermissions: (permissions: string[]) => boolean;
-  userRole: any;
+  userRole: string | null;
   loading: boolean;
 }
 
 export const usePermission = (userId?: string): UsePermissionReturn => {
   const [permissions, setPermissions] = useState<string[]>([]);
-  const [userRole, setUserRole] = useState<any>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadPermissions = useCallback(async () => {
@@ -29,29 +29,29 @@ export const usePermission = (userId?: string): UsePermissionReturn => {
     }
 
     try {
-      // Get user's role
+      // Get user's role (your schema uses role VARCHAR field)
       const { data: userData, error: userError } = await supabase
         .from('users')
-        .select('role_id, role:roles(*)')
+        .select('role')
         .eq('id', userId)
         .single();
 
       if (userError) throw userError;
-      if (!userData?.role_id) {
+      if (!userData?.role) {
         setLoading(false);
         return;
       }
 
       setUserRole(userData.role);
 
-      // Get permissions for this role
+      // Get permissions for this role (your schema: role_permissions uses role VARCHAR)
       const { data: rolePerms, error: permError } = await supabase
         .from('role_permissions')
         .select(`
           permission_id,
           permissions:permissions(module, permission)
         `)
-        .eq('role_id', userData.role_id);
+        .eq('role', userData.role);
 
       if (permError) throw permError;
 
