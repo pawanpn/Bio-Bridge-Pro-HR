@@ -2,9 +2,19 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DeviceScanner } from '../components/DeviceScanner';
 import { invoke } from '@tauri-apps/api/core';
-import { Users, UserCheck, UserMinus, Cloud, CloudOff, Clock, X, CalendarCheck, Fingerprint, ScanFace, ArrowLeft } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { 
+  Users, UserCheck, UserMinus, Cloud, CloudOff, Clock, X, CalendarCheck, 
+  Fingerprint, ScanFace, ArrowLeft, DollarSign, TrendingUp, TrendingDown,
+  ShoppingCart, Package, FileText, Briefcase, Calendar, Activity,
+  CreditCard, Wallet, BarChart3, PieChart as PieChartIcon,
+  Layers, Truck, Settings, ClipboardList, CheckCircle, AlertCircle,
+  CalendarDays, UserPlus, Building2, MapPin, Phone, Mail
+} from 'lucide-react';
+import { 
+  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, 
+  XAxis, YAxis, CartesianGrid, Legend, AreaChart, Area, LineChart, Line 
+} from 'recharts';
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -12,6 +22,56 @@ import { Table, TableHeader, TableBody, TableRow, TableCell, TableHead } from '@
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+
+interface ERPStats {
+  // HR Module
+  totalEmployees: number;
+  presentToday: number;
+  absentToday: number;
+  lateToday: number;
+  onLeave: number;
+  pendingLeaveRequests: number;
+  newHiresThisMonth: number;
+  resignationsThisMonth: number;
+  
+  // Payroll Module
+  monthlyPayroll: number;
+  pendingPayslips: number;
+  totalDeductions: number;
+  totalAllowances: number;
+  
+  // Finance Module
+  totalRevenue: number;
+  totalExpenses: number;
+  pendingInvoices: number;
+  pendingPayments: number;
+  profitMargin: number;
+  
+  // Inventory Module
+  totalItems: number;
+  lowStockItems: number;
+  totalWarehouses: number;
+  pendingPOs: number;
+  
+  // Project Module
+  activeProjects: number;
+  completedProjects: number;
+  overdueTasks: number;
+  totalTasks: number;
+  
+  // CRM Module
+  totalLeads: number;
+  activeOpportunities: number;
+  expectedRevenue: number;
+  totalCustomers: number;
+  
+  // Attendance
+  lastDeviceSync?: string;
+  presentStaff: Staff[];
+  absentStaff: Staff[];
+  lateStaff: Staff[];
+  leaveStaff: Staff[];
+}
 
 interface Staff {
   id: number;
@@ -29,35 +89,6 @@ interface TodayPunchDetail {
   workingHours: string;
   totalPunches: number;
   punches: { timestamp: string; time: string; method: string; device: string }[];
-}
-
-interface Stats {
-  totalStaff: number;
-  presentToday: number;
-  onLeave: number;
-  absent: number;
-  lateToday: number;
-  presentStaff: Staff[];
-  absentStaff: Staff[];
-  lateStaff: Staff[];
-  leaveStaff: Staff[];
-  lastDeviceSync?: string;
-}
-
-interface DeviceConfig {
-  id: number;
-  name: string;
-  brand: string;
-  ip: string;
-  port: number;
-  status: string;
-  is_default?: boolean;
-}
-
-interface CloudConfig {
-  configured: boolean;
-  clientEmail?: string;
-  projectId?: string;
 }
 
 // Stat Card Component with gradient backgrounds
