@@ -266,7 +266,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     let _ = conn.execute(
         "CREATE TABLE IF NOT EXISTS Notifications (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sender_id INTEGER NOT NULL,
+            sender_id INTEGER,
             sender_name TEXT,
             receiver_id INTEGER,
             receiver_type TEXT DEFAULT 'USER', -- USER, BRANCH, ALL
