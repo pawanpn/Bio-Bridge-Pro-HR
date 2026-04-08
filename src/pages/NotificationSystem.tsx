@@ -111,8 +111,15 @@ export const NotificationSystem: React.FC = () => {
       setSendStatus('❌ Title and message are required');
       return;
     }
+    if (!user) {
+      setSendStatus('❌ You must be logged in to send notifications');
+      return;
+    }
     setSendStatus('');
     try {
+      // Parse user ID - handle both numeric and UUID formats
+      const numericId = isNaN(parseInt(user.id)) ? null : parseInt(user.id);
+      
       await invoke('send_notification', {
         title: composeForm.title,
         message: composeForm.message,
@@ -121,6 +128,8 @@ export const NotificationSystem: React.FC = () => {
         branchId: composeForm.receiverType === 'BRANCH' ? composeForm.branchId : null,
         notificationType: composeForm.notificationType,
         expiresAt: composeForm.expiresAt || null,
+        senderId: numericId,
+        senderName: user.full_name || user.username,
       });
       setSendStatus('✅ Notification sent successfully!');
       setComposeForm({

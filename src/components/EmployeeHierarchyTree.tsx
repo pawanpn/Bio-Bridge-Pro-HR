@@ -159,8 +159,7 @@ export const EmployeeHierarchyTree: React.FC = () => {
           *,
           department:departments(name),
           designation:designations(name, level),
-          branch:branches(name),
-          role:roles(name, code)
+          branch:branches(name)
         `)
         .eq('is_active', true)
         .order('employee_code');
