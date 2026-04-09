@@ -80,20 +80,39 @@ export const SystemTools: React.FC = () => {
               <h4 className="font-semibold">Seed Results:</h4>
               <div className="grid grid-cols-2 gap-3">
                 {seedResults.map((result) => (
-                  <div key={result.module} className="flex items-center justify-between p-3 border rounded-lg">
-                    <span className="text-sm font-medium">{result.module}</span>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={result.recordsCreated > 0 ? 'default' : 'destructive'}>
-                        {result.recordsCreated} records
-                      </Badge>
-                      {result.recordsCreated > 0 ? (
-                        <CheckCircle className="w-4 h-4 text-green-500" />
-                      ) : (
-                        <AlertCircle className="w-4 h-4 text-red-500" />
-                      )}
+                  <div key={result.module} className="p-3 border rounded-lg space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">{result.module}</span>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={result.recordsCreated > 0 ? 'default' : 'destructive'}>
+                          {result.recordsCreated} records
+                        </Badge>
+                        {result.recordsCreated > 0 ? (
+                          <CheckCircle className="w-4 h-4 text-green-500" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-red-500" />
+                        )}
+                      </div>
                     </div>
+                    {result.errors.length > 0 && (
+                      <p className="text-xs text-red-600 bg-red-50 p-2 rounded">{result.errors[0]}</p>
+                    )}
                   </div>
                 ))}
+              </div>
+              {/* Overall status */}
+              <div className="mt-4 p-3 rounded-lg" style={{
+                backgroundColor: seedResults.some(r => r.recordsCreated > 0) ? '#f0fdf4' : '#fef2f2',
+                border: `1px solid ${seedResults.some(r => r.recordsCreated > 0) ? '#bbf7d0' : '#fecaca'}`
+              }}>
+                <p className="text-sm font-medium" style={{
+                  color: seedResults.some(r => r.recordsCreated > 0) ? '#166534' : '#991b1b'
+                }}>
+                  {seedResults.some(r => r.recordsCreated > 0)
+                    ? `✅ Successfully seeded ${seedResults.filter(r => r.recordsCreated > 0).length} modules`
+                    : '❌ All modules failed to seed. Check error messages above.'
+                  }
+                </p>
               </div>
             </div>
           )}
