@@ -48,6 +48,7 @@ interface EmployeeForm {
   department_id: string;
   designation_id: string;
   employment_type: string;
+  employment_status: string;
   date_of_joining: string;
   reporting_manager_id: string;
   emergency_contact_name: string;
@@ -75,6 +76,7 @@ const emptyForm: EmployeeForm = {
   department_id: '',
   designation_id: '',
   employment_type: 'Full-time',
+  employment_status: 'Active',
   date_of_joining: new Date().toISOString().split('T')[0],
   reporting_manager_id: '',
   emergency_contact_name: '',
@@ -112,15 +114,18 @@ export const EmployeeManagement: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      // Load from local SQLite (existing system)
-      const [empData, branchData] = await Promise.all([
-        invoke<any[]>('list_employees'),
+      const [empResult, branchData] = await Promise.all([
+        invoke<any>('list_employees'),
         invoke<any[]>('list_branches'),
       ]);
-      setEmployees(empData || []);
+      // Handle both flat array and wrapped {success, data, count} format
+      const empData = Array.isArray(empResult) ? empResult : (empResult as any)?.data || [];
+      setEmployees(empData);
       setBranches(branchData || []);
     } catch (error) {
       console.error('Failed to load data:', error);
+      setEmployees([]);
+      setBranches([]);
     } finally {
       setLoading(false);
     }
@@ -160,37 +165,49 @@ export const EmployeeManagement: React.FC = () => {
 
     setFormStatus('');
     try {
-      // Save to local SQLite first (offline-first)
+      // Save using the crud commands
       if (formDialog.editing) {
-        await invoke('update_employee', {
-          id: formDialog.editing.id,
-          name: `${formData.first_name} ${formData.middle_name || ''} ${formData.last_name}`.trim(),
-          department: formData.department_id,
-          branchId: Number(formData.branch_id) || 1,
+        await invoke('crud::update_employee', {
+          employeeId: formDialog.editing.id,
+          request: {
+            first_name: formData.first_name,
+            last_name: formData.last_name,
+            personal_email: formData.personal_email || undefined,
+            personal_phone: formData.personal_phone || undefined,
+            branch_id: formData.branch_id ? String(formData.branch_id) : undefined,
+            employment_status: formData.employment_status || 'Active',
+          }
         });
       } else {
-        await invoke('add_employee', {
-          name: `${formData.first_name} ${formData.middle_name || ''} ${formData.last_name}`.trim(),
-          department: formData.department_id,
-          branchId: Number(formData.branch_id) || 1,
+        await invoke('crud::create_employee', {
+          request: {
+            employee_code: formData.employee_code,
+            first_name: formData.first_name,
+            middle_name: formData.middle_name || undefined,
+            last_name: formData.last_name,
+            personal_email: formData.personal_email || undefined,
+            personal_phone: formData.personal_phone || undefined,
+            branch_id: formData.branch_id ? String(formData.branch_id) : undefined,
+            employment_status: formData.employment_status || 'Active',
+          }
         });
       }
 
       setFormStatus('✅ Employee saved successfully!');
       loadData();
-      
+
       setTimeout(() => {
         setFormDialog({ open: false, editing: null });
       }, 1500);
-    } catch (error) {
-      setFormStatus('❌ Failed to save: ' + error);
+    } catch (error: any) {
+      setFormStatus('❌ Failed to save: ' + (error?.message || error));
     }
   };
 
   const handleDeleteEmployee = async () => {
     if (!deleteDialog.employee) return;
     try {
-      await invoke('delete_employee', { id: deleteDialog.employee.id });
+      await invoke('crud::delete_employee', { employeeId: deleteDialog.employee.id });
       setDeleteDialog({ open: false, employee: null });
       loadData();
     } catch (error) {
