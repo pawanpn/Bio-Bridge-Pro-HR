@@ -157,13 +157,12 @@ export interface Notification {
 
 export const inventoryService = {
   /**
-   * Get all active inventory items
+   * Get all inventory items
    */
   async getAll(): Promise<Item[]> {
     const { data, error } = await supabase
       .from('items')
       .select('*')
-      .eq('is_active', true)
       .order('item_code', { ascending: true });
 
     if (error) {
@@ -171,7 +170,7 @@ export const inventoryService = {
       throw error;
     }
 
-    return data || [];
+    return (data || []).map(fromItemDB);
   },
 
   /**
@@ -291,8 +290,7 @@ export const inventoryService = {
   }> {
     const { data: items } = await supabase
       .from('items')
-      .select('quantity, unit_price, reorder_level')
-      .eq('is_active', true);
+      .select('quantity, unit_price, reorder_level');
 
     if (!items) {
       return { total_items: 0, total_value: 0, low_stock: 0, out_of_stock: 0 };
