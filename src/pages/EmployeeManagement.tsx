@@ -109,6 +109,14 @@ export const EmployeeManagement: React.FC = () => {
   // Load data
   useEffect(() => {
     loadData();
+
+    // Listen for sync events to refresh data
+    const handleDataSynced = () => loadData();
+    window.addEventListener('data-synced', handleDataSynced);
+
+    return () => {
+      window.removeEventListener('data-synced', handleDataSynced);
+    };
   }, []);
 
   const loadData = async () => {

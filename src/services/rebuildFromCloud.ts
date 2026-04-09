@@ -61,6 +61,9 @@ export async function rebuildLocalFromCloud(): Promise<RebuildStats> {
     console.log(`✅ Rebuilt ${stats.devices} devices`);
 
     console.log('✅ Full cloud-to-local rebuild complete!');
+
+    // Notify app that data has been synced
+    window.dispatchEvent(new CustomEvent('data-synced', { detail: { source: 'rebuild' } }));
   } catch (error: any) {
     stats.errors.push(error.message);
     console.error('❌ Rebuild failed:', error);
