@@ -259,11 +259,14 @@ pub struct CreateEmployeeRequest {
     pub personal_phone: Option<String>,
     pub current_address: Option<String>,
     pub permanent_address: Option<String>,
+    pub citizenship_number: Option<String>,
+    pub pan_number: Option<String>,
     pub department_id: Option<String>,
     pub designation_id: Option<String>,
     pub branch_id: Option<String>,
     pub date_of_joining: Option<String>,
     pub employment_type: Option<String>,
+    pub employment_status: Option<String>,
     pub reporting_manager_id: Option<String>,
     pub bank_name: Option<String>,
     pub account_number: Option<String>,
@@ -280,6 +283,8 @@ pub struct UpdateEmployeeRequest {
     pub personal_phone: Option<String>,
     pub current_address: Option<String>,
     pub permanent_address: Option<String>,
+    pub citizenship_number: Option<String>,
+    pub pan_number: Option<String>,
     pub department_id: Option<String>,
     pub designation_id: Option<String>,
     pub branch_id: Option<String>,
@@ -333,16 +338,16 @@ pub async fn create_employee(
         None
     };
 
-    // Insert employee
+    // Insert employee with all fields
     let employee_id = conn.execute(
         "INSERT INTO Employees (
             employee_code, first_name, middle_name, last_name,
             date_of_birth, gender, personal_email, personal_phone,
-            current_address, permanent_address, department_id,
-            designation_id, branch_id, date_of_joining,
-            employment_type, reporting_manager_id, bank_name,
+            current_address, permanent_address, citizenship_number, pan_number,
+            department_id, designation_id, branch_id, date_of_joining,
+            employment_type, employment_status, reporting_manager_id, bank_name,
             account_number, status, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, 'active', datetime('now'), datetime('now'))",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, 'active', datetime('now'), datetime('now'))",
         params![
             employee_code,
             first_name,
@@ -354,11 +359,14 @@ pub async fn create_employee(
             phone_encrypted,
             address_encrypted,
             request.permanent_address.as_ref().map(|s| encrypt_data(&sanitize_input(s))).transpose().map_err(|e| AppError::EncryptionError(e))?,
+            request.citizenship_number.as_ref().map(|s| sanitize_input(s)),
+            request.pan_number.as_ref().map(|s| sanitize_input(s)),
             request.department_id,
             request.designation_id,
             request.branch_id,
             request.date_of_joining,
             request.employment_type.as_deref().unwrap_or("Full-time"),
+            request.employment_status.as_deref().unwrap_or("Active"),
             request.reporting_manager_id,
             request.bank_name,
             account_encrypted,
@@ -569,6 +577,46 @@ pub async fn update_employee(
     if let Some(emp_type) = request.employment_type {
         updates.push("employment_type = ?");
         values.push(Box::new(emp_type));
+    }
+    if let Some(citizenship) = request.citizenship_number {
+        updates.push("citizenship_number = ?");
+        values.push(Box::new(sanitize_input(&citizenship)));
+    }
+    if let Some(pan) = request.pan_number {
+        updates.push("pan_number = ?");
+        values.push(Box::new(sanitize_input(&pan)));
+    }
+    if let Some(dept_id) = request.department_id {
+        updates.push("department_id = ?");
+        values.push(Box::new(dept_id));
+    }
+    if let Some(desig_id) = request.designation_id {
+        updates.push("designation_id = ?");
+        values.push(Box::new(desig_id));
+    }
+    if let Some(dob) = request.date_of_birth {
+        updates.push("date_of_birth = ?");
+        values.push(Box::new(dob));
+    }
+    if let Some(gender) = request.gender {
+        updates.push("gender = ?");
+        values.push(Box::new(gender));
+    }
+    if let Some(addr) = request.current_address {
+        updates.push("current_address = ?");
+        values.push(Box::new(sanitize_input(&addr)));
+    }
+    if let Some(permanent_addr) = request.permanent_address {
+        updates.push("permanent_address = ?");
+        values.push(Box::new(sanitize_input(&permanent_addr)));
+    }
+    if let Some(bank) = request.bank_name {
+        updates.push("bank_name = ?");
+        values.push(Box::new(sanitize_input(&bank)));
+    }
+    if let Some(acc) = request.account_number {
+        updates.push("account_number = ?");
+        values.push(Box::new(sanitize_input(&acc)));
     }
 
     if updates.is_empty() {
