@@ -279,10 +279,16 @@ pub struct UpdateEmployeeRequest {
     pub personal_email: Option<String>,
     pub personal_phone: Option<String>,
     pub current_address: Option<String>,
+    pub permanent_address: Option<String>,
     pub department_id: Option<String>,
     pub designation_id: Option<String>,
+    pub branch_id: Option<String>,
     pub date_of_joining: Option<String>,
     pub employment_status: Option<String>,
+    pub employment_type: Option<String>,
+    pub reporting_manager_id: Option<String>,
+    pub bank_name: Option<String>,
+    pub account_number: Option<String>,
 }
 
 /// CREATE: Add new employee
@@ -534,6 +540,10 @@ pub async fn update_employee(
         updates.push("first_name = ?");
         values.push(Box::new(sanitize_input(&first_name)));
     }
+    if let Some(middle_name) = request.middle_name {
+        updates.push("middle_name = ?");
+        values.push(Box::new(sanitize_input(&middle_name)));
+    }
     if let Some(last_name) = request.last_name {
         updates.push("last_name = ?");
         values.push(Box::new(sanitize_input(&last_name)));
@@ -542,6 +552,23 @@ pub async fn update_employee(
         updates.push("personal_email = ?");
         let encrypted = encrypt_data(&email).map_err(|e| AppError::EncryptionError(e))?;
         values.push(Box::new(encrypted));
+    }
+    if let Some(phone) = request.personal_phone {
+        updates.push("personal_phone = ?");
+        let encrypted = encrypt_data(&phone).map_err(|e| AppError::EncryptionError(e))?;
+        values.push(Box::new(encrypted));
+    }
+    if let Some(branch_id) = request.branch_id {
+        updates.push("branch_id = ?");
+        values.push(Box::new(branch_id));
+    }
+    if let Some(status) = request.employment_status {
+        updates.push("employment_status = ?");
+        values.push(Box::new(status));
+    }
+    if let Some(emp_type) = request.employment_type {
+        updates.push("employment_type = ?");
+        values.push(Box::new(emp_type));
     }
 
     if updates.is_empty() {

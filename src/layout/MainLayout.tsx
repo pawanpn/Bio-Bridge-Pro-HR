@@ -2,8 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { AttendanceConsole } from '../components/AttendanceConsole';
+import { ConnectivityBadge } from '../components/ConnectivityBadge';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { useAuth } from '../context/AuthContext';
+import { syncService } from '../services/syncService';
 import { AppConfig } from '../config/appConfig';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,6 +49,23 @@ export const MainLayout: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [breadcrumbHistory, setBreadcrumbHistory] = useState<Array<{label: string, path: string}>>([]);
+
+  // Initialize sync service
+  useEffect(() => {
+    syncService.initialize();
+    syncService.setupRealtimeListeners((table, data) => {
+      console.log(`📡 Realtime update: ${table}`, data);
+      // Reload data when changes detected
+      if (table === 'employees' || table === 'attendance_logs') {
+        // Trigger reload of current page data
+        window.dispatchEvent(new CustomEvent('data-synced', { detail: { table } }));
+      }
+    });
+    
+    return () => {
+      syncService.destroy();
+    };
+  }, []);
 
   // Define breadcrumb labels for each route
   const breadcrumbLabels: Record<string, string> = {
@@ -438,6 +457,9 @@ export const MainLayout: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2 lg:gap-4 flex-shrink-0">
+            {/* Connectivity Badge */}
+            <ConnectivityBadge />
+
             {/* Branch Selector */}
             <select
               value={selectedBranch}

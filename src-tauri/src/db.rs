@@ -230,6 +230,51 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE Users ADD COLUMN must_change_password INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE Employees ADD COLUMN status TEXT DEFAULT 'active'", []);
 
+    // Migration: Add all missing columns to Employees table for full CRUD support
+    let employee_columns = vec![
+        ("employee_code", "TEXT"),
+        ("first_name", "TEXT"),
+        ("middle_name", "TEXT"),
+        ("last_name", "TEXT"),
+        ("date_of_birth", "TEXT"),
+        ("gender", "TEXT"),
+        ("personal_email", "TEXT"),
+        ("personal_phone", "TEXT"),
+        ("current_address", "TEXT"),
+        ("permanent_address", "TEXT"),
+        ("department_id", "TEXT"),
+        ("designation_id", "TEXT"),
+        ("date_of_joining", "TEXT"),
+        ("employment_type", "TEXT"),
+        ("employment_status", "TEXT DEFAULT 'Active'"),
+        ("reporting_manager_id", "TEXT"),
+        ("bank_name", "TEXT"),
+        ("account_number", "TEXT"),
+        ("created_at", "TEXT DEFAULT (datetime('now'))"),
+        ("updated_at", "TEXT DEFAULT (datetime('now'))"),
+    ];
+    for (col, col_type) in employee_columns {
+        let _ = conn.execute(&format!("ALTER TABLE Employees ADD COLUMN {} {}", col, col_type), []);
+    }
+
+    // Migrate existing data: populate first_name/last_name from name
+    let _ = conn.execute(
+        "UPDATE Employees SET first_name = TRIM(SUBSTR(name, 1, INSTR(name, ' ') - 1)), last_name = TRIM(SUBSTR(name, INSTR(name, ' ') + 1)) WHERE first_name IS NULL AND INSTR(name, ' ') > 0",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE Employees SET first_name = name WHERE first_name IS NULL",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE Employees SET employee_code = 'EMP-' || printf('%04d', id) WHERE employee_code IS NULL",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE Employees SET employment_status = UPPER(status) WHERE status IS NOT NULL",
+        [],
+    );
+
     // Migration for LeaveRequests table
     let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN leave_type TEXT DEFAULT 'Casual Leave'", []);
     let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN reason TEXT", []);
@@ -284,6 +329,24 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         )",
         [],
     );
+
+    // Offline-First Sync Queue table
+    let _ = conn.execute(
+        "CREATE TABLE IF NOT EXISTS sync_queue (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            table_name TEXT NOT NULL,
+            operation TEXT NOT NULL CHECK(operation IN ('INSERT', 'UPDATE', 'DELETE')),
+            payload TEXT NOT NULL,
+            supabase_id TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            synced_at TEXT,
+            retry_count INTEGER DEFAULT 0,
+            error_message TEXT
+        )",
+        [],
+    );
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_sync_queue_pending ON sync_queue(synced_at) WHERE synced_at IS NULL", []);
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_sync_queue_table ON sync_queue(table_name)", []);
 
     // Inventory Items table
     let _ = conn.execute(

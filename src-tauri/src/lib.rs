@@ -2400,6 +2400,22 @@ pub fn run() {
             crud::update_asset,
             crud::delete_asset,
             crud::get_asset_stats,
+            // Sync Queue Commands (Offline-First)
+            add_to_sync_queue,
+            get_pending_sync_items,
+            mark_sync_complete,
+            update_sync_retry,
+            upsert_employee_from_cloud,
+            delete_employee_by_id,
+            get_employee_by_code,
+            insert_attendance_from_cloud,
+            upsert_leave_from_cloud,
+            delete_leave_by_id,
+            upsert_item_from_cloud,
+            upsert_branch_from_cloud,
+            upsert_gate_from_cloud,
+            upsert_device_from_cloud,
+            mark_record_pending_sync,
             // Supabase Sync Commands
             sync_service::initialize_supabase_sync,
             sync_service::sync_to_supabase,
@@ -2931,7 +2947,486 @@ fn decrypt_data(data: &[u8]) -> Result<Vec<u8>, AppError> {
     let cipher = Aes256Gcm::new(key);
     let (nonce_bytes, ciphertext) = data.split_at(12);
     let nonce = Nonce::from_slice(nonce_bytes);
-    
+
     cipher.decrypt(nonce, ciphertext)
         .map_err(|_| AppError::LicenseError("Activation token is corrupted or tampered.".to_string()))
+}
+
+// ── Sync Queue Commands (Offline-First) ───────────────────────────────────
+
+/// Add an operation to the sync queue
+#[tauri::command]
+fn add_to_sync_queue(
+    table_name: String,
+    operation: String,
+    payload: String,
+    supabase_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "INSERT INTO sync_queue (table_name, operation, payload, supabase_id, retry_count) VALUES (?1, ?2, ?3, ?4, 0)",
+        params![table_name, operation, payload, supabase_id],
+    ).map_err(|e| AppError::DatabaseError(format!("Failed to add to sync queue: {}", e)))?;
+
+    Ok(())
+}
+
+/// Get all pending (unsynced) items from the queue
+#[tauri::command]
+fn get_pending_sync_items(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, table_name, operation, payload, supabase_id, created_at, retry_count, error_message 
+         FROM sync_queue WHERE synced_at IS NULL ORDER BY created_at ASC LIMIT 100"
+    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+
+    let items: Vec<serde_json::Value> = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "table_name": row.get::<_, String>(1)?,
+                "operation": row.get::<_, String>(2)?,
+                "payload": row.get::<_, String>(3)?,
+                "supabase_id": row.get::<_, Option<String>>(4)?,
+                "created_at": row.get::<_, String>(5)?,
+                "retry_count": row.get::<_, i64>(6)?,
+                "error_message": row.get::<_, Option<String>>(7)?,
+            }))
+        })
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(items)
+}
+
+/// Mark a sync item as complete
+#[tauri::command]
+fn mark_sync_complete(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "UPDATE sync_queue SET synced_at = datetime('now') WHERE id = ?1",
+        params![id],
+    ).map_err(|e| AppError::DatabaseError(format!("Mark complete failed: {}", e)))?;
+
+    Ok(())
+}
+
+/// Update retry count and error message for a failed sync
+#[tauri::command]
+fn update_sync_retry(id: i64, error_message: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "UPDATE sync_queue SET retry_count = retry_count + 1, error_message = ?1 WHERE id = ?2",
+        params![error_message, id],
+    ).map_err(|e| AppError::DatabaseError(format!("Update retry failed: {}", e)))?;
+
+    Ok(())
+}
+
+/// Upsert employee from cloud realtime update
+#[tauri::command]
+fn upsert_employee_from_cloud(employee_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let data: serde_json::Value = serde_json::from_str(&employee_data)
+        .map_err(|e| AppError::ValidationError(format!("Invalid JSON: {}", e)))?;
+
+    let exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM Employees WHERE employee_code = ?1",
+        [data["employee_code"].as_str().unwrap_or("")],
+        |row| row.get(0),
+    ).unwrap_or(false);
+
+    if exists {
+        conn.execute(
+            "UPDATE Employees SET first_name = ?1, last_name = ?2, personal_email = ?3, personal_phone = ?4, branch_id = ?5, employment_status = ?6, updated_at = datetime('now') WHERE employee_code = ?7",
+            params![
+                data["first_name"].as_str().unwrap_or(""),
+                data["last_name"].as_str().unwrap_or(""),
+                data["personal_email"].as_str().unwrap_or(""),
+                data["personal_phone"].as_str().unwrap_or(""),
+                data["branch_id"].as_str().unwrap_or(""),
+                data["employment_status"].as_str().unwrap_or("Active"),
+                data["employee_code"].as_str().unwrap_or(""),
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Update failed: {}", e)))?;
+    } else {
+        conn.execute(
+            "INSERT INTO Employees (employee_code, first_name, last_name, personal_email, personal_phone, branch_id, employment_status, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'active', datetime('now'), datetime('now'))",
+            params![
+                data["employee_code"].as_str().unwrap_or(""),
+                data["first_name"].as_str().unwrap_or(""),
+                data["last_name"].as_str().unwrap_or(""),
+                data["personal_email"].as_str().unwrap_or(""),
+                data["personal_phone"].as_str().unwrap_or(""),
+                data["branch_id"].as_str().unwrap_or(""),
+                data["employment_status"].as_str().unwrap_or("Active"),
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Insert failed: {}", e)))?;
+    }
+
+    Ok(())
+}
+
+/// Delete employee by code (from cloud)
+#[tauri::command]
+fn delete_employee_by_id(employee_code: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "DELETE FROM Employees WHERE employee_code = ?1",
+        params![employee_code],
+    ).map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
+
+    Ok(())
+}
+
+/// Get employee by code for timestamp comparison
+#[tauri::command]
+fn get_employee_by_code(employee_code: String, state: State<'_, AppState>) -> Result<Option<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let result = conn.query_row(
+        "SELECT id, employee_code, first_name, last_name, personal_email, personal_phone, branch_id, employment_status, created_at, updated_at 
+         FROM Employees WHERE employee_code = ?1",
+        params![employee_code],
+        |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "employee_code": row.get::<_, String>(1)?,
+                "first_name": row.get::<_, String>(2)?,
+                "last_name": row.get::<_, String>(3)?,
+                "personal_email": row.get::<_, Option<String>>(4)?,
+                "personal_phone": row.get::<_, Option<String>>(5)?,
+                "branch_id": row.get::<_, Option<i64>>(6)?,
+                "employment_status": row.get::<_, String>(7)?,
+                "created_at": row.get::<_, Option<String>>(8)?,
+                "updated_at": row.get::<_, Option<String>>(9)?,
+            }))
+        },
+    );
+
+    match result {
+        Ok(data) => Ok(Some(data)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(AppError::DatabaseError(format!("Query failed: {}", e))),
+    }
+}
+
+/// Insert attendance from cloud realtime update
+#[tauri::command]
+fn insert_attendance_from_cloud(attendance_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let data: serde_json::Value = serde_json::from_str(&attendance_data)
+        .map_err(|e| AppError::ValidationError(format!("Invalid JSON: {}", e)))?;
+
+    let exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM AttendanceLogs WHERE employee_id = ?1 AND timestamp = ?2",
+        params![
+            data["employee_id"].as_i64().unwrap_or(0),
+            data["timestamp"].as_str().unwrap_or(""),
+        ],
+        |row| row.get(0),
+    ).unwrap_or(false);
+
+    if !exists {
+        conn.execute(
+            "INSERT INTO AttendanceLogs (employee_id, branch_id, gate_id, device_id, timestamp, log_type, punch_method, is_synced) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+            params![
+                data["employee_id"].as_i64().unwrap_or(0),
+                data["branch_id"].as_i64().unwrap_or(0),
+                data["gate_id"].as_i64().unwrap_or(1),
+                data["device_id"].as_i64().unwrap_or(0),
+                data["timestamp"].as_str().unwrap_or(""),
+                data["log_type"].as_str().unwrap_or("in"),
+                data["punch_method"].as_str().unwrap_or("device"),
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Insert failed: {}", e)))?;
+    }
+
+    Ok(())
+}
+
+/// Upsert leave request from cloud realtime update
+#[tauri::command]
+fn upsert_leave_from_cloud(leave_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let data: serde_json::Value = serde_json::from_str(&leave_data)
+        .map_err(|e| AppError::ValidationError(format!("Invalid JSON: {}", e)))?;
+
+    let leave_id = data["id"].as_i64().unwrap_or(0);
+
+    let exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM LeaveRequests WHERE id = ?1",
+        params![leave_id],
+        |row| row.get(0),
+    ).unwrap_or(false);
+
+    if exists {
+        conn.execute(
+            "UPDATE LeaveRequests SET start_date = ?1, end_date = ?2, status = ?3, leave_type = ?4, reason = ?5, approved_by = ?6, updated_at = datetime('now') WHERE id = ?7",
+            params![
+                data["start_date"].as_str().unwrap_or(""),
+                data["end_date"].as_str().unwrap_or(""),
+                data["status"].as_str().unwrap_or("pending"),
+                data["leave_type"].as_str().unwrap_or("Casual Leave"),
+                data["reason"].as_str().unwrap_or(""),
+                data["approved_by"].as_str().unwrap_or(""),
+                leave_id,
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Update leave failed: {}", e)))?;
+    } else {
+        conn.execute(
+            "INSERT INTO LeaveRequests (id, employee_id, start_date, end_date, status, leave_type, reason, approved_by, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))",
+            params![
+                leave_id,
+                data["employee_id"].as_i64().unwrap_or(0),
+                data["start_date"].as_str().unwrap_or(""),
+                data["end_date"].as_str().unwrap_or(""),
+                data["status"].as_str().unwrap_or("pending"),
+                data["leave_type"].as_str().unwrap_or("Casual Leave"),
+                data["reason"].as_str().unwrap_or(""),
+                data["approved_by"].as_str().unwrap_or(""),
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Insert leave failed: {}", e)))?;
+    }
+
+    Ok(())
+}
+
+/// Delete leave request by ID (from cloud)
+#[tauri::command]
+fn delete_leave_by_id(leave_id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "DELETE FROM LeaveRequests WHERE id = ?1",
+        params![leave_id],
+    ).map_err(|e| AppError::DatabaseError(format!("Delete leave failed: {}", e)))?;
+
+    Ok(())
+}
+
+/// Upsert item from cloud
+#[tauri::command]
+fn upsert_item_from_cloud(item_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let data: serde_json::Value = serde_json::from_str(&item_data)
+        .map_err(|e| AppError::ValidationError(format!("Invalid JSON: {}", e)))?;
+
+    let item_code = data["item_code"].as_str().unwrap_or("");
+    let exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM Items WHERE item_code = ?1",
+        params![item_code],
+        |row| row.get(0),
+    ).unwrap_or(false);
+
+    if exists {
+        conn.execute(
+            "UPDATE Items SET name = ?1, description = ?2, category = ?3, quantity = ?4, unit_price = ?5, reorder_level = ?6, supplier = ?7, location = ?8, is_active = ?9, updated_at = datetime('now') WHERE item_code = ?10",
+            params![
+                data["name"].as_str().unwrap_or(""),
+                data["description"].as_str().unwrap_or(""),
+                data["category"].as_str().unwrap_or("General"),
+                data["quantity"].as_i64().unwrap_or(0),
+                data["unit_price"].as_f64().unwrap_or(0.0),
+                data["reorder_level"].as_i64().unwrap_or(10),
+                data["supplier"].as_str().unwrap_or(""),
+                data["location"].as_str().unwrap_or(""),
+                data["is_active"].as_i64().unwrap_or(1),
+                item_code,
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Update item failed: {}", e)))?;
+    } else {
+        conn.execute(
+            "INSERT INTO Items (item_code, name, description, category, quantity, unit_price, reorder_level, supplier, location, is_active, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now'), datetime('now'))",
+            params![
+                item_code,
+                data["name"].as_str().unwrap_or(""),
+                data["description"].as_str().unwrap_or(""),
+                data["category"].as_str().unwrap_or("General"),
+                data["quantity"].as_i64().unwrap_or(0),
+                data["unit_price"].as_f64().unwrap_or(0.0),
+                data["reorder_level"].as_i64().unwrap_or(10),
+                data["supplier"].as_str().unwrap_or(""),
+                data["location"].as_str().unwrap_or(""),
+                data["is_active"].as_i64().unwrap_or(1),
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Insert item failed: {}", e)))?;
+    }
+
+    Ok(())
+}
+
+/// Upsert branch from cloud
+#[tauri::command]
+fn upsert_branch_from_cloud(branch_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let data: serde_json::Value = serde_json::from_str(&branch_data)
+        .map_err(|e| AppError::ValidationError(format!("Invalid JSON: {}", e)))?;
+
+    let branch_id = data["id"].as_i64().unwrap_or(0);
+    let exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM Branches WHERE id = ?1",
+        params![branch_id],
+        |row| row.get(0),
+    ).unwrap_or(false);
+
+    if exists {
+        conn.execute(
+            "UPDATE Branches SET name = ?1, location = ?2 WHERE id = ?3",
+            params![
+                data["name"].as_str().unwrap_or(""),
+                data["location"].as_str().unwrap_or(""),
+                branch_id,
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Update branch failed: {}", e)))?;
+    } else {
+        conn.execute(
+            "INSERT OR IGNORE INTO Branches (id, name, location) VALUES (?1, ?2, ?3)",
+            params![
+                branch_id,
+                data["name"].as_str().unwrap_or(""),
+                data["location"].as_str().unwrap_or(""),
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Insert branch failed: {}", e)))?;
+    }
+
+    Ok(())
+}
+
+/// Upsert gate from cloud
+#[tauri::command]
+fn upsert_gate_from_cloud(gate_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let data: serde_json::Value = serde_json::from_str(&gate_data)
+        .map_err(|e| AppError::ValidationError(format!("Invalid JSON: {}", e)))?;
+
+    let gate_id = data["id"].as_i64().unwrap_or(0);
+    let exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM Gates WHERE id = ?1",
+        params![gate_id],
+        |row| row.get(0),
+    ).unwrap_or(false);
+
+    if exists {
+        conn.execute(
+            "UPDATE Gates SET name = ?1, branch_id = ?2 WHERE id = ?3",
+            params![
+                data["name"].as_str().unwrap_or(""),
+                data["branch_id"].as_i64().unwrap_or(0),
+                gate_id,
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Update gate failed: {}", e)))?;
+    } else {
+        conn.execute(
+            "INSERT OR IGNORE INTO Gates (id, name, branch_id) VALUES (?1, ?2, ?3)",
+            params![
+                gate_id,
+                data["name"].as_str().unwrap_or(""),
+                data["branch_id"].as_i64().unwrap_or(0),
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Insert gate failed: {}", e)))?;
+    }
+
+    Ok(())
+}
+
+/// Upsert device from cloud
+#[tauri::command]
+fn upsert_device_from_cloud(device_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let data: serde_json::Value = serde_json::from_str(&device_data)
+        .map_err(|e| AppError::ValidationError(format!("Invalid JSON: {}", e)))?;
+
+    let device_id = data["id"].as_i64().unwrap_or(0);
+    let exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM Devices WHERE id = ?1",
+        params![device_id],
+        |row| row.get(0),
+    ).unwrap_or(false);
+
+    if exists {
+        conn.execute(
+            "UPDATE Devices SET name = ?1, brand = ?2, ip_address = ?3, port = ?4, comm_key = ?5, machine_number = ?6, branch_id = ?7, gate_id = ?8, is_default = ?9, status = ?10, updated_at = datetime('now') WHERE id = ?11",
+            params![
+                data["name"].as_str().unwrap_or(""),
+                data["brand"].as_str().unwrap_or("ZKTeco"),
+                data["ip_address"].as_str().unwrap_or(""),
+                data["port"].as_i64().unwrap_or(4370),
+                data["comm_key"].as_i64().unwrap_or(0),
+                data["machine_number"].as_i64().unwrap_or(1),
+                data["branch_id"].as_i64().unwrap_or(0),
+                data["gate_id"].as_i64().unwrap_or(0),
+                data["is_default"].as_i64().unwrap_or(0),
+                data["status"].as_str().unwrap_or("offline"),
+                device_id,
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Update device failed: {}", e)))?;
+    } else {
+        conn.execute(
+            "INSERT OR IGNORE INTO Devices (id, name, brand, ip_address, port, comm_key, machine_number, branch_id, gate_id, is_default, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now'), datetime('now'))",
+            params![
+                device_id,
+                data["name"].as_str().unwrap_or(""),
+                data["brand"].as_str().unwrap_or("ZKTeco"),
+                data["ip_address"].as_str().unwrap_or(""),
+                data["port"].as_i64().unwrap_or(4370),
+                data["comm_key"].as_i64().unwrap_or(0),
+                data["machine_number"].as_i64().unwrap_or(1),
+                data["branch_id"].as_i64().unwrap_or(0),
+                data["gate_id"].as_i64().unwrap_or(0),
+                data["is_default"].as_i64().unwrap_or(0),
+                data["status"].as_str().unwrap_or("offline"),
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Insert device failed: {}", e)))?;
+    }
+
+    Ok(())
+}
+
+/// Mark a local record as pending sync to cloud (for offline edits)
+#[tauri::command]
+fn mark_record_pending_sync(
+    table_name: String,
+    record_id: String,
+    operation: String,
+    payload: String,
+    state: State<'_, AppState>,
+) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "INSERT INTO sync_queue (table_name, operation, payload, supabase_id, retry_count) VALUES (?1, ?2, ?3, ?4, 0)",
+        params![table_name, operation, payload, record_id],
+    ).map_err(|e| AppError::DatabaseError(format!("Mark pending failed: {}", e)))?;
+
+    Ok(())
 }
