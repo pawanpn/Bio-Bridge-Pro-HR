@@ -45,7 +45,7 @@ const styles = {
   container: (_expanded: boolean) => ({
     position: 'fixed' as const,
     bottom: 0,
-    left: '250px', // width of sidebar
+    left: '208px',
     right: 0,
     backgroundColor: '#0f172a',
     color: '#38bdf8',
