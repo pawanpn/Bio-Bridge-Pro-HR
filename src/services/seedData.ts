@@ -151,7 +151,8 @@ async function seedInventory(): Promise<number> {
   const dummyItems = [
     {
       item_code: 'INV-001',
-      name: 'ZKTeco SpeedFace V5L',
+      item_name: 'ZKTeco SpeedFace V5L', // Supabase uses item_name
+      name: 'ZKTeco SpeedFace V5L', // For TypeScript compatibility
       description: 'Face recognition attendance device',
       category: 'Hardware',
       quantity: 15,
@@ -162,6 +163,7 @@ async function seedInventory(): Promise<number> {
     },
     {
       item_code: 'INV-002',
+      item_name: 'Hikvision DS-K1T804MF',
       name: 'Hikvision DS-K1T804MF',
       description: 'Fingerprint & card reader',
       category: 'Hardware',
@@ -173,6 +175,7 @@ async function seedInventory(): Promise<number> {
     },
     {
       item_code: 'INV-003',
+      item_name: 'Cat6 Network Cable (100m)',
       name: 'Cat6 Network Cable (100m)',
       description: 'Ethernet cable for device connectivity',
       category: 'Networking',
@@ -184,6 +187,7 @@ async function seedInventory(): Promise<number> {
     },
     {
       item_code: 'INV-004',
+      item_name: 'Biometric Cards (Pack of 100)',
       name: 'Biometric Cards (Pack of 100)',
       description: 'RFID proximity cards for attendance',
       category: 'Accessories',
@@ -195,6 +199,7 @@ async function seedInventory(): Promise<number> {
     },
     {
       item_code: 'INV-005',
+      item_name: 'UPS 1KVA',
       name: 'UPS 1KVA',
       description: 'Uninterruptible power supply for devices',
       category: 'Power',
@@ -206,9 +211,22 @@ async function seedInventory(): Promise<number> {
     },
   ];
 
+  // Map to Supabase column names (item_name not name)
+  const dbItems = dummyItems.map(item => ({
+    item_code: item.item_code,
+    item_name: item.item_name,
+    description: item.description,
+    category: item.category,
+    quantity: item.quantity,
+    unit_price: item.unit_price,
+    reorder_level: item.reorder_level,
+    supplier: item.supplier,
+    location: item.location,
+  }));
+
   const { error } = await supabase
     .from('items')
-    .upsert(dummyItems, { onConflict: 'item_code', ignoreDuplicates: true });
+    .upsert(dbItems, { onConflict: 'item_code', ignoreDuplicates: true });
 
   if (error) throw error;
 
