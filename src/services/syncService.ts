@@ -7,7 +7,7 @@ export interface SyncQueueItem {
   id: number;
   table_name: string;
   operation: SyncOperation;
-  payload: string; // JSON string
+  data: string; // JSON string - Supabase column is 'data' (not 'payload')
   supabase_id?: string;
   created_at: string;
   synced_at?: string;

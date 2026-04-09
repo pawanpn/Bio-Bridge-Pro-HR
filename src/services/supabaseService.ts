@@ -14,7 +14,7 @@ import { supabase } from '../config/supabase';
 export interface Item {
   id: string; // UUID
   item_code: string;
-  name: string;
+  name: string; // Maps to item_name in Supabase
   description?: string | null;
   category: string;
   quantity: number;
@@ -26,6 +26,36 @@ export interface Item {
   created_at: string;
   updated_at: string;
 }
+
+// Helper to convert between TS interface and Supabase columns
+export const toItemDB = (item: Partial<Item>) => ({
+  item_code: item.item_code,
+  item_name: item.name, // TS 'name' → DB 'item_name'
+  description: item.description,
+  category: item.category,
+  quantity: item.quantity,
+  unit_price: item.unit_price,
+  reorder_level: item.reorder_level,
+  supplier: item.supplier,
+  location: item.location,
+  is_active: item.is_active,
+});
+
+export const fromItemDB = (row: any): Item => ({
+  id: row.id,
+  item_code: row.item_code,
+  name: row.item_name || row.name, // DB 'item_name' → TS 'name'
+  description: row.description,
+  category: row.category,
+  quantity: row.quantity,
+  unit_price: row.unit_price,
+  reorder_level: row.reorder_level,
+  supplier: row.supplier,
+  location: row.location,
+  is_active: row.is_active,
+  created_at: row.created_at,
+  updated_at: row.updated_at,
+});
 
 export interface Project {
   id: string; // UUID
