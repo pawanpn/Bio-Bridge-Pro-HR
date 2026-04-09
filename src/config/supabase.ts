@@ -1,6 +1,9 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 // Supabase Configuration
+// All tables are in the PUBLIC schema
+const PUBLIC_SCHEMA = 'public';
+
 // These will be configured by user in System Settings or Setup Wizard
 let SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.supabase.co';
 let SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key';
@@ -15,7 +18,7 @@ if (isSetupComplete) {
   SUPABASE_ANON_KEY = localStorage.getItem('supabaseAnonKey') || SUPABASE_ANON_KEY;
 }
 
-// Create Supabase client (singleton)
+// Create Supabase client (singleton) - all queries target PUBLIC schema
 let supabaseClient: SupabaseClient;
 
 export const initializeSupabase = (url: string, anonKey: string): SupabaseClient => {
@@ -23,8 +26,9 @@ export const initializeSupabase = (url: string, anonKey: string): SupabaseClient
   SUPABASE_ANON_KEY = anonKey;
   localStorage.setItem('supabaseUrl', url);
   localStorage.setItem('supabaseAnonKey', anonKey);
-  
+
   supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    db: { schema: PUBLIC_SCHEMA },
     auth: {
       autoRefreshToken: true,
       persistSession: true,
@@ -36,13 +40,14 @@ export const initializeSupabase = (url: string, anonKey: string): SupabaseClient
       },
     },
   });
-  
+
   return supabaseClient;
 };
 
-// Initialize with current values
+// Initialize with current values - PUBLIC schema
 try {
   supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    db: { schema: PUBLIC_SCHEMA },
     auth: {
       autoRefreshToken: true,
       persistSession: true,
@@ -58,6 +63,7 @@ try {
   console.warn('⚠️ Failed to initialize Supabase client:', error);
   // Create a dummy client that won't crash
   supabaseClient = createClient('https://placeholder.supabase.co', 'placeholder', {
+    db: { schema: PUBLIC_SCHEMA },
     auth: {
       autoRefreshToken: false,
       persistSession: false,
@@ -67,6 +73,7 @@ try {
 }
 
 export const supabase = supabaseClient;
+export { PUBLIC_SCHEMA };
 
 // Export service key for admin operations
 export const getServiceKey = () => SUPABASE_SERVICE_KEY;
