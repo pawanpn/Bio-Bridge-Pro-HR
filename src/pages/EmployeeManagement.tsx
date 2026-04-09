@@ -133,7 +133,8 @@ export const EmployeeManagement: React.FC = () => {
 
   // Filter employees
   const filteredEmployees = employees.filter(emp => {
-    const matchesSearch = emp.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    const name = emp.full_name || `${emp.first_name || ''} ${emp.middle_name || ''} ${emp.last_name || ''}`.trim();
+    const matchesSearch = name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          emp.employee_code?.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' || emp.status === statusFilter;
     return matchesSearch && matchesStatus;
@@ -165,32 +166,39 @@ export const EmployeeManagement: React.FC = () => {
 
     setFormStatus('');
     try {
-      // Save using the crud commands
+      // Build full request with all fields from the form
+      const request = {
+        employee_code: formData.employee_code,
+        first_name: formData.first_name,
+        middle_name: formData.middle_name || undefined,
+        last_name: formData.last_name,
+        date_of_birth: formData.date_of_birth || undefined,
+        gender: formData.gender || undefined,
+        personal_email: formData.personal_email || undefined,
+        personal_phone: formData.personal_phone || undefined,
+        current_address: formData.current_address || undefined,
+        permanent_address: formData.permanent_address || undefined,
+        citizenship_number: formData.citizenship_number || undefined,
+        pan_number: formData.pan_number || undefined,
+        branch_id: formData.branch_id ? String(formData.branch_id) : undefined,
+        department_id: formData.department_id || undefined,
+        designation_id: formData.designation_id || undefined,
+        employment_type: formData.employment_type || undefined,
+        employment_status: formData.employment_status || 'Active',
+        date_of_joining: formData.date_of_joining || undefined,
+        reporting_manager_id: formData.reporting_manager_id || undefined,
+        bank_name: formData.bank_name || undefined,
+        account_number: formData.account_number || undefined,
+      };
+
+      // Save using the crud commands (local SQLite first)
       if (formDialog.editing) {
         await invoke('crud::update_employee', {
           employeeId: formDialog.editing.id,
-          request: {
-            first_name: formData.first_name,
-            last_name: formData.last_name,
-            personal_email: formData.personal_email || undefined,
-            personal_phone: formData.personal_phone || undefined,
-            branch_id: formData.branch_id ? String(formData.branch_id) : undefined,
-            employment_status: formData.employment_status || 'Active',
-          }
+          request,
         });
       } else {
-        await invoke('crud::create_employee', {
-          request: {
-            employee_code: formData.employee_code,
-            first_name: formData.first_name,
-            middle_name: formData.middle_name || undefined,
-            last_name: formData.last_name,
-            personal_email: formData.personal_email || undefined,
-            personal_phone: formData.personal_phone || undefined,
-            branch_id: formData.branch_id ? String(formData.branch_id) : undefined,
-            employment_status: formData.employment_status || 'Active',
-          }
-        });
+        await invoke('crud::create_employee', { request });
       }
 
       setFormStatus('✅ Employee saved successfully!');
@@ -221,7 +229,7 @@ export const EmployeeManagement: React.FC = () => {
       headers.join(','),
       ...employees.map(emp => [
         emp.employee_code || '',
-        emp.name || '',
+        emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || '',
         emp.department || '',
         emp.branch_name || '',
         emp.status || 'Active',
@@ -362,12 +370,14 @@ export const EmployeeManagement: React.FC = () => {
                 filteredEmployees.map(emp => (
                   <TableRow key={emp.id} className="cursor-pointer hover:bg-muted/50">
                     <TableCell className="font-mono text-sm">{emp.employee_code || `#${emp.id}`}</TableCell>
-                    <TableCell className="font-medium">{emp.name}</TableCell>
+                    <TableCell className="font-medium">
+                      {emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || '—'}
+                    </TableCell>
                     <TableCell className="text-muted-foreground">{emp.department || '—'}</TableCell>
                     <TableCell className="text-muted-foreground">{emp.branch_name || '—'}</TableCell>
                     <TableCell>
-                      <Badge variant={emp.status === 'Active' || !emp.status ? 'default' : 'secondary'}>
-                        {emp.status || 'Active'}
+                      <Badge variant={emp.employment_status === 'Active' || !emp.employment_status ? 'default' : 'secondary'}>
+                        {emp.employment_status || 'Active'}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">

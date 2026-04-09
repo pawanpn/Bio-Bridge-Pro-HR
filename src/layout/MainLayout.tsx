@@ -85,6 +85,7 @@ export const MainLayout: React.FC = () => {
     '/device-settings': 'Device Settings',
     '/notifications': 'Notifications',
     '/system-settings': 'System Settings',
+    '/system-tools': 'System Tools',
     '/permissions': 'Roles & Permissions',
     '/cloud-settings': 'Cloud Settings',
   };
@@ -370,12 +371,20 @@ export const MainLayout: React.FC = () => {
         {/* Footer - Fixed at Bottom */}
         <div className="flex-shrink-0 py-1 border-t border-white/10 space-y-0">
           {!isOperator && (
-            <SidebarItem
-              icon={<Settings size={16} />}
-              label="System Settings"
-              active={activeTab === 'Settings'}
-              onClick={() => go('Settings', '/system-settings')}
-            />
+            <>
+              <SidebarItem
+                icon={<Database size={16} />}
+                label="System Tools"
+                active={activeTab === 'System Tools'}
+                onClick={() => go('System Tools', '/system-tools')}
+              />
+              <SidebarItem
+                icon={<Settings size={16} />}
+                label="System Settings"
+                active={activeTab === 'Settings'}
+                onClick={() => go('Settings', '/system-settings')}
+              />
+            </>
           )}
           <SidebarItem
             icon={<LogOut size={16} />}

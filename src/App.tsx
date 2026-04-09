@@ -21,6 +21,7 @@ import { InventoryManagement } from './pages/InventoryManagement';
 import { ProjectsManagement } from './pages/ProjectsManagement';
 import { CRMManagement } from './pages/CRMManagement';
 import { AssetsManagement } from './pages/AssetsManagement';
+import { SystemTools } from './components/SystemTools';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -62,6 +63,7 @@ function AppContent() {
         <Route path="device-settings" element={<DeviceSettings />} />
         <Route path="notifications" element={<NotificationSystem />} />
         <Route path="system-settings" element={<DynamicSystemSettings />} />
+        <Route path="system-tools" element={<SystemTools />} />
         <Route path="permissions" element={<PermissionManagement />} />
         <Route path="reports" element={<Reports />} />
         <Route path="inventory" element={<InventoryManagement />} />
