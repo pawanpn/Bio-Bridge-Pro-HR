@@ -159,9 +159,13 @@ export const BranchGateDeviceManagement: React.FC = () => {
   };
 
   // Gate handlers
-  const handleAddGate = () => {
-    if (!selectedBranchId) return;
-    setGateDialog({ open: true, editing: null });
+  const handleAddGate = (branchId?: number) => {
+    if (branchId) {
+      setGateDialog({ open: true, editing: { branch_id: branchId } as any });
+    } else {
+      if (!selectedBranchId) return;
+      setGateDialog({ open: true, editing: null });
+    }
   };
 
   const handleEditGate = (gate: Gate) => {
@@ -179,8 +183,13 @@ export const BranchGateDeviceManagement: React.FC = () => {
   };
 
   // Device handlers
-  const handleAddDevice = () => {
-    setDeviceDialog({ open: true, editing: null });
+  const handleAddDevice = (branchId?: number) => {
+    if (branchId) {
+      // Pre-select the branch when adding from BranchDialog
+      setDeviceDialog({ open: true, editing: { branch_id: branchId } as any });
+    } else {
+      setDeviceDialog({ open: true, editing: null });
+    }
   };
 
   const handleEditDevice = (device: Device) => {
@@ -285,6 +294,8 @@ export const BranchGateDeviceManagement: React.FC = () => {
       {activeTab === 'branches' && (
         <BranchesTab
           branches={branches}
+          gates={gates}
+          devices={devices}
           onAdd={handleAddBranch}
           onEdit={handleEditBranch}
           onDelete={(id, name) => setDeleteDialog({ open: true, type: 'branch', id, name })}
@@ -333,6 +344,8 @@ export const BranchGateDeviceManagement: React.FC = () => {
       <BranchDialog
         open={branchDialog.open}
         editing={branchDialog.editing}
+        gates={gates}
+        devices={devices}
         onClose={() => setBranchDialog({ open: false, editing: null })}
         onSave={async (data) => {
           try {
@@ -347,6 +360,12 @@ export const BranchGateDeviceManagement: React.FC = () => {
             console.error('Failed to save branch:', error);
           }
         }}
+        onAddGate={handleAddGate}
+        onEditGate={handleEditGate}
+        onDeleteGate={(id, name) => setDeleteDialog({ open: true, type: 'gate', id, name })}
+        onAddDevice={handleAddDevice}
+        onEditDevice={handleEditDevice}
+        onDeleteDevice={(id, name) => setDeleteDialog({ open: true, type: 'device', id, name })}
       />
 
       <GateDialog
@@ -432,12 +451,14 @@ const TabButton: React.FC<{
 
 const BranchesTab: React.FC<{
   branches: Branch[];
+  gates: Gate[];
+  devices: Device[];
   onAdd: () => void;
   onEdit: (branch: Branch) => void;
   onDelete: (id: number, name: string) => void;
   onSelect: (id: number) => void;
   loading: boolean;
-}> = ({ branches, onAdd, onEdit, onDelete, onSelect, loading }) => (
+}> = ({ branches, gates, devices, onAdd, onEdit, onDelete, onSelect, loading }) => (
   <div>
     <div className="flex justify-between items-center mb-4">
       <h2 className="text-xl font-semibold">Branches</h2>
@@ -472,7 +493,7 @@ const BranchesTab: React.FC<{
               </TableRow>
             ) : (
               branches.map(branch => (
-                <TableRow key={branch.id} className="cursor-pointer hover:bg-muted/50" onClick={() => onSelect(branch.id)}>
+                <TableRow key={branch.id}>
                   <TableCell className="font-medium">{branch.name}</TableCell>
                   <TableCell className="text-muted-foreground">{branch.location || '—'}</TableCell>
                   <TableCell>
@@ -481,13 +502,17 @@ const BranchesTab: React.FC<{
                   <TableCell>
                     <Badge variant="secondary">{branch.device_count || 0}</Badge>
                   </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
+                  <TableCell>
                     <div className="flex gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => onEdit(branch)}>
+                      <Button variant="ghost" size="icon" onClick={() => onEdit(branch)} title="Edit Branch">
                         <Edit2 className="w-4 h-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => onDelete(branch.id, branch.name)}>
+                      <Button variant="ghost" size="icon" onClick={() => onDelete(branch.id, branch.name)} title="Delete Branch">
                         <Trash2 className="w-4 h-4 text-destructive" />
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => onSelect(branch.id)} title="Manage Gates & Devices">
+                        <Eye className="w-4 h-4 mr-2" />
+                        Manage
                       </Button>
                     </div>
                   </TableCell>
@@ -671,16 +696,25 @@ const DevicesTab: React.FC<{
   </div>
 );
 
-// ── Branch Dialog ───────────────────────────────────────────────────────────
+// ── Enhanced Branch Dialog with Gates & Devices ────────────────────────────
 
 const BranchDialog: React.FC<{
   open: boolean;
   editing: Branch | null;
+  gates: Gate[];
+  devices: Device[];
   onClose: () => void;
   onSave: (data: { name: string; location: string }) => void;
-}> = ({ open, editing, onClose, onSave }) => {
+  onAddGate: () => void;
+  onEditGate: (gate: Gate) => void;
+  onDeleteGate: (id: number, name: string) => void;
+  onAddDevice: () => void;
+  onEditDevice: (device: Device) => void;
+  onDeleteDevice: (id: number, name: string) => void;
+}> = ({ open, editing, gates, devices, onClose, onSave, onAddGate, onEditGate, onDeleteGate, onAddDevice, onEditDevice, onDeleteDevice }) => {
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
+  const [dialogTab, setDialogTab] = useState<'details' | 'gates' | 'devices'>('details');
 
   useEffect(() => {
     if (editing) {
@@ -690,6 +724,7 @@ const BranchDialog: React.FC<{
       setName('');
       setLocation('');
     }
+    setDialogTab('details');
   }, [editing]);
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -697,40 +732,155 @@ const BranchDialog: React.FC<{
     onSave({ name, location });
   };
 
+  const branchGates = editing ? gates.filter(g => g.branch_id === editing.id) : [];
+  const branchDevices = editing ? devices.filter(d => d.branch_id === editing?.id) : [];
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>{editing ? 'Edit Branch' : 'Add New Branch'}</DialogTitle>
           <DialogDescription>
-            {editing ? 'Update branch details' : 'Create a new branch for your organization'}
+            {editing ? 'Manage branch details, gates, and devices' : 'Create a new branch for your organization'}
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <Label>Branch Name</Label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g., Kathmandu Office"
-              required
+
+        {editing && (
+          <div className="flex gap-2 border-b border-border pb-2">
+            <TabButton
+              icon={<Building2 className="w-4 h-4" />}
+              label="Branch Details"
+              active={dialogTab === 'details'}
+              onClick={() => setDialogTab('details')}
+            />
+            <TabButton
+              icon={<DoorOpen className="w-4 h-4" />}
+              label={`Gates (${branchGates.length})`}
+              active={dialogTab === 'gates'}
+              onClick={() => setDialogTab('gates')}
+            />
+            <TabButton
+              icon={<Monitor className="w-4 h-4" />}
+              label={`Devices (${branchDevices.length})`}
+              active={dialogTab === 'devices'}
+              onClick={() => setDialogTab('devices')}
             />
           </div>
-          <div>
-            <Label>Location</Label>
-            <Input
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="e.g., New Road, Kathmandu"
-            />
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit">
-              {editing ? 'Update' : 'Create'}
-            </Button>
-          </DialogFooter>
-        </form>
+        )}
+
+        <div className="flex-1 overflow-y-auto">
+          {dialogTab === 'details' && (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <Label>Branch Name</Label>
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g., Kathmandu Office"
+                  required
+                />
+              </div>
+              <div>
+                <Label>Location</Label>
+                <Input
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="e.g., New Road, Kathmandu"
+                />
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+                <Button type="submit">
+                  {editing ? 'Update' : 'Create'}
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+
+          {dialogTab === 'gates' && editing && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <h3 className="text-sm font-semibold">Gates for {editing.name}</h3>
+                <Button size="sm" onClick={onAddGate}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Gate
+                </Button>
+              </div>
+              {branchGates.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <DoorOpen className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">No gates added yet</p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                  {branchGates.map(gate => (
+                    <div key={gate.id} className="flex items-center justify-between p-3 border border-border rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <DoorOpen className="w-5 h-5 text-muted-foreground" />
+                        <div>
+                          <p className="font-medium text-sm">{gate.name}</p>
+                          <p className="text-xs text-muted-foreground">{gate.device_count || 0} devices</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEditGate(gate)}>
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onDeleteGate(gate.id, gate.name)}>
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {dialogTab === 'devices' && editing && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <h3 className="text-sm font-semibold">Devices for {editing.name}</h3>
+                <Button size="sm" onClick={() => onAddDevice(editing.id)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Device
+                </Button>
+              </div>
+              {branchDevices.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <Monitor className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">No devices added yet</p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                  {branchDevices.map(device => (
+                    <div key={device.id} className="flex items-center justify-between p-3 border border-border rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <Monitor className="w-5 h-5 text-muted-foreground" />
+                        <div>
+                          <p className="font-medium text-sm">{device.name}</p>
+                          <p className="text-xs text-muted-foreground">{device.brand} • {device.ip}:{device.port}</p>
+                          {device.gate_name && <p className="text-xs text-muted-foreground">Gate: {device.gate_name}</p>}
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEditDevice(device)}>
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onDeleteDevice(device.id, device.name)}>
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground mt-4">
+                Tip: You can also manage devices from the Devices tab for a full view of all devices across branches.
+              </p>
+            </div>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -820,7 +970,8 @@ const DeviceDialog: React.FC<{
   });
 
   useEffect(() => {
-    if (editing) {
+    if (editing && editing.name) {
+      // Full edit mode
       setForm({
         name: editing.name,
         brand: editing.brand,
@@ -838,8 +989,28 @@ const DeviceDialog: React.FC<{
         server_address: editing.server_address || '0.0.0.0',
         https_enabled: editing.https_enabled || false,
       });
+    } else if (editing && editing.branch_id) {
+      // Pre-select branch mode (from BranchDialog)
+      const branchGates = gates.filter(g => g.branch_id === editing.branch_id);
+      setForm({
+        name: '',
+        brand: 'ZKTeco',
+        ip: '',
+        port: 4370,
+        comm_key: 0,
+        machine_number: 1,
+        branch_id: editing.branch_id,
+        gate_id: branchGates[0]?.id || 0,
+        subnet_mask: '255.255.255.0',
+        gateway: '192.168.1.1',
+        dns: '8.8.8.8',
+        dhcp: false,
+        server_mode: 'Standalone',
+        server_address: '0.0.0.0',
+        https_enabled: false,
+      });
     } else {
-      // For new device, set first branch and its first gate
+      // New device - set first branch and its first gate
       const firstBranch = branches[0];
       const branchGates = gates.filter(g => g.branch_id === firstBranch?.id);
       setForm({
@@ -849,8 +1020,8 @@ const DeviceDialog: React.FC<{
         port: 4370,
         comm_key: 0,
         machine_number: 1,
-        branch_id: firstBranch?.id || 1,
-        gate_id: branchGates[0]?.id || 1,
+        branch_id: firstBranch?.id || 0,
+        gate_id: branchGates[0]?.id || 0,
         subnet_mask: '255.255.255.0',
         gateway: '192.168.1.1',
         dns: '8.8.8.8',
@@ -923,9 +1094,13 @@ const DeviceDialog: React.FC<{
                 onChange={(e) => handleBranchChange(Number(e.target.value))}
                 className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
               >
-                {branches.map(b => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
+                {branches.length === 0 ? (
+                  <option value="">No branches available</option>
+                ) : (
+                  branches.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))
+                )}
               </select>
             </div>
             <div>

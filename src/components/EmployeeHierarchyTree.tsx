@@ -31,7 +31,7 @@ interface Employee {
   branch_id?: string;
   reporting_manager_id?: string;
   employment_status: string;
-  is_active: boolean;
+  is_active?: boolean;
   department?: { name: string };
   designation?: { name: string; level: number };
   branch?: { name: string };
@@ -87,7 +87,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({ employee, expanded, onToggle, onSel
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <p className="font-semibold truncate">{employee.full_name}</p>
-            {!employee.is_active && (
+            {employee.is_active === false && (
               <Badge variant="destructive" className="text-xs">Inactive</Badge>
             )}
           </div>
@@ -161,12 +161,18 @@ export const EmployeeHierarchyTree: React.FC = () => {
           designation:designations(name, level),
           branch:branches(name)
         `)
-        .eq('is_active', true)
+        .or('employment_status.eq.Active,employment_status.eq.active')
         .order('employee_code');
 
       if (error) throw error;
 
-      const hierarchy = buildHierarchy(data || []);
+      // Normalize is_active from employment_status if not present
+      const normalizedData = (data || []).map(emp => ({
+        ...emp,
+        is_active: emp.is_active ?? (emp.employment_status === 'Active' || emp.employment_status === 'active')
+      }));
+
+      const hierarchy = buildHierarchy(normalizedData);
       setEmployees(hierarchy);
     } catch (error: any) {
       console.error('Error loading employees:', error);
@@ -372,9 +378,10 @@ export const EmployeeHierarchyTree: React.FC = () => {
                   <div className="flex items-center gap-2 text-sm">
                     <div>
                       <p className="text-muted-foreground">Status</p>
-                      <Badge variant={selectedEmployee.is_active ? 'default' : 'destructive'}>
-                        {selectedEmployee.is_active ? 'Active' : 'Inactive'}
+                      <Badge variant={selectedEmployee.is_active !== false ? 'default' : 'destructive'}>
+                        {selectedEmployee.is_active !== false ? 'Active' : 'Inactive'}
                       </Badge>
+                      <p className="text-xs text-muted-foreground mt-1">{selectedEmployee.employment_status}</p>
                     </div>
                   </div>
                 </div>
