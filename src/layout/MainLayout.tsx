@@ -17,6 +17,7 @@ import {
   Monitor,
   FileText,
   Settings,
+  Database,
   LogOut,
   User as UserIcon,
   CalendarCheck,

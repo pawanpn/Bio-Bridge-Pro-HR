@@ -3093,15 +3093,14 @@ fn delete_employee_by_id(employee_code: String, state: State<'_, AppState>) -> R
     Ok(())
 }
 
-/// Get employee by code for timestamp comparison
+/// Get employee by code for existence check
 #[tauri::command]
 fn get_employee_by_code(employee_code: String, state: State<'_, AppState>) -> Result<Option<serde_json::Value>, AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let result = conn.query_row(
-        "SELECT id, employee_code, first_name, last_name, personal_email, personal_phone, branch_id, employment_status, created_at, updated_at 
-         FROM Employees WHERE employee_code = ?1",
+        "SELECT id, employee_code, first_name, last_name FROM Employees WHERE employee_code = ?1",
         params![employee_code],
         |row| {
             Ok(serde_json::json!({
@@ -3109,12 +3108,6 @@ fn get_employee_by_code(employee_code: String, state: State<'_, AppState>) -> Re
                 "employee_code": row.get::<_, String>(1)?,
                 "first_name": row.get::<_, String>(2)?,
                 "last_name": row.get::<_, String>(3)?,
-                "personal_email": row.get::<_, Option<String>>(4)?,
-                "personal_phone": row.get::<_, Option<String>>(5)?,
-                "branch_id": row.get::<_, Option<i64>>(6)?,
-                "employment_status": row.get::<_, String>(7)?,
-                "created_at": row.get::<_, Option<String>>(8)?,
-                "updated_at": row.get::<_, Option<String>>(9)?,
             }))
         },
     );
