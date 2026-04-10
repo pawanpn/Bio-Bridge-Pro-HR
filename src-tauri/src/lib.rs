@@ -464,31 +464,33 @@ async fn sync_device_data(
         chrono::Utc::now().format("%H:%M:%S")
     ));
 
-    // Step 1: Fetch all employees from database with device_enroll_number
-    let db_guard = state.db.lock().map_err(lock_err)?;
-    let conn = db_guard.as_ref()
-        .ok_or_else(|| AppError::DatabaseError("Database not initialized".into()))?;
+    let employees = {
+        let db_guard = state.db.lock().map_err(lock_err)?;
+        let conn = db_guard.as_ref()
+            .ok_or_else(|| AppError::DatabaseError("Database not initialized".into()))?;
 
-    let mut employees = Vec::new();
-    let mut stmt = conn.prepare(
-        "SELECT device_enroll_number, first_name || ' ' || last_name as full_name 
-         FROM Employees 
-         WHERE device_enroll_number IS NOT NULL AND device_enroll_number != ''
-         ORDER BY device_enroll_number"
-    ).map_err(|e| AppError::DatabaseError(format!("Failed to query employees: {}", e)))?;
+        let mut employees = Vec::new();
+        let mut stmt = conn.prepare(
+            "SELECT device_enroll_number, first_name || ' ' || last_name as full_name 
+             FROM Employees 
+             WHERE device_enroll_number IS NOT NULL AND device_enroll_number != ''
+             ORDER BY device_enroll_number"
+        ).map_err(|e| AppError::DatabaseError(format!("Failed to query employees: {}", e)))?;
 
-    let employee_rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-        ))
-    }).map_err(|e| AppError::DatabaseError(format!("Failed to fetch employee data: {}", e)))?;
+        let employee_rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+            ))
+        }).map_err(|e| AppError::DatabaseError(format!("Failed to fetch employee data: {}", e)))?;
 
-    for emp in employee_rows {
-        if let Ok((enroll, name)) = emp {
-            employees.push((enroll, name));
+        for emp in employee_rows {
+            if let Ok((enroll, name)) = emp {
+                employees.push((enroll, name));
+            }
         }
-    }
+        employees
+    };
 
     let _ = app.emit("console-log", format!(
         "[INFO] Found {} employees to push to device",
