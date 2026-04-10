@@ -1,5 +1,4 @@
 pub mod zkteco;
-pub mod zkteco_sdk;
 pub mod hikvision;
 pub mod scanner;
 pub mod id;
