@@ -538,10 +538,11 @@ async fn test_sdk_connection(
     #[cfg(windows)]
     {
         // Try COM-based connection
-        use windows::core::CLSID;
+        use windows::core::HSTRING;
+        use windows::Win32::System::Com::CLSIDFromString;
         
         let clsid_str = "00853A19-BD51-419B-9269-2DABE57EB61F"; // zkemkeeper.ZKEM.1
-        match CLSID::from(clsid_str) {
+        match unsafe { CLSIDFromString(&HSTRING::from(clsid_str)) } {
             Ok(_) => {
                 // COM object available, test device connection
                 let sync_manager = ZKSyncManager::new();

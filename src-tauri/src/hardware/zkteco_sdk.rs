@@ -16,6 +16,8 @@ use tokio::sync::Mutex;
 use windows::{
     core::*,
     Win32::System::Com::*,
+    Win32::System::Ole::*,
+    Win32::Foundation::*,
 };
 
 use crate::models::AttendanceLog;
@@ -69,15 +71,15 @@ impl ZKConnection {
         }
 
         // Create zkemkeeper COM object
-        let clsid = CLSID::from("00853A19-BD51-419B-9269-2DABE57EB61F"); // zkemkeeper.ZKEM.1
+        let clsid = clsid_from_str("00853A19-BD51-419B-9269-2DABE57EB61F")?;
         let dispatch: IDispatch = unsafe {
             CoCreateInstance(&clsid, None, CLSCTX_INPROC_SERVER)
                 .map_err(|e| AppError::ConnectionError(format!("Failed to create zkemkeeper COM object: {}", e)))?
         };
 
         // Call Connect_Net(IP, Port)
-        let ip_variant = VARIANT::from(self.ip.as_str());
-        let port_variant = VARIANT::from(self.port as i32);
+        let ip_variant = to_variant_str(self.ip.as_str());
+        let port_variant = to_variant_i32(self.port as i32);
         
         let result = invoke_method_bool(&dispatch, "Connect_Net", &[ip_variant, port_variant])
             .map_err(|e| AppError::ConnectionError(format!("Connect_Net failed: {}", e)))?;
@@ -117,31 +119,31 @@ impl ZKConnection {
     #[cfg(windows)]
     pub async fn push_user(&self, user: &DeviceUser) -> Result<bool, AppError> {
         // Create COM object
-        let clsid = CLSID::from("00853A19-BD51-419B-9269-2DABE57EB61F");
+        let clsid = clsid_from_str("00853A19-BD51-419B-9269-2DABE57EB61F")?;
         let dispatch: IDispatch = unsafe {
             CoCreateInstance(&clsid, None, CLSCTX_INPROC_SERVER)
                 .map_err(|e| AppError::ConnectionError(format!("Failed to create COM object: {}", e)))?
         };
 
         // Connect first
-        let ip_variant = VARIANT::from(self.ip.as_str());
-        let port_variant = VARIANT::from(self.port as i32);
+        let ip_variant = to_variant_str(self.ip.as_str());
+        let port_variant = to_variant_i32(self.port as i32);
         let _ = invoke_method_bool(&dispatch, "Connect_Net", &[ip_variant, port_variant])
             .map_err(|e| AppError::ConnectionError(format!("Connection failed: {}", e)))?;
 
         // Call SSR_SetUserInfo(MachineNumber, EnrollNumber, Name, Password, Role)
-        let mach_variant = VARIANT::from(self.machine_number);
-        let enroll_variant = VARIANT::from(user.enroll_number.as_str());
-        let name_variant = VARIANT::from(user.name.as_str());
-        let pass_variant = VARIANT::from(user.password.as_str());
-        let role_variant = VARIANT::from(user.role);
+        let mach_variant = to_variant_i32(self.machine_number);
+        let enroll_variant = to_variant_str(user.enroll_number.as_str());
+        let name_variant = to_variant_str(user.name.as_str());
+        let pass_variant = to_variant_str(user.password.as_str());
+        let role_variant = to_variant_i32(user.role);
 
         let result = invoke_method_bool(&dispatch, "SSR_SetUserInfo", &[
             mach_variant, enroll_variant, name_variant, pass_variant, role_variant
         ]).map_err(|e| AppError::ConnectionError(format!("SSR_SetUserInfo failed: {}", e)))?;
 
         // Disconnect
-        let _ = invoke_method(&dispatch, "Disconnect", &[VARIANT::from(self.machine_number)]);
+        let _ = invoke_method(&dispatch, "Disconnect", &[to_variant_i32(self.machine_number)]);
 
         Ok(result)
     }
@@ -155,22 +157,22 @@ impl ZKConnection {
     #[cfg(windows)]
     pub async fn pull_logs(&self) -> Result<Vec<ZKLogRecord>, AppError> {
         // Create COM object
-        let clsid = CLSID::from("00853A19-BD51-419B-9269-2DABE57EB61F");
+        let clsid = clsid_from_str("00853A19-BD51-419B-9269-2DABE57EB61F")?;
         let dispatch: IDispatch = unsafe {
             CoCreateInstance(&clsid, None, CLSCTX_INPROC_SERVER)
                 .map_err(|e| AppError::ConnectionError(format!("Failed to create COM object: {}", e)))?
         };
 
         // Connect
-        let ip_variant = VARIANT::from(self.ip.as_str());
-        let port_variant = VARIANT::from(self.port as i32);
+        let ip_variant = to_variant_str(self.ip.as_str());
+        let port_variant = to_variant_i32(self.port as i32);
         let _ = invoke_method_bool(&dispatch, "Connect_Net", &[ip_variant, port_variant])
             .map_err(|e| AppError::ConnectionError(format!("Connection failed: {}", e)))?;
 
         // Enable device
         let _ = invoke_method_bool(&dispatch, "EnableDevice", &[
-            VARIANT::from(self.machine_number),
-            VARIANT::from(false) // false = disable
+            to_variant_i32(self.machine_number),
+            to_variant_bool(false)
         ]);
 
         // Read attendance logs using ReadGeneralLogData
@@ -179,20 +181,21 @@ impl ZKConnection {
 
         while more_logs {
             // Get log count
-            let dwEnrollNumber = VARIANT::from(0i32);
-            let dwVerifyMode = VARIANT::from(0i32);
-            let dwInOutMode = VARIANT::from(0i32);
-            let dwYear = VARIANT::from(0i32);
-            let dwMonth = VARIANT::from(0i32);
-            let dwDay = VARIANT::from(0i32);
-            let dwHour = VARIANT::from(0i32);
-            let dwMinute = VARIANT::from(0i32);
-            let dwSecond = VARIANT::from(0i32);
-            let dwWorkcode = VARIANT::from(0i32);
+            // Get log count
+            let dwEnrollNumber = to_variant_i32(0i32);
+            let dwVerifyMode = to_variant_i32(0i32);
+            let dwInOutMode = to_variant_i32(0i32);
+            let dwYear = to_variant_i32(0i32);
+            let dwMonth = to_variant_i32(0i32);
+            let dwDay = to_variant_i32(0i32);
+            let dwHour = to_variant_i32(0i32);
+            let dwMinute = to_variant_i32(0i32);
+            let dwSecond = to_variant_i32(0i32);
+            let dwWorkcode = to_variant_i32(0i32);
 
             // ReadGeneralLogData returns byref parameters
             match invoke_method_with_refs(&dispatch, "ReadGeneralLogData", &[
-                VARIANT::from(self.machine_number),
+                to_variant_i32(self.machine_number),
             ]) {
                 Ok((success, refs)) => {
                     if success {
@@ -213,7 +216,7 @@ impl ZKConnection {
         
         // Try ReadAllGLogData approach
         if let Ok(count) = invoke_method_i32(&dispatch, "GetDeviceStatus", &[
-            VARIANT::from(6i32) // Status: AttLogCount
+            to_variant_i32(6i32) // Status: AttLogCount
         ]) {
             for i in 0..count.min(1000) { // Limit to prevent timeout
                 // Get each log entry
@@ -222,7 +225,7 @@ impl ZKConnection {
         }
 
         // Disconnect
-        let _ = invoke_method(&dispatch, "Disconnect", &[VARIANT::from(self.machine_number)]);
+        let _ = invoke_method(&dispatch, "Disconnect", &[to_variant_i32(self.machine_number)]);
 
         Ok(all_logs)
     }
@@ -237,9 +240,10 @@ impl ZKConnection {
         #[cfg(windows)]
         unsafe {
             if self.connected {
-                let clsid = CLSID::from("00853A19-BD51-419B-9269-2DABE57EB61F");
-                if let Ok(dispatch) = CoCreateInstance::<IDispatch>(&clsid, None, CLSCTX_INPROC_SERVER) {
-                    let _ = invoke_method(&dispatch, "Disconnect", &[VARIANT::from(self.machine_number)]);
+                if let Ok(clsid) = clsid_from_str("00853A19-BD51-419B-9269-2DABE57EB61F") {
+                    if let Ok(dispatch) = CoCreateInstance::<IDispatch>(&clsid, None, CLSCTX_INPROC_SERVER) {
+                        let _ = invoke_method(&dispatch, "Disconnect", &[to_variant_i32(self.machine_number)]);
+                    }
                 }
                 CoUninitialize();
             }
@@ -263,59 +267,17 @@ pub struct ZKLogRecord {
 
 /// Helper: Invoke COM method returning bool
 #[cfg(windows)]
+/// Helper: Invoke COM method returning bool
+#[cfg(windows)]
 fn invoke_method_bool(dispatch: &IDispatch, method: &str, args: &[VARIANT]) -> Result<bool, AppError> {
-    let method_name = BSTR::from(method);
-    let mut result = VARIANT::default();
-    let mut params = args.to_vec();
-    let mut dispparams = DISPPARAMS {
-        rgvarg: params.as_mut_ptr(),
-        rgdispidNamedArgs: std::ptr::null_mut(),
-        cArgs: params.len() as u32,
-        cNamedArgs: 0,
-    };
-
-    unsafe {
-        dispatch.Invoke(
-            &method_name,
-            &GUID::zeroed(),
-            0,
-            DISPATCH_METHOD,
-            &mut dispparams,
-            &mut result,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        ).map_err(|e| AppError::ConnectionError(format!("COM invoke failed: {}", e)))?;
-    }
-
+    let result = invoke_method(dispatch, method, args)?;
     Ok(result.as_bool().unwrap_or(false))
 }
 
 /// Helper: Invoke COM method returning i32
 #[cfg(windows)]
 fn invoke_method_i32(dispatch: &IDispatch, method: &str, args: &[VARIANT]) -> Result<i32, AppError> {
-    let method_name = BSTR::from(method);
-    let mut result = VARIANT::default();
-    let mut params = args.to_vec();
-    let mut dispparams = DISPPARAMS {
-        rgvarg: params.as_mut_ptr(),
-        rgdispidNamedArgs: std::ptr::null_mut(),
-        cArgs: params.len() as u32,
-        cNamedArgs: 0,
-    };
-
-    unsafe {
-        dispatch.Invoke(
-            &method_name,
-            &GUID::zeroed(),
-            0,
-            DISPATCH_METHOD,
-            &mut dispparams,
-            &mut result,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        ).map_err(|e| AppError::ConnectionError(format!("COM invoke failed: {}", e)))?;
-    }
-
+    let result = invoke_method(dispatch, method, args)?;
     Ok(result.as_i32().unwrap_or(0))
 }
 
@@ -326,6 +288,11 @@ fn invoke_method_with_refs(dispatch: &IDispatch, method: &str, args: &[VARIANT])
     let method_name = BSTR::from(method);
     let mut result = VARIANT::default();
     let mut params = args.to_vec();
+    // Reverse for COM
+    params.reverse();
+    
+    let dispid = get_dispid(dispatch, method)?;
+
     let mut dispparams = DISPPARAMS {
         rgvarg: params.as_mut_ptr(),
         rgdispidNamedArgs: std::ptr::null_mut(),
@@ -335,7 +302,7 @@ fn invoke_method_with_refs(dispatch: &IDispatch, method: &str, args: &[VARIANT])
 
     unsafe {
         dispatch.Invoke(
-            &method_name,
+            dispid,
             &GUID::zeroed(),
             0,
             DISPATCH_METHOD,
@@ -343,10 +310,125 @@ fn invoke_method_with_refs(dispatch: &IDispatch, method: &str, args: &[VARIANT])
             &mut result,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-        ).map_err(|e| AppError::ConnectionError(format!("COM invoke failed: {}", e)))?;
+        ).map_err(|e| AppError::ConnectionError(format!("COM invoke failed for '{}': {}", method, e)))?;
     }
 
+    // Reverse back if needed, but usually we just want the updated refs
+    params.reverse();
     Ok((result.as_bool().unwrap_or(false), params))
+}
+
+/// Generic Invoke helper
+#[cfg(windows)]
+fn invoke_method(dispatch: &IDispatch, method: &str, args: &[VARIANT]) -> Result<VARIANT, AppError> {
+    let mut result = VARIANT::default();
+    let mut params = args.to_vec();
+    params.reverse();
+    
+    let dispid = get_dispid(dispatch, method)?;
+
+    let mut dispparams = DISPPARAMS {
+        rgvarg: params.as_mut_ptr(),
+        rgdispidNamedArgs: std::ptr::null_mut(),
+        cArgs: params.len() as u32,
+        cNamedArgs: 0,
+    };
+
+    unsafe {
+        dispatch.Invoke(
+            dispid,
+            &GUID::zeroed(),
+            0,
+            DISPATCH_METHOD,
+            &mut dispparams,
+            &mut result,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        ).map_err(|e| AppError::ConnectionError(format!("COM invoke failed for '{}': {}", method, e)))?;
+    }
+
+    Ok(result)
+}
+
+#[cfg(windows)]
+fn get_dispid(dispatch: &IDispatch, name: &str) -> Result<i32, AppError> {
+    let bstr_name = BSTR::from(name);
+    let mut dispid = 0i32;
+    unsafe {
+        dispatch.GetIDsOfNames(
+            &GUID::zeroed(),
+            &PCWSTR(bstr_name.as_ptr()),
+            1,
+            0,
+            &mut dispid,
+        ).map_err(|e| AppError::ConnectionError(format!("Failed to get DISPID for '{}': {}", name, e)))?;
+    }
+    Ok(dispid)
+}
+
+#[cfg(windows)]
+fn clsid_from_str(s: &str) -> Result<GUID, AppError> {
+    unsafe {
+        CLSIDFromString(&HSTRING::from(s))
+            .map_err(|e| AppError::ConnectionError(format!("Invalid CLSID {}: {}", s, e)))
+    }
+}
+
+#[cfg(windows)]
+fn to_variant_str(s: &str) -> VARIANT {
+    let mut v = VARIANT::default();
+    let bstr = BSTR::from(s);
+    unsafe {
+        v.Anonymous.Anonymous.vt = VT_BSTR;
+        v.Anonymous.Anonymous.Anonymous.bstrVal = std::mem::ManuallyDrop::new(bstr);
+    }
+    v
+}
+
+#[cfg(windows)]
+fn to_variant_i32(i: i32) -> VARIANT {
+    let mut v = VARIANT::default();
+    unsafe {
+        v.Anonymous.Anonymous.vt = VT_I4;
+        v.Anonymous.Anonymous.Anonymous.lVal = i;
+    }
+    v
+}
+
+#[cfg(windows)]
+fn to_variant_bool(b: bool) -> VARIANT {
+    let mut v = VARIANT::default();
+    unsafe {
+        v.Anonymous.Anonymous.vt = VT_BOOL;
+        v.Anonymous.Anonymous.Anonymous.boolVal = if b { VARIANT_BOOL(-1) } else { VARIANT_BOOL(0) };
+    }
+    v
+}
+
+trait VariantExt {
+    fn as_bool(&self) -> Option<bool>;
+    fn as_i32(&self) -> Option<i32>;
+}
+
+impl VariantExt for VARIANT {
+    fn as_bool(&self) -> Option<bool> {
+        unsafe {
+            if self.Anonymous.Anonymous.vt == VT_BOOL {
+                Some(self.Anonymous.Anonymous.Anonymous.boolVal.0 != 0)
+            } else {
+                None
+            }
+        }
+    }
+    fn as_i32(&self) -> Option<i32> {
+        unsafe {
+            if self.Anonymous.Anonymous.vt == VT_I4 {
+                Some(self.Anonymous.Anonymous.Anonymous.lVal)
+            } else {
+                None
+            }
+        }
+    }
 }
 
 /// Bi-directional sync manager
