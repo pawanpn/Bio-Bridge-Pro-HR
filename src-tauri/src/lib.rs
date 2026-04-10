@@ -14,6 +14,7 @@ use rusqlite::{Connection, params};
 use crate::errors::AppError;
 use crate::models::DeviceBrand;
 use crate::cloud::gdrive::{ServiceAccountKey, NormalizedLog};
+use crate::hardware::zkteco_sdk::ZKSyncManager;
 
 use aes_gcm::{
     aead::{Aead, KeyInit},
@@ -323,6 +324,244 @@ async fn pull_all_logs(
     app: AppHandle, state: State<'_, AppState>,
 ) -> Result<String, AppError> {
     sync_device_logs_internal(ip, port, device_id, brand, false, app, state).await
+}
+
+/// ═══════════════════════════════════════════════════════════════════
+/// BI-DIRECTIONAL SYNC: Push Employees + Pull Attendance Logs
+/// ═══════════════════════════════════════════════════════════════════
+
+/// Push a single employee to ZKTeco device
+/// Uses device_enroll_number as the unique key
+#[tauri::command]
+async fn push_user_to_device(
+    ip: String,
+    port: u16,
+    device_enroll_number: String,
+    first_name: String,
+    machine_number: i32,
+    app: AppHandle,
+) -> Result<String, AppError> {
+    let _ = app.emit("console-log", format!(
+        "[{}] Pushing employee '{}' (ID: {}) to device {}:{}",
+        chrono::Utc::now().format("%H:%M:%S"), first_name, device_enroll_number, ip, port
+    ));
+
+    let sync_manager = ZKSyncManager::new();
+    
+    match sync_manager.push_employee_to_device(
+        &device_enroll_number,
+        &first_name,
+        &ip,
+        port,
+        machine_number,
+    ).await {
+        Ok(msg) => {
+            let _ = app.emit("console-log", format!("[SUCCESS] {}", msg));
+            Ok(msg)
+        }
+        Err(e) => {
+            let _ = app.emit("console-log", format!("[ERROR] Push failed: {}", e));
+            Err(e)
+        }
+    }
+}
+
+/// Pull attendance logs from device and match with database employees
+/// Uses device_enroll_number to match with employees table
+#[tauri::command]
+async fn pull_attendance_logs(
+    ip: String,
+    port: u16,
+    device_id: i32,
+    machine_number: i32,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, AppError> {
+    let _ = app.emit("console-log", format!(
+        "[{}] Pulling attendance logs from device {}:{}",
+        chrono::Utc::now().format("%H:%M:%S"), ip, port
+    ));
+
+    let sync_manager = ZKSyncManager::new();
+    
+    // Pull logs from device
+    let logs = sync_manager.pull_attendance_logs(
+        &ip, port, device_id, machine_number
+    ).await?;
+
+    if logs.is_empty() {
+        let msg = "ℹ️ No new attendance logs found on device".to_string();
+        let _ = app.emit("console-log", format!("[INFO] {}", msg));
+        return Ok(msg);
+    }
+
+    // Insert logs into local SQLite database
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref()
+        .ok_or_else(|| AppError::DatabaseError("Database not initialized".into()))?;
+
+    let mut inserted_count = 0;
+    let mut skipped_count = 0;
+
+    for log in &logs {
+        // Check for duplicate (same employee_id + timestamp)
+        let exists: bool = conn.query_row(
+            "SELECT 1 FROM AttendanceLogs WHERE employee_id = ?1 AND timestamp = ?2 LIMIT 1",
+            params![log.employee_id, log.timestamp],
+            |_| Ok(true)
+        ).unwrap_or(false);
+
+        if exists {
+            skipped_count += 1;
+            continue;
+        }
+
+        // Insert new log
+        conn.execute(
+            "INSERT INTO AttendanceLogs (employee_id, device_id, timestamp, punch_method, is_synced) 
+             VALUES (?1, ?2, ?3, ?4, 1)",
+            params![log.employee_id, log.device_id, log.timestamp, log.punch_method],
+        ).map_err(|e| AppError::DatabaseError(format!("Failed to insert log: {}", e)))?;
+
+        inserted_count += 1;
+    }
+
+    let msg = format!(
+        "✅ Pulled {} logs | Inserted: {} | Skipped (duplicates): {}",
+        logs.len(), inserted_count, skipped_count
+    );
+
+    let _ = app.emit("console-log", format!("[SUCCESS] {}", msg));
+    
+    // Emit realtime update to frontend
+    let _ = app.emit("attendance-synced", serde_json::json!({
+        "device_id": device_id,
+        "total_logs": logs.len(),
+        "inserted": inserted_count,
+        "skipped": skipped_count,
+        "timestamp": chrono::Utc::now().to_rfc3339()
+    }));
+
+    Ok(msg)
+}
+
+/// ═══════════════════════════════════════════════════════════════════
+/// FULL BI-DIRECTIONAL SYNC: One-click sync
+/// Pushes new employees to device AND pulls attendance logs
+/// ═══════════════════════════════════════════════════════════════════
+
+#[tauri::command]
+async fn sync_device_data(
+    ip: String,
+    port: u16,
+    device_id: i32,
+    machine_number: i32,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, AppError> {
+    let _ = app.emit("console-log", format!(
+        "[{}] ═══ STARTING BI-DIRECTIONAL SYNC ═══",
+        chrono::Utc::now().format("%H:%M:%S")
+    ));
+
+    // Step 1: Fetch all employees from database with device_enroll_number
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref()
+        .ok_or_else(|| AppError::DatabaseError("Database not initialized".into()))?;
+
+    let mut employees = Vec::new();
+    let mut stmt = conn.prepare(
+        "SELECT device_enroll_number, first_name || ' ' || last_name as full_name 
+         FROM Employees 
+         WHERE device_enroll_number IS NOT NULL AND device_enroll_number != ''
+         ORDER BY device_enroll_number"
+    ).map_err(|e| AppError::DatabaseError(format!("Failed to query employees: {}", e)))?;
+
+    let employee_rows = stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+        ))
+    }).map_err(|e| AppError::DatabaseError(format!("Failed to fetch employee data: {}", e)))?;
+
+    for emp in employee_rows {
+        if let Ok((enroll, name)) = emp {
+            employees.push((enroll, name));
+        }
+    }
+
+    let _ = app.emit("console-log", format!(
+        "[INFO] Found {} employees to push to device",
+        employees.len()
+    ));
+
+    // Step 2: Bi-directional sync
+    let sync_manager = ZKSyncManager::new();
+    
+    let result = sync_manager.sync_device_data(
+        &ip, port, device_id, machine_number, employees
+    ).await;
+
+    match result {
+        Ok(msg) => {
+            let _ = app.emit("console-log", format!(
+                "[SUCCESS] ═══ BI-DIRECTIONAL SYNC COMPLETE ═══\n{}", msg
+            ));
+            
+            // Step 3: After pulling logs, insert them into database
+            if msg.contains("Pulled") {
+                // Extract log count and trigger pull
+                let _ = pull_attendance_logs(
+                    ip.clone(), port, device_id, machine_number,
+                    app.clone(), state
+                ).await;
+            }
+
+            Ok(msg)
+        }
+        Err(e) => {
+            let _ = app.emit("console-log", format!("[ERROR] Bi-directional sync failed: {}", e));
+            Err(e)
+        }
+    }
+}
+
+/// Test ZKTeco SDK connection and COM availability
+#[tauri::command]
+async fn test_sdk_connection(
+    ip: String,
+    port: u16,
+    machine_number: i32,
+) -> Result<String, AppError> {
+    #[cfg(windows)]
+    {
+        // Try COM-based connection
+        use windows::core::CLSID;
+        
+        let clsid_str = "00853A19-BD51-419B-9269-2DABE57EB61F"; // zkemkeeper.ZKEM.1
+        match CLSID::from(clsid_str) {
+            Ok(_) => {
+                // COM object available, test device connection
+                let sync_manager = ZKSyncManager::new();
+                match sync_manager.connect(&ip, port, machine_number).await {
+                    Ok(_) => {
+                        Ok(format!("✅ SDK available | Device {}:{} connected (Machine #{})", ip, port, machine_number))
+                    }
+                    Err(e) => {
+                        Err(AppError::ConnectionError(format!("SDK available but device connection failed: {}", e)))
+                    }
+                }
+            }
+            Err(_) => {
+                Err(AppError::ConnectionError("zkemkeeper COM object not registered. Install ZKTeco SDK or run as admin.".to_string()))
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        Err(AppError::ConnectionError("ZKTeco SDK (zkemkeeper) only works on Windows".to_string()))
+    }
 }
 
 async fn sync_device_logs_internal(
@@ -2294,6 +2533,11 @@ pub fn run() {
             get_cloud_config,
             sync_device_logs,
             pull_all_logs,
+            // Bi-directional sync commands
+            push_user_to_device,
+            pull_attendance_logs,
+            sync_device_data,
+            test_sdk_connection,
             get_device_users,
             scan_network,
             get_dashboard_stats,
