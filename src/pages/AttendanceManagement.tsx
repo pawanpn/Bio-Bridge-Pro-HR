@@ -2,8 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
 import {
-  Calendar, Upload, UserPlus, Download,
-  Clock, CheckCircle, AlertCircle, RefreshCw
+  Calendar, Upload, UserPlus,
+  Clock, CheckCircle, AlertCircle, RefreshCw, Fingerprint
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -52,26 +52,43 @@ interface Gate {
   name: string;
 }
 
+interface Device {
+  id: number;
+  name: string;
+  brand: string;
+  ip: string;
+  port: number;
+  comm_key: number;
+  machine_number: number;
+  branch_id: number;
+  branch_name: string;
+  gate_id: number;
+  gate_name: string;
+  status: string;
+  is_default: boolean;
+}
+
 type TabType = 'daily' | 'manual' | 'import' | 'reports';
 
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export const AttendanceManagement: React.FC = () => {
-  const { user } = useAuth();
-  
   const [activeTab, setActiveTab] = useState<TabType>('daily');
   const [branches, setBranches] = useState<Branch[]>([]);
-  const [gates, setGates] = useState<Gate[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<number | null>(null);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  
+
   // Daily attendance
   const [dailyLogs, setDailyLogs] = useState<AttendanceLog[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // Device sync
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [syncing, setSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('');
+
   // Manual entry
-  const [manualDialog, setManualDialog] = useState(false);
   const [manualForm, setManualForm] = useState({
     employeeId: '',
     date: new Date().toISOString().split('T')[0],
@@ -81,21 +98,21 @@ export const AttendanceManagement: React.FC = () => {
   const [manualStatus, setManualStatus] = useState('');
 
   // CSV Import
-  const [csvDialog, setCsvDialog] = useState(false);
   const [csvContent, setCsvContent] = useState('');
   const [csvStatus, setCsvStatus] = useState('');
-  const [csvFile, setCsvFile] = useState<File | null>(null);
 
   // Load data
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [branchData, empData] = await Promise.all([
+      const [branchData, empData, deviceData] = await Promise.all([
         invoke<any[]>('list_branches'),
         invoke<any[]>('list_employees'),
+        invoke<any[]>('list_all_devices'),
       ]);
       setBranches(branchData);
       setEmployees(empData);
+      setDevices(deviceData);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -126,6 +143,43 @@ export const AttendanceManagement: React.FC = () => {
       console.error('Failed to load daily logs:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Device sync function
+  const handleSyncFromDevice = async (device: Device) => {
+    setSyncing(true);
+    setSyncStatus(`🔄 Syncing from ${device.name} (${device.ip})...`);
+    try {
+      await invoke('sync_device_logs', {
+        ip: device.ip,
+        port: device.port,
+        deviceId: device.id,
+        brand: device.brand,
+      });
+      setSyncStatus(`✅ Successfully synced from ${device.name}!`);
+      loadDailyLogs();
+      setTimeout(() => setSyncStatus(''), 5000);
+    } catch (error) {
+      setSyncStatus(`❌ Sync failed: ${error}`);
+      setTimeout(() => setSyncStatus(''), 5000);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleTestDeviceConnection = async (device: Device) => {
+    try {
+      await invoke('test_device_connection', {
+        ip: device.ip,
+        port: device.port,
+        commKey: device.comm_key,
+        machineNumber: device.machine_number,
+        brand: device.brand
+      });
+      alert(`✅ ${device.name} is online and reachable!`);
+    } catch (error) {
+      alert(`❌ Connection failed: ${error}`);
     }
   };
 
@@ -161,7 +215,6 @@ export const AttendanceManagement: React.FC = () => {
   const handleCsvFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setCsvFile(file);
     const reader = new FileReader();
     reader.onload = (event) => {
       setCsvContent(event.target?.result as string);
@@ -184,9 +237,7 @@ export const AttendanceManagement: React.FC = () => {
       loadDailyLogs();
       setTimeout(() => {
         setCsvStatus('');
-        setCsvDialog(false);
         setCsvContent('');
-        setCsvFile(null);
       }, 2000);
     } catch (error) {
       setCsvStatus('❌ Import failed: ' + error);
@@ -241,7 +292,81 @@ export const AttendanceManagement: React.FC = () => {
             Refresh
           </Button>
         </div>
+        <div className="flex items-end">
+          <Button 
+            onClick={() => {
+              const defaultDevice = devices.find(d => d.is_default) || devices[0];
+              if (defaultDevice) handleSyncFromDevice(defaultDevice);
+              else alert('❌ No devices configured. Please add a device in Branch/Gate/Device Management.');
+            }}
+            disabled={syncing || devices.length === 0}
+            className="w-full"
+          >
+            <Fingerprint className="w-4 h-4 mr-2" />
+            {syncing ? 'Syncing...' : 'Sync from Device'}
+          </Button>
+        </div>
       </div>
+
+      {/* Device Status */}
+      {syncStatus && (
+        <div className={`mb-4 p-4 rounded-md border ${
+          syncStatus.includes('❌') ? 'bg-red-50 border-red-200 text-red-700' : 
+          syncStatus.includes('✅') ? 'bg-green-50 border-green-200 text-green-700' :
+          'bg-blue-50 border-blue-200 text-blue-700'
+        }`}>
+          {syncStatus}
+        </div>
+      )}
+
+      {/* Connected Devices */}
+      {devices.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="text-lg">Connected Attendance Devices</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {devices.map(device => (
+                <div key={device.id} className="p-4 border rounded-lg bg-muted/30">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Fingerprint className="w-4 h-4 text-primary" />
+                      <div>
+                        <p className="font-medium text-sm">{device.name}</p>
+                        <p className="text-xs text-muted-foreground font-mono">{device.ip}:{device.port}</p>
+                      </div>
+                    </div>
+                    <Badge variant={device.is_default ? 'default' : 'secondary'} className="text-xs">
+                      {device.is_default ? 'Default' : 'Backup'}
+                    </Badge>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      className="flex-1 h-8 text-xs"
+                      onClick={() => handleSyncFromDevice(device)}
+                      disabled={syncing}
+                    >
+                      {syncing ? 'Syncing...' : 'Sync'}
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      className="h-8 w-8 p-0"
+                      onClick={() => handleTestDeviceConnection(device)}
+                      title="Test Connection"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">

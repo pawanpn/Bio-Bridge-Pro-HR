@@ -3,16 +3,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
-import { 
-  Settings, 
-  Save, 
-  Plus, 
-  Trash2, 
-  Globe, 
-  Bell, 
-  Shield, 
-  Clock, 
+import { DeviceManagement } from '@/components/DeviceManagement';
+import {
+  Settings,
+  Save,
+  Plus,
+  Trash2,
+  Globe,
+  Bell,
+  Shield,
+  Clock,
   Database,
   DollarSign,
   Building2,
@@ -287,10 +287,12 @@ export const DynamicSystemSettings: React.FC = () => {
           <h2 className="text-3xl font-bold">System Settings</h2>
           <p className="text-muted-foreground">Configure and manage all system settings dynamically</p>
         </div>
-        <Button onClick={() => setShowAddSetting(true)}>
-          <Plus size={16} />
-          Add Setting
-        </Button>
+        {activeCategory !== 'attendance' && (
+          <Button onClick={() => setShowAddSetting(true)}>
+            <Plus size={16} />
+            Add Setting
+          </Button>
+        )}
       </div>
 
       {/* Messages */}
@@ -336,63 +338,68 @@ export const DynamicSystemSettings: React.FC = () => {
 
       {/* Settings by Category */}
       <div className="space-y-6">
-        {filteredCategories.map(cat => {
-          const Icon = cat.icon;
-          return (
-            <Card key={cat.category}>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Icon size={20} />
-                  {cat.category.charAt(0).toUpperCase() + cat.category.slice(1)} Settings
-                </CardTitle>
-                <CardDescription>{cat.description}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {cat.settings.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-8">
-                    No settings configured yet. Click "Add Setting" to create one.
-                  </p>
-                ) : (
-                  <div className="space-y-4">
-                    {cat.settings.map(setting => (
-                      <div key={setting.id} className="p-4 border rounded-lg">
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-semibold">{setting.setting_key}</h4>
-                              <Badge variant="outline" className="text-xs">
-                                {setting.setting_type}
-                              </Badge>
-                              {setting.is_public && (
-                                <Badge variant="secondary" className="text-xs">
-                                  Public
+        {/* Special handling for Attendance category - show Device Management */}
+        {activeCategory === 'attendance' ? (
+          <DeviceManagement />
+        ) : (
+          filteredCategories.map(cat => {
+            const Icon = cat.icon;
+            return (
+              <Card key={cat.category}>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Icon size={20} />
+                    {cat.category.charAt(0).toUpperCase() + cat.category.slice(1)} Settings
+                  </CardTitle>
+                  <CardDescription>{cat.description}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {cat.settings.length === 0 ? (
+                    <p className="text-center text-muted-foreground py-8">
+                      No settings configured yet. Click "Add Setting" to create one.
+                    </p>
+                  ) : (
+                    <div className="space-y-4">
+                      {cat.settings.map(setting => (
+                        <div key={setting.id} className="p-4 border rounded-lg">
+                          <div className="flex items-start justify-between mb-3">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-semibold">{setting.setting_key}</h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {setting.setting_type}
                                 </Badge>
+                                {setting.is_public && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    Public
+                                  </Badge>
+                                )}
+                              </div>
+                              {setting.description && (
+                                <p className="text-sm text-muted-foreground mt-1">
+                                  {setting.description}
+                                </p>
                               )}
                             </div>
-                            {setting.description && (
-                              <p className="text-sm text-muted-foreground mt-1">
-                                {setting.description}
-                              </p>
-                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => deleteSetting(setting.id!)}
+                            >
+                              <Trash2 size={16} className="text-red-500" />
+                            </Button>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => deleteSetting(setting.id!)}
-                          >
-                            <Trash2 size={16} className="text-red-500" />
-                          </Button>
+                          {renderSettingInput(setting)}
                         </div>
-                        {renderSettingInput(setting)}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })
+        )}
       </div>
 
       {/* Add Setting Dialog */}

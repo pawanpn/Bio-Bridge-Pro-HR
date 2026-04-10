@@ -251,14 +251,6 @@ export const MainLayout: React.FC = () => {
             )}
             {!isOperator && (
               <SidebarItem
-                icon={<GitBranch size={16} />}
-                label="Employee Hierarchy"
-                active={activeTab === 'Hierarchy'}
-                onClick={() => go('Hierarchy', '/employee-hierarchy')}
-              />
-            )}
-            {!isOperator && (
-              <SidebarItem
                 icon={<CalendarCheck size={16} />}
                 label="Leave Management"
                 active={activeTab === 'Leave'}
