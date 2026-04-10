@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
-import { Building2, DoorOpen, Monitor, Plus, Edit2, Trash2, Check, Eye, Shield, AlertCircle } from 'lucide-react';
+import { Building2, DoorOpen, Monitor, Plus, Edit2, Trash2, Eye, Shield, AlertCircle, Download, Wifi, WifiOff, Info } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -89,6 +89,10 @@ export const BranchGateDeviceManagement: React.FC = () => {
     open: false, type: '', id: 0, name: ''
   });
 
+  // Sync state
+  const [syncingDevices, setSyncingDevices] = useState<Set<number>>(new Set());
+  const [syncMessages, setSyncMessages] = useState<Record<number, string>>({});
+
   // Load data
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -164,7 +168,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
   };
 
   const handleEditGate = (gate: Gate) => {
-    setGateDialog({ open: true, editing: gate, preselectBranch: undefined });
+    setGateDialog({ open: true, editing: gate, preselectBranch: null });
   };
 
   const handleDeleteGate = async () => {
@@ -205,6 +209,43 @@ export const BranchGateDeviceManagement: React.FC = () => {
     }
   };
 
+  const handleSyncDeviceLogs = async (device: Device) => {
+    setSyncingDevices(prev => new Set(prev).add(device.id));
+    setSyncMessages(prev => ({ ...prev, [device.id]: '🔄 Syncing logs...' }));
+    
+    try {
+      const result = await invoke('sync_device_logs', {
+        ip: device.ip,
+        port: device.port,
+        deviceId: device.id,
+        brand: device.brand,
+      });
+      setSyncMessages(prev => ({ ...prev, [device.id]: `✅ ${result}` }));
+      setTimeout(() => {
+        setSyncMessages(prev => {
+          const updated = { ...prev };
+          delete updated[device.id];
+          return updated;
+        });
+      }, 5000);
+    } catch (error) {
+      setSyncMessages(prev => ({ ...prev, [device.id]: `❌ Sync failed: ${error}` }));
+      setTimeout(() => {
+        setSyncMessages(prev => {
+          const updated = { ...prev };
+          delete updated[device.id];
+          return updated;
+        });
+      }, 5000);
+    } finally {
+      setSyncingDevices(prev => {
+        const updated = new Set(prev);
+        updated.delete(device.id);
+        return updated;
+      });
+    }
+  };
+
   const testDeviceConnection = async (device: Device) => {
     try {
       await invoke('test_device_connection', {
@@ -214,9 +255,16 @@ export const BranchGateDeviceManagement: React.FC = () => {
         machineNumber: device.machine_number,
         brand: device.brand
       });
-      alert('✅ Device is online and reachable!');
+      // Update device status to online
+      setDevices(prev => prev.map(d => 
+        d.id === device.id ? { ...d, status: 'online' } : d
+      ));
     } catch (error) {
-      alert('❌ Device connection failed: ' + error);
+      // Update device status to offline
+      setDevices(prev => prev.map(d => 
+        d.id === device.id ? { ...d, status: 'offline' } : d
+      ));
+      throw error;
     }
   };
 
@@ -325,8 +373,11 @@ export const BranchGateDeviceManagement: React.FC = () => {
           onEdit={handleEditDevice}
           onDelete={(id, name) => setDeleteDialog({ open: true, type: 'device', id, name })}
           onSetDefault={handleSetDefaultDevice}
+          onSync={handleSyncDeviceLogs}
           onTest={testDeviceConnection}
           loading={loading}
+          syncingDevices={syncingDevices}
+          syncMessages={syncMessages}
         />
       )}
 
@@ -451,7 +502,7 @@ const BranchesTab: React.FC<{
   onDelete: (id: number, name: string) => void;
   onSelect: (id: number) => void;
   loading: boolean;
-}> = ({ branches, gates, devices, onAdd, onEdit, onDelete, onSelect, loading }) => (
+}> = ({ branches, gates: _gates, devices: _devices, onAdd, onEdit, onDelete, onSelect, loading }) => (
   <div>
     <div className="flex justify-between items-center mb-4">
       <h2 className="text-xl font-semibold">Branches</h2>
@@ -591,7 +642,7 @@ const GatesTab: React.FC<{
   </div>
 );
 
-// ── Devices Tab ─────────────────────────────────────────────────────────────
+// ── Devices Tab - Clean Table Design with Inline Sync ──────────────────────
 
 const DevicesTab: React.FC<{
   devices: Device[];
@@ -601,17 +652,39 @@ const DevicesTab: React.FC<{
   onEdit: (device: Device) => void;
   onDelete: (id: number, name: string) => void;
   onSetDefault: (id: number) => void;
+  onSync: (device: Device) => void;
   onTest: (device: Device) => void;
   loading: boolean;
-}> = ({ devices, branches, gates, onAdd, onEdit, onDelete, onSetDefault, onTest, loading }) => (
+  syncingDevices: Set<number>;
+  syncMessages: Record<number, string>;
+}> = ({ devices, onAdd, onEdit, onDelete, onSync, loading, syncingDevices, syncMessages }) => (
   <div>
-    <div className="flex justify-between items-center mb-4">
-      <h2 className="text-xl font-semibold">Devices</h2>
-      <Button onClick={onAdd}>
-        <Plus className="w-4 h-4 mr-2" />
+    <div className="flex justify-between items-center mb-6">
+      <div>
+        <h2 className="text-2xl font-bold text-foreground">Device Management</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Manage biometric hardware (ZKTeco / Hikvision) for attendance synchronization.
+        </p>
+      </div>
+      <Button onClick={onAdd} className="gap-2">
+        <Plus className="w-4 h-4" />
         Add Device
       </Button>
     </div>
+
+    {/* Sync Messages */}
+    {Object.entries(syncMessages).map(([deviceId, message]) => (
+      <div
+        key={deviceId}
+        className={`mb-4 p-3 rounded-md border ${
+          message.includes('✅') ? 'bg-green-50 border-green-200 text-green-700' :
+          message.includes('❌') ? 'bg-red-50 border-red-200 text-red-700' :
+          'bg-blue-50 border-blue-200 text-blue-700'
+        }`}
+      >
+        {message}
+      </div>
+    ))}
 
     <Card>
       <CardContent className="p-0">
@@ -619,63 +692,96 @@ const DevicesTab: React.FC<{
           <TableHeader>
             <TableRow>
               <TableHead>Device Name</TableHead>
-              <TableHead>Brand</TableHead>
+              <TableHead>Location</TableHead>
               <TableHead>IP Address</TableHead>
-              <TableHead>Branch / Gate</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Default</TableHead>
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8">Loading...</TableCell>
+                <TableCell colSpan={5} className="text-center py-8">Loading...</TableCell>
               </TableRow>
             ) : devices.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                   No devices found. Add your first device to start collecting attendance.
                 </TableCell>
               </TableRow>
             ) : (
               devices.map(device => (
                 <TableRow key={device.id}>
-                  <TableCell className="font-medium">{device.name}</TableCell>
                   <TableCell>
-                    <Badge variant="outline">{device.brand}</Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-sm">{device.ip}:{device.port}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">
-                    {device.branch_name} / {device.gate_name}
+                    <div>
+                      <div className="font-semibold">{device.name}</div>
+                      <div className="text-xs text-muted-foreground">{device.brand} : {device.port}</div>
+                    </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={device.status === 'online' ? 'default' : 'secondary'}>
-                      {device.status}
-                    </Badge>
+                    <div className="text-sm">
+                      <div className="font-medium">{device.branch_name}</div>
+                      <div className="text-xs text-muted-foreground">Gate: {device.gate_name}</div>
+                    </div>
                   </TableCell>
                   <TableCell>
-                    {device.is_default ? (
-                      <Badge variant="default">
-                        <Check className="w-3 h-3 mr-1" />
-                        Default
-                      </Badge>
-                    ) : (
-                      <Button variant="ghost" size="sm" onClick={() => onSetDefault(device.id)}>
-                        Set Default
+                    <code className="text-sm bg-muted px-2 py-1 rounded">
+                      {device.ip}
+                    </code>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      {device.status === 'online' ? (
+                        <>
+                          <Wifi className="w-4 h-4 text-green-500" />
+                          <span className="text-sm text-green-600 font-medium">Online</span>
+                        </>
+                      ) : (
+                        <>
+                          <WifiOff className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm text-gray-500 font-medium">Offline</span>
+                        </>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onEdit(device)}
+                        className="gap-1 h-8"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                        Edit
                       </Button>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => onTest(device)} title="Test Connection">
-                        <Eye className="w-4 h-4" />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSync(device)}
+                        disabled={syncingDevices.has(device.id)}
+                        className="gap-1 h-8"
+                      >
+                        {syncingDevices.has(device.id) ? (
+                          <>
+                            <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                            Syncing...
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-3 h-3" />
+                            Sync Logs
+                          </>
+                        )}
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => onEdit(device)} title="Edit">
-                        <Edit2 className="w-4 h-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => onDelete(device.id, device.name)} title="Delete">
-                        <Trash2 className="w-4 h-4 text-destructive" />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onDelete(device.id, device.name)}
+                        className="gap-1 h-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        Delete
                       </Button>
                     </div>
                   </TableCell>
@@ -684,6 +790,22 @@ const DevicesTab: React.FC<{
             )}
           </TableBody>
         </Table>
+      </CardContent>
+    </Card>
+
+    {/* Connection Tips */}
+    <Card className="mt-6 border-l-4 border-l-blue-500">
+      <CardContent className="p-4">
+        <h3 className="font-semibold mb-2 flex items-center gap-2">
+          <Info className="w-4 h-4 text-blue-500" />
+          Connection Tips
+        </h3>
+        <ul className="text-sm text-muted-foreground space-y-1">
+          <li>• Ensure the device is connected to the same local network (LAN).</li>
+          <li>• For <strong>ZKTeco</strong>, the default port is <strong>4370</strong>. For <strong>Hikvision</strong>, use <strong>8000</strong> or <strong>80</strong>.</li>
+          <li>• If the scanner fails, enter the device IP manually and click Test Connection first.</li>
+          <li>• Use <strong>Sync Logs</strong> to pull attendance data from a specific device on demand.</li>
+        </ul>
       </CardContent>
     </Card>
   </div>
@@ -794,7 +916,7 @@ const BranchDialog: React.FC<{
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <h3 className="text-sm font-semibold">Gates for {editing.name}</h3>
-                <Button size="sm" onClick={onAddGate}>
+                <Button size="sm" onClick={() => onAddGate(editing?.id)}>
                   <Plus className="w-4 h-4 mr-2" />
                   Add Gate
                 </Button>
@@ -1133,6 +1255,38 @@ const DeviceDialog: React.FC<{
               />
             </div>
           </div>
+
+          {/* Test Connection Button */}
+          {form.ip && (
+            <div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await invoke('test_device_connection', {
+                      ip: form.ip,
+                      port: form.port,
+                      commKey: form.comm_key,
+                      machineNumber: form.machine_number,
+                      brand: form.brand
+                    });
+                    alert('✅ Device is online and reachable!');
+                  } catch (error) {
+                    alert(`❌ Connection failed: ${error}`);
+                  }
+                }}
+                className="gap-2"
+              >
+                <Eye className="w-4 h-4" />
+                Test Connection
+              </Button>
+              <p className="text-xs text-muted-foreground mt-1">
+                Verify the device is reachable before saving
+              </p>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>

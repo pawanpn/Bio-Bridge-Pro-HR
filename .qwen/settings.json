@@ -12,7 +12,10 @@
       "Bash(timeout *)",
       "Bash(npm install *)",
       "Bash(powershell *)",
-      "Bash(select-object *)"
+      "Bash(select-object *)",
+      "Bash(git show *)",
+      "Bash(dir *)",
+      "Bash(del *)"
     ]
   },
   "$version": 3
