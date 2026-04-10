@@ -16,7 +16,9 @@
       "Bash(git show *)",
       "Bash(dir *)",
       "Bash(del *)",
-      "Bash(dumpbin *)"
+      "Bash(dumpbin *)",
+      "Bash(copy *)",
+      "Bash(npm *)"
     ]
   },
   "$version": 3
