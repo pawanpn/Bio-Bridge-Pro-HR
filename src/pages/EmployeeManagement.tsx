@@ -3,7 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
 import {
   Users, UserPlus, Search, Filter, Download, Upload,
-  Edit2, Trash2, Eye, FileText, Calendar, MapPin, Phone, Mail
+  Edit2, Trash2, Eye, FileText, Calendar, MapPin, Phone, Mail,
+  HardDrive, Loader2, AlertCircle, CheckCircle, Info
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -24,6 +25,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 
@@ -100,7 +102,15 @@ export const EmployeeManagement: React.FC = () => {
   const [formDialog, setFormDialog] = useState({ open: false, editing: null as any });
   const [viewDialog, setViewDialog] = useState({ open: false, employee: null as any });
   const [deleteDialog, setDeleteDialog] = useState({ open: false, employee: null as any });
+  const [importDialog, setImportDialog] = useState({ open: false });
   
+  // Import state
+  const [devices, setDevices] = useState<any[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
+  const [selectedBranchId, setSelectedBranchId] = useState<string>('');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<any>(null);
+
   // Form state
   const [formData, setFormData] = useState<EmployeeForm>(emptyForm);
   const [formStep, setFormStep] = useState(1);
@@ -122,18 +132,35 @@ export const EmployeeManagement: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [empResult, branchData] = await Promise.all([
+      console.log('[EmployeeManagement] Loading data...');
+      const [empResult, branchData, deviceData] = await Promise.all([
         invoke<any>('list_employees'),
         invoke<any[]>('list_branches'),
+        invoke<any[]>('list_all_devices'),
       ]);
+      
+      console.log('[EmployeeManagement] Raw branch data:', branchData);
+      console.log('[EmployeeManagement] Raw device data:', deviceData);
+      console.log('[EmployeeManagement] Branch data type:', typeof branchData, Array.isArray(branchData));
+      console.log('[EmployeeManagement] Device data type:', typeof deviceData, Array.isArray(deviceData));
+      
       // Handle both flat array and wrapped {success, data, count} format
       const empData = Array.isArray(empResult) ? empResult : (empResult as any)?.data || [];
+      const branches = Array.isArray(branchData) ? branchData : [];
+      const devices = Array.isArray(deviceData) ? deviceData : [];
+      
+      console.log('[EmployeeManagement] Setting employees:', empData.length);
+      console.log('[EmployeeManagement] Setting branches:', branches.length, branches);
+      console.log('[EmployeeManagement] Setting devices:', devices.length, devices);
+      
       setEmployees(empData);
-      setBranches(branchData || []);
+      setBranches(branches);
+      setDevices(devices);
     } catch (error) {
       console.error('Failed to load data:', error);
       setEmployees([]);
       setBranches([]);
+      setDevices([]);
     } finally {
       setLoading(false);
     }
@@ -231,6 +258,49 @@ export const EmployeeManagement: React.FC = () => {
     }
   };
 
+  const handleImportFromDevice = async () => {
+    // Reload data to ensure we have the latest devices and branches
+    await loadData();
+    setImportDialog({ open: true });
+    setImportResult(null);
+    setSelectedDeviceId('');
+    setSelectedBranchId('');
+  };
+
+  const handleExecuteImport = async () => {
+    if (!selectedDeviceId || !selectedBranchId) {
+      setImportResult({ success: false, error: 'Please select both device and branch' });
+      return;
+    }
+
+    setImporting(true);
+    setImportResult(null);
+
+    try {
+      const result = await invoke<any>('import_device_employees', {
+        deviceId: parseInt(selectedDeviceId),
+        branchId: parseInt(selectedBranchId),
+      });
+
+      setImportResult(result);
+      
+      if (result.success) {
+        loadData();
+        setTimeout(() => {
+          setImportDialog({ open: false });
+          setImportResult(null);
+        }, 3000);
+      }
+    } catch (error: any) {
+      setImportResult({
+        success: false,
+        error: error?.message || error || 'Failed to import employees'
+      });
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const exportToCSV = () => {
     const headers = ['Employee Code', 'Name', 'Department', 'Branch', 'Status', 'Joining Date'];
     const csvContent = [
@@ -264,6 +334,10 @@ export const EmployeeManagement: React.FC = () => {
           </p>
         </div>
         <div className="flex gap-3">
+          <Button variant="outline" onClick={handleImportFromDevice}>
+            <HardDrive className="w-4 h-4 mr-2" />
+            Import from Device
+          </Button>
           <Button variant="outline" onClick={exportToCSV}>
             <Download className="w-4 h-4 mr-2" />
             Export CSV
@@ -673,6 +747,196 @@ export const EmployeeManagement: React.FC = () => {
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteDialog({ open: false, employee: null })}>Cancel</Button>
             <Button variant="destructive" onClick={handleDeleteEmployee}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Import from Device Dialog */}
+      <Dialog open={importDialog.open} onOpenChange={(open) => !open && setImportDialog({ open: false })}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <HardDrive className="w-5 h-5" />
+              Import Employees from Attendance Device
+            </DialogTitle>
+            <DialogDescription>
+              Pull all employee data from the attendance device and add them to the system. 
+              Employees will be added with their device user numbers and no roles assigned.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            {/* Debug Info */}
+            <div className="p-2 bg-gray-100 rounded text-xs font-mono">
+              <strong>Debug:</strong> Devices: {JSON.stringify(devices.slice(0, 2))} | Branches: {JSON.stringify(branches.slice(0, 2))}
+            </div>
+
+            {/* Refresh Button */}
+            <div className="flex justify-end">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={loadData}
+                className="gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh Lists
+              </Button>
+            </div>
+
+            {/* Device Selection */}
+            <div className="space-y-2">
+              <Label>Select Attendance Device *</Label>
+              <select
+                value={selectedDeviceId}
+                onChange={(e) => setSelectedDeviceId(e.target.value)}
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                disabled={importing}
+              >
+                <option value="">Choose a device...</option>
+                {devices.map((device: any) => (
+                  <option key={device.id} value={device.id}>
+                    {device.name} ({device.brand} - {device.ip})
+                  </option>
+                ))}
+              </select>
+              {devices.length === 0 && (
+                <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                  <p className="text-sm text-yellow-800">
+                    ⚠️ No devices found. Please add a device in Organization Structure → Devices tab first.
+                  </p>
+                  <p className="text-xs text-yellow-600 mt-1">
+                    Devices loaded: {devices.length}
+                  </p>
+                </div>
+              )}
+              {devices.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  ✅ {devices.length} device(s) available
+                </p>
+              )}
+            </div>
+
+            {/* Branch Selection */}
+            <div className="space-y-2">
+              <Label>Assign to Branch *</Label>
+              <select
+                value={selectedBranchId}
+                onChange={(e) => setSelectedBranchId(e.target.value)}
+                className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                disabled={importing}
+              >
+                <option value="">Choose a branch...</option>
+                {branches.map((branch: any) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+              {branches.length === 0 && (
+                <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                  <p className="text-sm text-yellow-800">
+                    ⚠️ No branches found. Please add a branch in Organization Structure → Branches tab first.
+                  </p>
+                  <p className="text-xs text-yellow-600 mt-1">
+                    Branches loaded: {branches.length}
+                  </p>
+                </div>
+              )}
+              {branches.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  ✅ {branches.length} branch(es) available
+                </p>
+              )}
+            </div>
+
+            {/* Import Result */}
+            {importResult && (
+              <div className={`p-4 rounded-md border ${
+                importResult.success 
+                  ? 'bg-green-50 border-green-200 text-green-800' 
+                  : 'bg-red-50 border-red-200 text-red-800'
+              }`}>
+                <div className="flex items-start gap-3">
+                  {importResult.success ? (
+                    <CheckCircle className="h-5 w-5 text-green-600 mt-0.5 flex-shrink-0" />
+                  ) : (
+                    <AlertCircle className="h-5 w-5 text-red-600 mt-0.5 flex-shrink-0" />
+                  )}
+                  <div className="flex-1">
+                    {importResult.success ? (
+                      <div className="space-y-2">
+                        <p className="font-semibold">Import Successful!</p>
+                        <div className="text-sm space-y-1">
+                          <p>✅ Imported: {importResult.imported} employees</p>
+                          <p>⏭️ Skipped (already exists): {importResult.skipped} employees</p>
+                          {importResult.errors > 0 && (
+                            <p>❌ Errors: {importResult.errors} employees</p>
+                          )}
+                          {importResult.error_details && importResult.error_details.length > 0 && (
+                            <div className="mt-2 p-2 bg-red-100 border border-red-300 rounded text-xs">
+                              {importResult.error_details.slice(0, 3).map((err: string, idx: number) => (
+                                <p key={idx}>{err}</p>
+                              ))}
+                              {importResult.error_details.length > 3 && (
+                                <p>... and {importResult.error_details.length - 3} more errors</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="font-medium">{importResult.error || 'Failed to import employees'}</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Info Box */}
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-md">
+              <div className="flex items-start gap-2">
+                <Info className="w-5 h-5 text-blue-600 mt-0.5" />
+                <div className="text-sm text-blue-800">
+                  <p className="font-medium mb-1">What will be imported:</p>
+                  <ul className="list-disc list-inside space-y-1 text-xs">
+                    <li>Employee name from the device</li>
+                    <li>Employee code will be generated as: DEV{'{'}device_id{'}'}_{'{'}user_number{'}'}</li>
+                    <li>Assigned to the selected branch</li>
+                    <li>No roles or permissions will be assigned</li>
+                    <li>Duplicate employees (same user number) will be skipped</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => setImportDialog({ open: false })}
+              disabled={importing}
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleExecuteImport}
+              disabled={!selectedDeviceId || !selectedBranchId || importing}
+            >
+              {importing ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Importing...
+                </>
+              ) : (
+                <>
+                  <HardDrive className="w-4 h-4 mr-2" />
+                  Import Employees
+                </>
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

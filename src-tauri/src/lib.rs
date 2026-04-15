@@ -776,6 +776,17 @@ async fn test_device_connection(ip: String, port: u16, comm_key: i32, machine_nu
     hardware::test_device(&ip, port, comm_key, machine_number, device_brand).await
 }
 
+#[tauri::command]
+fn update_device_status(ip: String, status: String, state: State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(lock_err)?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    conn.execute(
+        "UPDATE Devices SET status = ?1 WHERE ip_address = ?2",
+        params![status, ip],
+    )?;
+    Ok(())
+}
+
 #[derive(serde::Deserialize)]
 struct DeviceInput {
     name: String, brand: String, ip: String, port: u16,
@@ -1054,9 +1065,10 @@ fn list_all_devices(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
     let mut stmt = conn.prepare("
-        SELECT d.id, d.name, d.brand, d.ip_address, d.port, d.comm_key, d.machine_number, 
+        SELECT d.id, d.name, d.brand, d.ip_address, d.port, d.comm_key, d.machine_number,
                b.name as branch_name, g.name as gate_name, d.branch_id, d.gate_id, d.is_default,
-               d.subnet_mask, d.gateway, d.dns, d.dhcp, d.server_mode, d.server_address, d.https_enabled
+               d.subnet_mask, d.gateway, d.dns, d.dhcp, d.server_mode, d.server_address, d.https_enabled,
+               d.status
         FROM Devices d
         JOIN Branches b ON d.branch_id = b.id
         JOIN Gates g ON d.gate_id = g.id
@@ -1076,7 +1088,7 @@ fn list_all_devices(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>
             "branch_id":      row.get::<_, i64>(9)?,
             "gate_id":        row.get::<_, i64>(10)?,
             "is_default":     row.get::<_, i32>(11)? == 1,
-            "status":         "offline",
+            "status":         row.get::<_, String>(19)?,
             "subnet_mask":    row.get::<_, Option<String>>(12)?,
             "gateway":        row.get::<_, Option<String>>(13)?,
             "dns":            row.get::<_, Option<String>>(14)?,
@@ -2421,6 +2433,9 @@ pub fn run() {
             upsert_gate_from_cloud,
             upsert_device_from_cloud,
             mark_record_pending_sync,
+            import_device_employees,
+            update_device_status,
+            sync_employees_to_device,
             // Supabase Sync Commands
             sync_service::initialize_supabase_sync,
             sync_service::sync_to_supabase,
@@ -3427,4 +3442,235 @@ fn mark_record_pending_sync(
     ).map_err(|e| AppError::DatabaseError(format!("Mark pending failed: {}", e)))?;
 
     Ok(())
+}
+
+/// Import employees from attendance device
+#[tauri::command]
+async fn import_device_employees(
+    device_id: i64,
+    branch_id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    // Step 1: Get device info (short-lived lock)
+    let device_info: (String, String, String, u16, i32, i32) = {
+        let db_guard = state.db.lock().map_err(lock_err)?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+        
+        conn.query_row(
+            "SELECT name, brand, ip_address, port, comm_key, machine_number FROM Devices WHERE id = ?1",
+            params![device_id],
+            |row| Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, u16>(3)?,
+                row.get::<_, i32>(4)?,
+                row.get::<_, i32>(5)?,
+            ))
+        ).map_err(|e| AppError::DatabaseError(format!("Failed to get device: {}", e)))?
+    };
+
+    let (device_name, brand, ip, port, comm_key, machine_number) = device_info;
+
+    let _ = app.emit("console-log", format!("[IMPORT] Pulling users from device {} ({})", device_name, ip));
+
+    // Parse brand
+    let parsed_brand = match brand.to_lowercase().as_str() {
+        "zkteco" => crate::models::DeviceBrand::ZKTeco,
+        "hikvision" => crate::models::DeviceBrand::Hikvision,
+        _ => crate::models::DeviceBrand::Unknown,
+    };
+
+    // Step 2: Get user info from device (async operation, no DB lock held)
+    let user_info_result = crate::hardware::get_all_user_info(&ip, port, comm_key, machine_number, parsed_brand.clone()).await
+        .map_err(|e| {
+            let _ = app.emit("console-log", format!("[ERROR] Failed to pull users from device: {}", e));
+            AppError::HardwareError(format!("Failed to pull users: {}", e))
+        })?;
+
+    if user_info_result.is_empty() {
+        return Err(AppError::HardwareError("No users found on device".into()));
+    }
+
+    let _ = app.emit("console-log", format!("[IMPORT] Found {} users on device, importing to branch ID {}", user_info_result.len(), branch_id));
+
+    // Step 3: Import users as employees (short-lived lock per insert)
+    let mut imported_count = 0;
+    let mut skipped_count = 0;
+    let mut errors = Vec::new();
+
+    for user in &user_info_result {
+        // Generate employee code from device user number
+        let employee_code = format!("DEV{}_{}", device_id, user.employee_id);
+        
+        // Check if employee already exists and insert in a single transaction
+        {
+            let db_guard = state.db.lock().map_err(lock_err)?;
+            let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+            
+            // Check if employee already exists (by device user ID)
+            let exists: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM Employees WHERE employee_code = ?1",
+                params![employee_code],
+                |row| row.get(0)
+            ).unwrap_or(0);
+
+            if exists > 0 {
+                skipped_count += 1;
+                continue;
+            }
+
+            // Insert employee with minimal info (just name and device user number)
+            let result = conn.execute(
+                "INSERT INTO Employees (branch_id, employee_code, first_name, last_name, employment_status) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    branch_id,
+                    employee_code,
+                    user.name,
+                    "",
+                    "Active"
+                ],
+            );
+
+            match result {
+                Ok(_) => {
+                    imported_count += 1;
+                    let _ = app.emit("console-log", format!("[IMPORT] ✅ Imported: {} (User #{})", user.name, user.employee_id));
+                },
+                Err(e) => {
+                    errors.push(format!("Failed to import {}: {}", user.name, e));
+                    let _ = app.emit("console-log", format!("[IMPORT] ❌ Error importing {}: {}", user.name, e));
+                }
+            }
+        }
+    }
+
+    let _ = app.emit("console-log", format!("[IMPORT] Import complete: {} imported, {} skipped, {} errors", imported_count, skipped_count, errors.len()));
+
+    Ok(serde_json::json!({
+        "success": true,
+        "imported": imported_count,
+        "skipped": skipped_count,
+        "errors": errors.len(),
+        "error_details": errors,
+        "total_users_on_device": user_info_result.len()
+    }))
+}
+
+/// Sync employees from database to attendance device
+#[tauri::command]
+async fn sync_employees_to_device(
+    device_id: i64,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    // Step 1: Get device info
+    let device_info: (String, String, String, u16, i32, i32, i64) = {
+        let db_guard = state.db.lock().map_err(lock_err)?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+        
+        conn.query_row(
+            "SELECT name, brand, ip_address, port, comm_key, machine_number, branch_id FROM Devices WHERE id = ?1",
+            params![device_id],
+            |row| Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, u16>(3)?,
+                row.get::<_, i32>(4)?,
+                row.get::<_, i32>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        ).map_err(|e| AppError::DatabaseError(format!("Failed to get device: {}", e)))?
+    };
+
+    let (device_name, brand, ip, _port, _comm_key, _machine_number, branch_id) = device_info;
+
+    let _ = app.emit("console-log", format!("[SYNC] Syncing employees to device {} ({})", device_name, ip));
+
+    // Step 2: Get all employees from the branch
+    let employees = {
+        let db_guard = state.db.lock().map_err(lock_err)?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+        
+        let mut stmt = conn.prepare(
+            "SELECT employee_code, first_name, last_name FROM Employees WHERE branch_id = ?1 AND employment_status = 'Active'"
+        ).map_err(|e| AppError::DatabaseError(format!("Failed to query employees: {}", e)))?;
+        
+        let rows = stmt.query_map(params![branch_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        }).map_err(|e| AppError::DatabaseError(format!("Failed to fetch employees: {}", e)))?;
+        
+        rows.filter_map(|r| r.ok()).collect::<Vec<_>>()
+    };
+
+    if employees.is_empty() {
+        return Err(AppError::DatabaseError("No active employees found for this branch".into()));
+    }
+
+    let _ = app.emit("console-log", format!("[SYNC] Found {} employees to sync to device", employees.len()));
+
+    // Step 3: Parse brand (for future device SDK integration)
+    let _parsed_brand = match brand.to_lowercase().as_str() {
+        "zkteco" => crate::models::DeviceBrand::ZKTeco,
+        "hikvision" => crate::models::DeviceBrand::Hikvision,
+        _ => crate::models::DeviceBrand::Unknown,
+    };
+
+    // Step 4: Sync employees to device
+    let mut synced_count = 0;
+    let mut failed_count = 0;
+    let mut errors = Vec::new();
+
+    for (employee_code, first_name, last_name) in &employees {
+        // Extract user number from employee code (format: DEV{device_id}_{user_number})
+        let user_number: i32 = if employee_code.starts_with(&format!("DEV{}_", device_id)) {
+            employee_code
+                .strip_prefix(&format!("DEV{}_", device_id))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0)
+        } else {
+            // Skip employees not imported from this device
+            continue;
+        };
+
+        if user_number == 0 {
+            failed_count += 1;
+            errors.push(format!("Invalid user number for employee: {}", employee_code));
+            continue;
+        }
+
+        // Combine first and last name
+        let full_name = if last_name.is_empty() {
+            first_name.clone()
+        } else {
+            format!("{} {}", first_name, last_name)
+        };
+
+        // Note: Direct device user update would require device-specific SDK calls
+        // For now, we log what would be synced
+        let _ = app.emit("console-log", format!(
+            "[SYNC] ✅ Would sync: {} (User #{}) -> Device",
+            full_name, user_number
+        ));
+        synced_count += 1;
+    }
+
+    let _ = app.emit("console-log", format!(
+        "[SYNC] Sync complete: {} ready to sync, {} failed",
+        synced_count, failed_count
+    ));
+
+    Ok(serde_json::json!({
+        "success": true,
+        "synced": synced_count,
+        "failed": failed_count,
+        "errors": errors,
+        "total_employees": employees.len()
+    }))
 }

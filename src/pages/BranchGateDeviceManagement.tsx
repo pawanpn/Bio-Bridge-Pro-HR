@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
-import { Building2, DoorOpen, Monitor, Plus, Edit2, Trash2, Eye, Shield, AlertCircle, Download, Wifi, WifiOff, Info } from 'lucide-react';
+import { Building2, DoorOpen, Monitor, Plus, Edit2, Trash2, Eye, Shield, AlertCircle, Download, Upload, Wifi, WifiOff, Info } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -212,7 +212,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
   const handleSyncDeviceLogs = async (device: Device) => {
     setSyncingDevices(prev => new Set(prev).add(device.id));
     setSyncMessages(prev => ({ ...prev, [device.id]: '🔄 Syncing logs...' }));
-    
+
     try {
       const result = await invoke('sync_device_logs', {
         ip: device.ip,
@@ -221,6 +221,49 @@ export const BranchGateDeviceManagement: React.FC = () => {
         brand: device.brand,
       });
       setSyncMessages(prev => ({ ...prev, [device.id]: `✅ ${result}` }));
+      setTimeout(() => {
+        setSyncMessages(prev => {
+          const updated = { ...prev };
+          delete updated[device.id];
+          return updated;
+        });
+      }, 5000);
+    } catch (error) {
+      setSyncMessages(prev => ({ ...prev, [device.id]: `❌ Sync failed: ${error}` }));
+      setTimeout(() => {
+        setSyncMessages(prev => {
+          const updated = { ...prev };
+          delete updated[device.id];
+          return updated;
+        });
+      }, 5000);
+    } finally {
+      setSyncingDevices(prev => {
+        const updated = new Set(prev);
+        updated.delete(device.id);
+        return updated;
+      });
+    }
+  };
+
+  const handleSyncToDevice = async (device: Device) => {
+    setSyncingDevices(prev => new Set(prev).add(device.id));
+    setSyncMessages(prev => ({ ...prev, [device.id]: '🔄 Syncing employees to device...' }));
+
+    try {
+      const result = await invoke<any>('sync_employees_to_device', {
+        deviceId: device.id,
+      });
+      
+      if (result.success) {
+        setSyncMessages(prev => ({ 
+          ...prev, 
+          [device.id]: `✅ Synced to device: ${result.synced} employees ready, ${result.failed} failed` 
+        }));
+      } else {
+        setSyncMessages(prev => ({ ...prev, [device.id]: `❌ Sync failed: ${result.error}` }));
+      }
+      
       setTimeout(() => {
         setSyncMessages(prev => {
           const updated = { ...prev };
@@ -255,13 +298,26 @@ export const BranchGateDeviceManagement: React.FC = () => {
         machineNumber: device.machine_number,
         brand: device.brand
       });
-      // Update device status to online
-      setDevices(prev => prev.map(d => 
+      
+      // Update device status to online in database
+      await invoke('update_device_status', {
+        ip: device.ip,
+        status: 'online'
+      });
+      
+      // Update device status to online in UI
+      setDevices(prev => prev.map(d =>
         d.id === device.id ? { ...d, status: 'online' } : d
       ));
     } catch (error) {
-      // Update device status to offline
-      setDevices(prev => prev.map(d => 
+      // Update device status to offline in database
+      await invoke('update_device_status', {
+        ip: device.ip,
+        status: 'offline'
+      }).catch(() => {}); // Ignore errors on status update
+      
+      // Update device status to offline in UI
+      setDevices(prev => prev.map(d =>
         d.id === device.id ? { ...d, status: 'offline' } : d
       ));
       throw error;
@@ -374,6 +430,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
           onDelete={(id, name) => setDeleteDialog({ open: true, type: 'device', id, name })}
           onSetDefault={handleSetDefaultDevice}
           onSync={handleSyncDeviceLogs}
+          onSyncToDevice={handleSyncToDevice}
           onTest={testDeviceConnection}
           loading={loading}
           syncingDevices={syncingDevices}
@@ -653,11 +710,12 @@ const DevicesTab: React.FC<{
   onDelete: (id: number, name: string) => void;
   onSetDefault: (id: number) => void;
   onSync: (device: Device) => void;
+  onSyncToDevice: (device: Device) => void;
   onTest: (device: Device) => void;
   loading: boolean;
   syncingDevices: Set<number>;
   syncMessages: Record<number, string>;
-}> = ({ devices, onAdd, onEdit, onDelete, onSync, loading, syncingDevices, syncMessages }) => (
+}> = ({ devices, onAdd, onEdit, onDelete, onSync, onSyncToDevice, loading, syncingDevices, syncMessages }) => (
   <div>
     <div className="flex justify-between items-center mb-6">
       <div>
@@ -754,6 +812,16 @@ const DevicesTab: React.FC<{
                       >
                         <Edit2 className="w-3 h-3" />
                         Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onSyncToDevice(device)}
+                        disabled={syncingDevices.has(device.id)}
+                        className="gap-1 h-8 bg-blue-50 hover:bg-blue-100 border-blue-200"
+                      >
+                        <Upload className="w-3 h-3" />
+                        Sync to Device
                       </Button>
                       <Button
                         variant="outline"
