@@ -192,7 +192,7 @@ class SyncService {
 
   // Sync a single item to Supabase
   private async syncItem(item: SyncQueueItem): Promise<void> {
-    const payload = JSON.parse(item.payload);
+    const payload = JSON.parse(item.data);
 
     switch (item.table_name) {
       case 'employees':
@@ -238,7 +238,7 @@ class SyncService {
   }
 
   // Sync attendance to Supabase - uses upsert to prevent duplicate punches
-  private async syncAttendance(item: SyncQueueItem, payload: any): Promise<void> {
+  private async syncAttendance(_item: SyncQueueItem, payload: any): Promise<void> {
     await supabase
       .from('attendance_logs')
       .upsert(payload, { 

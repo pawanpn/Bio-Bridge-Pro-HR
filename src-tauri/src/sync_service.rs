@@ -419,6 +419,7 @@ pub async fn get_sync_stats(
 }
 
 /// Add record to sync queue
+#[allow(dead_code)]
 pub fn queue_for_sync(
     conn: &rusqlite::Connection,
     table_name: &str,

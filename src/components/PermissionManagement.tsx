@@ -72,13 +72,15 @@ export const PermissionManagement: React.FC = () => {
       const { data: permsData, error: permsError } = await supabase
         .from('permissions')
         .select('*')
-        .order('module', 'permission');
+        .order('module', { ascending: true })
+        .order('permission', { ascending: true });
 
       if (permsError) throw permsError;
 
       const { data: rolePermsData, error: rolePermsError } = await supabase
         .from('role_permissions')
-        .select('*');
+        .select('*')
+        .order('role', { ascending: true });
 
       if (rolePermsError) throw rolePermsError;
 

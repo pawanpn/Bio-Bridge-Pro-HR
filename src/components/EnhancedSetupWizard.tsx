@@ -402,9 +402,10 @@ export const EnhancedSetupWizard: React.FC = () => {
 
     // Assign permissions to roles (using role VARCHAR, not role_id)
     if (insertedPermissions) {
-      const rolePermissions = [];
+      const rolePermissions: Array<{role: string, permission_id: string, organization_id: string}> = [];
       
       // Define role codes (matching your schema: SUPER_ADMIN, ADMIN, MANAGER, EMPLOYEE, OPERATOR)
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const roles = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'SUPERVISOR', 'EMPLOYEE', 'OPERATOR', 'VIEWER'];
 
       // SUPER_ADMIN - all permissions
