@@ -1,3 +1,4 @@
+#![allow(unused_variables, dead_code, unused_imports)]
 mod db;
 mod hardware;
 mod cloud;
@@ -704,7 +705,7 @@ fn add_device(device: DeviceInput, state: State<'_, AppState>) -> Result<i64, Ap
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
     conn.execute(
         "INSERT INTO Devices (branch_id, gate_id, name, brand, ip_address, port, comm_key, machine_number, is_default) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0)",
-        (device.branch_id, device.gate_id, &device.name, &device.brand, &device.ip, device.port, device.comm_key, device.machine_number),
+        (1, device.gate_id, &device.name, &device.brand, &device.ip, device.port, device.comm_key, device.machine_number),
     )?;
     Ok(conn.last_insert_rowid())
 }
@@ -715,7 +716,7 @@ fn update_device(id: i64, device: DeviceInput, state: State<'_, AppState>) -> Re
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
     conn.execute(
         "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, machine_number=?6, branch_id=?7, gate_id=?8 WHERE id=?9",
-        (&device.name, &device.brand, &device.ip, device.port, device.comm_key, device.machine_number, device.branch_id, device.gate_id, id),
+        (&device.name, &device.brand, &device.ip, device.port, device.comm_key, device.machine_number, 1, device.gate_id, id),
     )?;
     Ok(())
 }
@@ -1483,3 +1484,4 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("Error while running Bio Bridge Pro HR");
 }
+
