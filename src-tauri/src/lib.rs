@@ -332,10 +332,11 @@ async fn sync_device_logs_internal(
         chrono::Utc::now().format("%H:%M:%S"), device_id, ip, port, brand
     ));
 
+    // Extract device info with lock - drop guard BEFORE any await
     let (branch_id, gate_id, branch_name, gate_name, comm_key, machine_number) = {
         let db_guard = state.db.lock().map_err(lock_err)?;
         let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-        conn.query_row(
+        let result = conn.query_row(
             "SELECT d.branch_id, d.gate_id, b.name, g.name, d.comm_key, d.machine_number 
              FROM Devices d
              JOIN Branches b ON d.branch_id = b.id
@@ -347,7 +348,9 @@ async fn sync_device_logs_internal(
                 row.get::<_, String>(2)?, row.get::<_, String>(3)?,
                 row.get::<_, i32>(4)?, row.get::<_, i32>(5)?
             ))
-        ).unwrap_or((1, 1, "Head Office".to_string(), "Main Gate".to_string(), 0, 1))
+        ).unwrap_or((1, 1, "Head Office".to_string(), "Main Gate".to_string(), 0, 1));
+        // Guard dropped here when block ends
+        result
     };
 
     let mut machine_no = machine_number;
@@ -355,6 +358,7 @@ async fn sync_device_logs_internal(
         machine_no = 11; 
     }
 
+    // FIRST AWAIT - safe now, no locks in scope
     let mut user_info_result = crate::hardware::get_all_user_info(&ip, port, comm_key, machine_no, parsed_brand.clone()).await
         .map_err(|e| {
             let _ = app.emit("console-log", format!("[ERROR] Handshake/User pull failed: {}", e));
@@ -362,50 +366,58 @@ async fn sync_device_logs_internal(
         })?;
 
     if user_info_result.is_empty() {
-        let db_guard = state.db.lock().map_err(lock_err)?;
-        if let Some(conn) = db_guard.as_ref() {
-            let count: i64 = conn.query_row("SELECT COUNT(*) FROM Employees", [], |r| r.get(0)).unwrap_or(0);
-            if count == 0 {
-                let enterprise_names = vec![
-                    "Purushottam S.", "Amit Shah", "Binod K.", "Deepak C.", "Eran K.",
-                    "Firoz M.", "Ganesh B.", "Hari P.", "Ishwar D.", "Jiban G.",
-                    "Kisan R.", "Laxman S.", "Manoj K.", "Narayan T.", "Ojasvi P.",
-                    "Pawan N.", "Qasim A.", "Rajan M.", "Suresh K.", "Tek B.",
-                    "Umesh G.", "Vivek S.", "Willy K.", "Xavier D.", "Yuvraj P."
-                ];
-                for (i, name) in enterprise_names.iter().enumerate() {
-                    user_info_result.push(crate::models::UserInfo {
-                        employee_id: (i + 1) as i32,
-                        name: name.to_string(),
-                    });
-                }
-            } else {
-                return Err(crate::errors::AppError::HardwareError("Handshake OK but no staff found.".into()));
+        // Check employee count with lock - drop guard immediately
+        let count = {
+            let db_guard = state.db.lock().map_err(lock_err)?;
+            let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+            conn.query_row("SELECT COUNT(*) FROM Employees", [], |r| r.get(0)).unwrap_or(0)
+            // Guard dropped here
+        };
+        
+        if count == 0 {
+            let enterprise_names = vec![
+                "Purushottam S.", "Amit Shah", "Binod K.", "Deepak C.", "Eran K.",
+                "Firoz M.", "Ganesh B.", "Hari P.", "Ishwar D.", "Jiban G.",
+                "Kisan R.", "Laxman S.", "Manoj K.", "Narayan T.", "Ojasvi P.",
+                "Pawan N.", "Qasim A.", "Rajan M.", "Suresh K.", "Tek B.",
+                "Umesh G.", "Vivek S.", "Willy K.", "Xavier D.", "Yuvraj P."
+            ];
+            for (i, name) in enterprise_names.iter().enumerate() {
+                user_info_result.push(crate::models::UserInfo {
+                    employee_id: (i + 1) as i32,
+                    name: name.to_string(),
+                });
             }
+        } else {
+            return Err(crate::errors::AppError::HardwareError("Handshake OK but no staff found.".into()));
         }
     }
 
+    // Insert users with lock - drop guard immediately
     {
         let db_guard = state.db.lock().map_err(lock_err)?;
-        if let Some(conn) = db_guard.as_ref() {
-            for u in &user_info_result {
-                let _ = conn.execute(
-                    "INSERT INTO Employees (id, name, branch_id) VALUES (?1, ?2, ?3) 
-                     ON CONFLICT(id) DO UPDATE SET name = excluded.name",
-                    params![u.employee_id, u.name, branch_id],
-                );
-            }
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+        for u in &user_info_result {
+            let _ = conn.execute(
+                "INSERT INTO Employees (id, name, branch_id) VALUES (?1, ?2, ?3) 
+                 ON CONFLICT(id) DO UPDATE SET name = excluded.name",
+                params![u.employee_id, u.name, branch_id],
+            );
         }
+        // Guard dropped when block ends
     }
 
+    // Get last timestamp with lock - drop guard BEFORE any await
     let last_timestamp: Option<String> = if incremental {
         let db_guard = state.db.lock().map_err(lock_err)?;
         let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-        conn.query_row(
+        let result = conn.query_row(
             "SELECT MAX(timestamp) FROM AttendanceLogs WHERE device_id = ?1",
             params![device_id],
             |row| row.get(0)
-        ).ok()
+        ).ok();
+        // Guard dropped here
+        result
     } else {
         None
     };
