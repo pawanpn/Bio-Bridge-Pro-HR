@@ -2245,7 +2245,7 @@ pub fn run() {
         })
                 .setup(|app| {
             let app_dir = app.path().app_data_dir().expect("Failed to resolve app data dir");
-            let conn = crate::db::init_db(&app_dir).expect("Failed to initialize SQLite");
+            let conn = crate::db::init_db(&app_dir).expect("Failed to initialize SQLite"); let _ = conn.execute("INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (1, 1, 'Head Office', 'Kathmandu') ", []); let _ = conn.execute("INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')", []);
 
             // --- Force Insert Branches and Gates ---
             let _ = conn.execute("INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (1, 1, 'Head Office', 'Kathmandu')", []);
@@ -2256,7 +2256,7 @@ pub fn run() {
 
             let state = app.state::<AppState>();
             let app_dir = app.path().app_data_dir().expect("Failed to resolve app data dir");
-            let conn = crate::db::init_db(&app_dir).expect("Failed to initialize SQLite");
+            let conn = crate::db::init_db(&app_dir).expect("Failed to initialize SQLite"); let _ = conn.execute("INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (1, 1, 'Head Office', 'Kathmandu') ", []); let _ = conn.execute("INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')", []);
 
             // Load stored cloud credentials and root folder ID on startup
             let config: Option<(String, String, String, Option<String>)> = conn.query_row(
