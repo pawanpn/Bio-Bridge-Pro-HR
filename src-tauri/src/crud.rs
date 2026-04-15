@@ -274,11 +274,13 @@ pub struct CreateEmployeeRequest {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdateEmployeeRequest {
+    pub employee_code: Option<String>,
     pub first_name: Option<String>,
     pub middle_name: Option<String>,
     pub last_name: Option<String>,
     pub date_of_birth: Option<String>,
     pub gender: Option<String>,
+    pub marital_status: Option<String>,
     pub personal_email: Option<String>,
     pub personal_phone: Option<String>,
     pub current_address: Option<String>,
@@ -294,6 +296,9 @@ pub struct UpdateEmployeeRequest {
     pub reporting_manager_id: Option<String>,
     pub bank_name: Option<String>,
     pub account_number: Option<String>,
+    pub emergency_contact_name: Option<String>,
+    pub emergency_contact_phone: Option<String>,
+    pub emergency_contact_relation: Option<String>,
 }
 
 /// CREATE: Add new employee
@@ -617,6 +622,30 @@ pub async fn update_employee(
     if let Some(acc) = request.account_number {
         updates.push("account_number = ?");
         values.push(Box::new(sanitize_input(&acc)));
+    }
+    if let Some(emp_code) = request.employee_code {
+        updates.push("employee_code = ?");
+        values.push(Box::new(sanitize_input(&emp_code)));
+    }
+    if let Some(marital) = request.marital_status {
+        updates.push("marital_status = ?");
+        values.push(Box::new(marital));
+    }
+    if let Some(doj) = request.date_of_joining {
+        updates.push("date_of_joining = ?");
+        values.push(Box::new(doj));
+    }
+    if let Some(emergency_name) = request.emergency_contact_name {
+        updates.push("emergency_contact_name = ?");
+        values.push(Box::new(sanitize_input(&emergency_name)));
+    }
+    if let Some(emergency_phone) = request.emergency_contact_phone {
+        updates.push("emergency_contact_phone = ?");
+        values.push(Box::new(sanitize_input(&emergency_phone)));
+    }
+    if let Some(emergency_relation) = request.emergency_contact_relation {
+        updates.push("emergency_contact_relation = ?");
+        values.push(Box::new(sanitize_input(&emergency_relation)));
     }
 
     if updates.is_empty() {

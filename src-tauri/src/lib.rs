@@ -874,14 +874,38 @@ fn set_default_device(id: i64, state: State<'_, AppState>) -> Result<(), AppErro
 
 #[tauri::command]
 fn save_device_config(
-    id: i64, name: String, brand: String, ip: String, port: u16, comm_key: i32, branch_id: i64, gate_id: i64,
+    id: i64, name: String, brand: String, ip: String, port: u16, comm_key: i32, 
+    branch_id: i64, gate_id: i64,
+    subnet_mask: Option<String>,
+    gateway: Option<String>,
+    dns: Option<String>,
+    dhcp: Option<i32>,
+    server_mode: Option<String>,
+    server_address: Option<String>,
+    https_enabled: Option<i32>,
     state: State<'_, AppState>,
 ) -> Result<(), AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
     conn.execute(
-        "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, branch_id=?6, gate_id=?7 WHERE id=?8",
-        (&name, &brand, &ip, port, comm_key, branch_id, gate_id, id),
+        "UPDATE Devices SET 
+            name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, 
+            branch_id=?6, gate_id=?7,
+            subnet_mask=?8, gateway=?9, dns=?10, dhcp=?11, 
+            server_mode=?12, server_address=?13, https_enabled=?14
+         WHERE id=?15",
+        (
+            &name, &brand, &ip, port, comm_key, 
+            branch_id, gate_id,
+            &subnet_mask.unwrap_or_else(|| "255.255.255.0".to_string()),
+            &gateway.unwrap_or_else(|| "0.0.0.0".to_string()),
+            &dns.unwrap_or_else(|| "0.0.0.0".to_string()),
+            &dhcp.unwrap_or(0),
+            &server_mode.unwrap_or_else(|| "Standalone".to_string()),
+            &server_address.unwrap_or_else(|| "0.0.0.0".to_string()),
+            &https_enabled.unwrap_or(0),
+            id,
+        ),
     )?;
     Ok(())
 }
@@ -1344,6 +1368,25 @@ fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, 
         |row| row.get(0)
     ).unwrap_or_else(|_| "Never".to_string());
 
+    // Get all branches with their counts (for Super Admin)
+    let mut branch_stmt = conn.prepare(
+        "SELECT b.id, b.name, b.location,
+                (SELECT COUNT(*) FROM Employees WHERE branch_id = b.id) as employee_count,
+                (SELECT COUNT(*) FROM Gates WHERE branch_id = b.id) as gate_count,
+                (SELECT COUNT(*) FROM Devices WHERE branch_id = b.id) as device_count
+         FROM Branches b ORDER BY b.name"
+    )?;
+    let branch_rows: Vec<serde_json::Value> = branch_stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "location": row.get::<_, Option<String>>(2)?,
+            "employee_count": row.get::<_, i64>(3)?,
+            "gate_count": row.get::<_, i64>(4)?,
+            "device_count": row.get::<_, i64>(5)?,
+        }))
+    })?.filter_map(|r| r.ok()).collect();
+
     Ok(serde_json::json!({
         "totalStaff": total_staff,
         "presentToday": present_staff.len(),
@@ -1356,6 +1399,7 @@ fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, 
         "leaveStaff": leave_staff,
         "lastUpdated": chrono::Local::now().format("%H:%M").to_string(),
         "lastDeviceSync": last_device_sync,
+        "branches": branch_rows,
     }))
 }
 
@@ -2199,7 +2243,18 @@ pub fn run() {
             current_user_branch_id: Mutex::new(None),
             supabase_config:     Mutex::new(None),
         })
-        .setup(|app| {
+                .setup(|app| {
+            let app_dir = app.path().app_data_dir().expect("Failed to resolve app data dir");
+            let conn = crate::db::init_db(&app_dir).expect("Failed to initialize SQLite");
+
+            // --- Force Insert Branches and Gates ---
+            let _ = conn.execute("INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (1, 1, 'Head Office', 'Kathmandu')", []);
+            let _ = conn.execute("INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (2, 1, 'Lalitpur Branch', 'Lalitpur')", []);
+            let _ = conn.execute("INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')", []);
+            let _ = conn.execute("INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (2, 2, 'Staff Entry')", []);
+            // ----------------------------------------
+
+            let state = app.state::<AppState>();
             let app_dir = app.path().app_data_dir().expect("Failed to resolve app data dir");
             let conn = crate::db::init_db(&app_dir).expect("Failed to initialize SQLite");
 

@@ -209,6 +209,7 @@ export const EmployeeManagement: React.FC = () => {
         last_name: formData.last_name,
         date_of_birth: formData.date_of_birth || undefined,
         gender: formData.gender || undefined,
+        marital_status: formData.marital_status || undefined,
         personal_email: formData.personal_email || undefined,
         personal_phone: formData.personal_phone || undefined,
         current_address: formData.current_address || undefined,
@@ -224,6 +225,9 @@ export const EmployeeManagement: React.FC = () => {
         reporting_manager_id: formData.reporting_manager_id || undefined,
         bank_name: formData.bank_name || undefined,
         account_number: formData.account_number || undefined,
+        emergency_contact_name: formData.emergency_contact_name || undefined,
+        emergency_contact_phone: formData.emergency_contact_phone || undefined,
+        emergency_contact_relation: formData.emergency_contact_relation || undefined,
       };
 
       // Save using the crud commands (local SQLite first)
