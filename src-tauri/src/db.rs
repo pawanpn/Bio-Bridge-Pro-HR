@@ -79,6 +79,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             is_default INTEGER DEFAULT 0,
             branch_id INTEGER REFERENCES Branches(id),
             gate_id INTEGER REFERENCES Gates(id),
+            status TEXT DEFAULT 'offline',
             subnet_mask TEXT,
             gateway TEXT,
             dns TEXT,

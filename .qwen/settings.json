@@ -18,7 +18,8 @@
       "Bash(del *)",
       "Bash(dumpbin *)",
       "Bash(copy *)",
-      "Bash(npm *)"
+      "Bash(npm *)",
+      "Bash(select-string *)"
     ]
   },
   "$version": 3
