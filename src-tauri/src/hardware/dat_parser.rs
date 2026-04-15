@@ -1,6 +1,7 @@
 use crate::models::{AttendanceLog, UserInfo};
 use std::fs;
 
+#[allow(dead_code)]
 pub fn parse_user_dat(file_path: &str) -> Result<Vec<UserInfo>, String> {
     let data = fs::read(file_path).map_err(|e| e.to_string())?;
     let mut users = Vec::new();
@@ -35,6 +36,7 @@ pub fn parse_user_dat(file_path: &str) -> Result<Vec<UserInfo>, String> {
     Ok(users)
 }
 
+#[allow(dead_code)]
 pub fn parse_attlog_dat(file_path: &str, device_id: i32) -> Result<Vec<AttendanceLog>, String> {
     let data = fs::read(file_path).map_err(|e| e.to_string())?;
     let mut logs = Vec::new();
