@@ -2,13 +2,14 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DeviceScanner } from '../components/DeviceScanner';
 import { invoke } from '@tauri-apps/api/core';
+import { useAuth } from '../context/AuthContext';
 import { 
   Users, UserCheck, UserMinus, Cloud, CloudOff, Clock, X, CalendarCheck, 
   Fingerprint, ScanFace, ArrowLeft, DollarSign, TrendingUp, TrendingDown,
   ShoppingCart, Package, FileText, Briefcase, Calendar, Activity,
   CreditCard, Wallet, BarChart3, PieChart as PieChartIcon,
   Layers, Truck, Settings, ClipboardList, CheckCircle, AlertCircle,
-  CalendarDays, UserPlus, Building2, MapPin, Phone, Mail
+  CalendarDays, UserPlus, Building2, MapPin, Phone, Mail, DoorOpen, Monitor
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, 
@@ -33,12 +34,6 @@ interface ERPStats {
   pendingLeaveRequests: number;
   newHiresThisMonth: number;
   resignationsThisMonth: number;
-  
-  // Payroll Module
-  monthlyPayroll: number;
-  pendingPayslips: number;
-  totalDeductions: number;
-  totalAllowances: number;
   
   // Finance Module
   totalRevenue: number;
@@ -71,6 +66,16 @@ interface ERPStats {
   absentStaff: Staff[];
   lateStaff: Staff[];
   leaveStaff: Staff[];
+  branches: BranchInfo[];
+}
+
+interface BranchInfo {
+  id: number;
+  name: string;
+  location?: string;
+  employee_count: number;
+  gate_count: number;
+  device_count: number;
 }
 
 interface Staff {
@@ -130,7 +135,10 @@ const SummaryMini: React.FC<{ label: string; value: string; color: string }> = (
 
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const [stats, setStats] = useState<Stats | null>(null);
+  const { user } = useAuth();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  
+  const [stats, setStats] = useState<ERPStats | null>(null);
   const [cloud, setCloud] = useState<CloudConfig | null>(null);
   const [device, setDevice] = useState<DeviceConfig | null>(null);
   const [isDeviceOnline, setIsDeviceOnline] = useState<boolean | null>(null);
@@ -566,6 +574,50 @@ export const Dashboard: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Charts Column */}
             <div className="lg:col-span-2 space-y-6">
+              {/* Branches Overview - Super Admin Only */}
+              {isSuperAdmin && stats.branches && stats.branches.length > 0 && (
+                <Card className="border border-border">
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-sm font-bold">Organization Structure - Branches</CardTitle>
+                      <Button variant="outline" size="sm" onClick={() => navigate('/branch-gate-device')}>
+                        Manage
+                      </Button>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {stats.branches.map((branch) => (
+                        <div
+                          key={branch.id}
+                          className="p-3 rounded-lg border border-border bg-card hover:bg-accent/10 cursor-pointer transition-colors"
+                          onClick={() => navigate(`/branch-gate-device?branch=${branch.id}`)}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <Building2 className="w-4 h-4 text-primary" />
+                            <span className="font-semibold text-sm">{branch.name}</span>
+                          </div>
+                          <div className="flex gap-3 text-xs text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <Users className="w-3 h-3" /> {branch.employee_count}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <DoorOpen className="w-3 h-3" /> {branch.gate_count}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Monitor className="w-3 h-3" /> {branch.device_count}
+                            </span>
+                          </div>
+                          {branch.location && (
+                            <p className="text-xs text-muted-foreground mt-1">{branch.location}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Pie Chart */}
               <Card>
                 <CardHeader className="pb-3">

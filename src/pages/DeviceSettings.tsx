@@ -219,6 +219,13 @@ export const DeviceSettings: React.FC = () => {
           commKey: Number(form.comm_key),
           branchId: form.branch_id || 1,
           gateId: form.gate_id || 1,
+          subnetMask: form.subnet_mask,
+          gateway: form.gateway,
+          dns: form.dns,
+          dhcp: form.dhcp ? 1 : 0,
+          serverMode: form.server_mode,
+          serverAddress: form.server_address,
+          httpsEnabled: form.https_enabled ? 1 : 0,
         });
       } else {
         await invoke('add_device', {
