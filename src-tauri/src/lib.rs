@@ -1,4 +1,3 @@
-#![allow(unused_variables, dead_code, unused_imports)]
 mod db;
 mod hardware;
 mod cloud;
@@ -8,7 +7,7 @@ mod crud;
 mod security;
 mod sync_service;
 
-use tauri::{AppHandle, Manager, State, Emitter, Listener};
+use tauri::{AppHandle, Manager, State, Emitter};
 use std::sync::Mutex;
 use std::fs;
 use rusqlite::{Connection, params};
@@ -16,10 +15,9 @@ use crate::errors::AppError;
 use crate::models::DeviceBrand;
 use crate::cloud::gdrive::{ServiceAccountKey, NormalizedLog};
 
-use aes_gcm::{
-    aead::{Aead, KeyInit},
-    Aes256Gcm, Nonce
-};
+// Crypto imports temporarily unused in lib.rs, but required for future enhancements
+// use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+
 use rand::Rng;
 use sha2::{Digest, Sha256};
 
@@ -668,7 +666,7 @@ async fn test_device_connection(ip: String, port: u16, comm_key: i32, machine_nu
 }
 
 #[tauri::command]
-fn update_device_status(ip: String, status: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn _update_device_status(ip: String, status: String, state: State<'_, AppState>) -> Result<(), AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
     conn.execute("UPDATE Devices SET status = ?1 WHERE ip_address = ?2", params![status, ip])?;
@@ -676,6 +674,7 @@ fn update_device_status(ip: String, status: String, state: State<'_, AppState>) 
 }
 
 #[derive(serde::Deserialize)]
+#[allow(dead_code)]
 struct DeviceInput {
     name: String, brand: String, ip: String, port: u16,
     #[serde(rename = "commKey")]
@@ -734,13 +733,13 @@ fn set_default_device(id: i64, state: State<'_, AppState>) -> Result<(), AppErro
 fn save_device_config(
     id: i64, name: String, brand: String, ip: String, port: u16, comm_key: i32, 
     branch_id: i64, gate_id: i64,
-    subnet_mask: Option<String>,
-    gateway: Option<String>,
-    dns: Option<String>,
-    dhcp: Option<i32>,
-    server_mode: Option<String>,
-    server_address: Option<String>,
-    https_enabled: Option<i32>,
+    _subnet_mask: Option<String>,
+    _gateway: Option<String>,
+    _dns: Option<String>,
+    _dhcp: Option<i32>,
+    _server_mode: Option<String>,
+    _server_address: Option<String>,
+    _https_enabled: Option<i32>,
     state: State<'_, AppState>,
 ) -> Result<(), AppError> {
     let db_guard = state.db.lock().map_err(lock_err)?;
@@ -802,7 +801,7 @@ fn stop_realtime_sync(state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
-async fn process_log_and_sync(
+async fn _process_log_and_sync(
     employee_id: i32,
     device_id: i32,
     timestamp: String,
@@ -991,42 +990,42 @@ fn get_dashboard_stats(state: State<'_, AppState>) -> Result<serde_json::Value, 
 }
 
 #[tauri::command]
-fn get_today_employee_punches(state: State<'_, AppState>, employee_id: i64) -> Result<serde_json::Value, AppError> {
+fn get_today_employee_punches(_state: State<'_, AppState>, employee_id: i64) -> Result<serde_json::Value, AppError> {
     Ok(serde_json::json!({"id": employee_id, "punches": []}))
 }
 
 #[tauri::command]
-fn get_daily_reports(state: State<'_, AppState>, from_date: String, to_date: String, _dept: Option<String>, _search: Option<String>, _branch_id: Option<i64>, _gate_id: Option<i64>) -> Result<Vec<serde_json::Value>, AppError> {
+fn get_daily_reports(_state: State<'_, AppState>, _from_date: String, _to_date: String, _dept: Option<String>, _search: Option<String>, _branch_id: Option<i64>, _gate_id: Option<i64>) -> Result<Vec<serde_json::Value>, AppError> {
     Ok(vec![])
 }
 
 #[tauri::command]
-fn get_raw_logs(state: State<'_, AppState>, from_date: String, to_date: String, _search: Option<String>, _branch_id: Option<i64>, _gate_id: Option<i64>) -> Result<Vec<serde_json::Value>, AppError> {
+fn get_raw_logs(_state: State<'_, AppState>, _from_date: String, _to_date: String, _search: Option<String>, _branch_id: Option<i64>, _gate_id: Option<i64>) -> Result<Vec<serde_json::Value>, AppError> {
     Ok(vec![])
 }
 
 #[tauri::command]
-async fn export_usb_db(state: State<'_, AppState>) -> Result<String, AppError> {
+async fn export_usb_db(_state: State<'_, AppState>) -> Result<String, AppError> {
     Ok("Desktop/exported.db".into())
 }
 
 #[tauri::command]
-fn get_departments(state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
+fn get_departments(_state: State<'_, AppState>) -> Result<Vec<String>, AppError> {
     Ok(vec!["HR".into(), "Finance".into()])
 }
 
 #[tauri::command]
-fn get_monthly_summary(state: State<'_, AppState>, year_month: String, _dept: Option<String>, _search: Option<String>) -> Result<Vec<serde_json::Value>, AppError> {
+fn get_monthly_summary(_state: State<'_, AppState>, _year_month: String, _dept: Option<String>, _search: Option<String>) -> Result<Vec<serde_json::Value>, AppError> {
     Ok(vec![])
 }
 
 #[tauri::command]
-fn get_monthly_ledger(state: State<'_, AppState>, year_month: String, _branch_id: Option<i64>, _gate_id: Option<i64>, _dept: Option<String>) -> Result<serde_json::Value, AppError> {
+fn get_monthly_ledger(_state: State<'_, AppState>, _year_month: String, _branch_id: Option<i64>, _gate_id: Option<i64>, _dept: Option<String>) -> Result<serde_json::Value, AppError> {
     Ok(serde_json::json!([]))
 }
 
 #[tauri::command]
-fn get_salary_sheet(state: State<'_, AppState>, year_month: String, _branch_id: Option<i64>, _gate_id: Option<i64>) -> Result<Vec<serde_json::Value>, AppError> {
+fn get_salary_sheet(_state: State<'_, AppState>, _year_month: String, _branch_id: Option<i64>, _gate_id: Option<i64>) -> Result<Vec<serde_json::Value>, AppError> {
     Ok(vec![])
 }
 
@@ -1040,17 +1039,17 @@ fn list_branches(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, A
 }
 
 #[tauri::command]
-fn get_employee_monthly_attendance(state: State<'_, AppState>, employee_id: i64, year: i32, month: i32) -> Result<serde_json::Value, AppError> {
+fn get_employee_monthly_attendance(_state: State<'_, AppState>, employee_id: i64, _year: i32, _month: i32) -> Result<serde_json::Value, AppError> {
     Ok(serde_json::json!({"id": employee_id, "logs": []}))
 }
 
 #[tauri::command]
-fn delete_leave_request(state: State<'_, AppState>, leave_id: i64) -> Result<(), AppError> {
+fn delete_leave_request(_state: State<'_, AppState>, _leave_id: i64) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn get_leave_stats(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+fn get_leave_stats(_state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
     Ok(serde_json::json!({"pending": 0}))
 }
 
@@ -1060,17 +1059,17 @@ fn get_leave_types(_state: State<'_, AppState>) -> Result<Vec<String>, AppError>
 }
 
 #[tauri::command]
-fn add_manual_attendance(state: State<'_, AppState>, employee_id: i64, timestamp: String, _method: Option<String>) -> Result<i64, AppError> {
+fn add_manual_attendance(_state: State<'_, AppState>, _employee_id: i64, _timestamp: String, _method: Option<String>) -> Result<i64, AppError> {
     Ok(1)
 }
 
 #[tauri::command]
-fn import_csv_attendance(state: State<'_, AppState>, csv_content: String) -> Result<serde_json::Value, AppError> {
+fn import_csv_attendance(_state: State<'_, AppState>, _csv_content: String) -> Result<serde_json::Value, AppError> {
     Ok(serde_json::json!({"imported": 0}))
 }
 
 #[tauri::command]
-fn list_employees_for_select(state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+fn list_employees_for_select(_state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
     Ok(serde_json::json!([]))
 }
 
@@ -1100,7 +1099,7 @@ fn is_master_pin_set(app: AppHandle) -> bool {
 }
 
 #[tauri::command]
-fn login(username: String, password: String, state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+fn login(username: String, password: String, _state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
     if username == "admin" && password == "admin" {
         Ok(serde_json::json!({"role": "SUPER_ADMIN"}))
     } else {
@@ -1109,182 +1108,185 @@ fn login(username: String, password: String, state: State<'_, AppState>) -> Resu
 }
 
 #[tauri::command]
-fn logout(state: State<'_, AppState>) -> Result<(), AppError> {
+fn logout(_state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn list_users(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+fn list_users(_state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
     Ok(vec![])
 }
 
 #[tauri::command]
-fn add_user(username: String, password: String, role: String, branch_id: Option<i64>, branch_ids: Vec<i64>, state: State<'_, AppState>) -> Result<(), AppError> {
+fn add_user(_username: String, _password: String, _role: String, _branch_id: Option<i64>, _branch_ids: Vec<i64>, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn update_user(id: i64, username: String, role: String, branch_id: Option<i64>, branch_ids: Vec<i64>, is_active: bool, state: State<'_, AppState>) -> Result<(), AppError> {
+fn update_user(_id: i64, _username: String, _role: String, _branch_id: Option<i64>, _branch_ids: Vec<i64>, _is_active: bool, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn reset_user_password(id: i64, new_password: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn reset_user_password(_id: i64, _new_password: String, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-async fn import_hardware_files(user_path: String, log_path: String, device_id: i32, branch_id: i64, state: State<'_, AppState>) -> Result<String, AppError> {
+async fn import_hardware_files(_user_path: String, _log_path: String, _device_id: i32, _branch_id: i64, _state: State<'_, AppState>) -> Result<String, AppError> {
     Ok("Success".into())
 }
 
 #[tauri::command]
-fn delete_user(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+fn delete_user(_id: i64, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn change_password(new_password: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn change_password(_new_password: String, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn send_notification(title: String, message: String, receiver_type: String, receiver_id: Option<i64>, branch_id: Option<i64>, notification_type: String, expires_at: Option<String>, sender_id: Option<i64>, sender_name: Option<String>, state: State<'_, AppState>) -> Result<i64, AppError> {
+fn send_notification(_title: String, _message: String, _receiver_type: String, _receiver_id: Option<i64>, _branch_id: Option<i64>, _notification_type: String, _expires_at: Option<String>, _sender_id: Option<i64>, _sender_name: Option<String>, _state: State<'_, AppState>) -> Result<i64, AppError> {
     Ok(1)
 }
 
 #[tauri::command]
-fn get_my_notifications(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+fn get_my_notifications(_state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
     Ok(vec![])
 }
 
 #[tauri::command]
-fn mark_notification_read(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+fn mark_notification_read(_id: i64, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn mark_all_notifications_read(state: State<'_, AppState>) -> Result<(), AppError> {
+fn mark_all_notifications_read(_state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn get_all_notifications(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+fn get_all_notifications(_state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
     Ok(vec![])
 }
 
 #[tauri::command]
-fn delete_notification(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+fn delete_notification(_id: i64, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn get_unread_count(state: State<'_, AppState>) -> Result<i64, AppError> {
+fn get_unread_count(_state: State<'_, AppState>) -> Result<i64, AppError> {
     Ok(0)
 }
 
-fn save_offline_token(app: &AppHandle, hw_id: &str, expiry: &str) -> Result<(), AppError> {
+fn save_offline_token(_app: &AppHandle, _hw_id: &str, _expiry: &str) -> Result<(), AppError> {
     let app_dir = app.path().app_data_dir().unwrap();
     let _ = fs::create_dir_all(&app_dir);
     Ok(())
 }
 
-fn check_offline_token(app: &tauri::AppHandle) -> Result<String, crate::errors::AppError> {
+fn check_offline_token(_app: &tauri::AppHandle) -> Result<String, crate::errors::AppError> {
     Ok("2026-12-31".into())
 }
 
+#[allow(dead_code)]
 const SECRET_KEY: &[u8; 32] = b"BioBridgeProEncryptionKey2026!#@"; 
 
+#[allow(dead_code)]
 fn encrypt_data(data: &[u8]) -> Result<Vec<u8>, AppError> {
     Ok(data.to_vec())
 }
 
+#[allow(dead_code)]
 fn decrypt_data(data: &[u8]) -> Result<Vec<u8>, AppError> {
     Ok(data.to_vec())
 }
 
 #[tauri::command]
-fn add_to_sync_queue(table_name: String, operation: String, payload: String, supabase_id: Option<String>, state: State<'_, AppState>) -> Result<(), AppError> {
+fn add_to_sync_queue(_table_name: String, _operation: String, _payload: String, _supabase_id: Option<String>, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn get_pending_sync_items(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+fn get_pending_sync_items(_state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
     Ok(vec![])
 }
 
 #[tauri::command]
-fn mark_sync_complete(id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+fn mark_sync_complete(_id: i64, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn update_sync_retry(id: i64, error_message: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn update_sync_retry(_id: i64, _error_message: String, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn upsert_employee_from_cloud(employee_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn upsert_employee_from_cloud(_employee_data: String, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn delete_employee_by_id(employee_code: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn delete_employee_by_id(_employee_code: String, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn get_employee_by_code(employee_code: String, state: State<'_, AppState>) -> Result<Option<serde_json::Value>, AppError> {
+fn get_employee_by_code(_employee_code: String, _state: State<'_, AppState>) -> Result<Option<serde_json::Value>, AppError> {
     Ok(None)
 }
 
 #[tauri::command]
-fn insert_attendance_from_cloud(attendance_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn insert_attendance_from_cloud(_attendance_data: String, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn upsert_leave_from_cloud(leave_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn upsert_leave_from_cloud(_leave_data: String, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn delete_leave_by_id(leave_id: i64, state: State<'_, AppState>) -> Result<(), AppError> {
+fn delete_leave_by_id(_leave_id: i64, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn upsert_item_from_cloud(item_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn upsert_item_from_cloud(_item_data: String, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn upsert_branch_from_cloud(branch_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn upsert_branch_from_cloud(_branch_data: String, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn upsert_gate_from_cloud(gate_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn upsert_gate_from_cloud(_gate_data: String, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn upsert_device_from_cloud(device_data: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn upsert_device_from_cloud(_device_data: String, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn mark_record_pending_sync(table_name: String, record_id: String, operation: String, payload: String, state: State<'_, AppState>) -> Result<(), AppError> {
+fn mark_record_pending_sync(_table_name: String, _record_id: String, _operation: String, _payload: String, _state: State<'_, AppState>) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-async fn import_device_employees(device_id: i64, branch_id: i64, app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+async fn import_device_employees(_device_id: i64, _branch_id: i64, _app: AppHandle, _state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
     Ok(serde_json::json!({"imported": 0}))
 }
 
 #[tauri::command]
-async fn sync_employees_to_device(device_id: i64, app: AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+async fn sync_employees_to_device(_device_id: i64, _app: AppHandle, _state: State<'_, AppState>) -> Result<serde_json::Value, AppError> {
     Ok(serde_json::json!({"synced": 0}))
 }
 
@@ -1295,7 +1297,7 @@ fn pin_hash(pin: &str) -> String {
 }
 
 #[tauri::command]
-async fn get_device_users(ip: String, port: u16, comm_key: i32, machine_number: i32, brand: String) -> Result<serde_json::Value, AppError> {
+async fn get_device_users(_ip: String, _port: u16, _comm_key: i32, _machine_number: i32, _brand: String) -> Result<serde_json::Value, AppError> {
     Ok(serde_json::json!({"count": 0}))
 }
 
