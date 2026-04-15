@@ -2243,35 +2243,19 @@ pub fn run() {
             current_user_branch_id: Mutex::new(None),
             supabase_config:     Mutex::new(None),
         })
-                .setup(|app| {
-            let app_dir = app.path().app_data_dir().expect("Failed to resolve app data dir");
-            let conn = crate::db::init_db(&app_dir).expect("Failed to initialize SQLite"); let _ = conn.execute("INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (1, 1, 'Head Office', 'Kathmandu') ", []); let _ = conn.execute("INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')", []);
-
-            // --- Force Insert Branches and Gates ---
+                                .setup(|app| {
+            let app_dir = app.path().app_data_dir().expect("failed to get app data dir");
+            let conn = crate::db::init_db(&app_dir).expect("failed to init db");
+            
+            // ????????? ???????? ??? ?? ?????????? ??????? ????????? ????????
             let _ = conn.execute("INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (1, 1, 'Head Office', 'Kathmandu')", []);
             let _ = conn.execute("INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (2, 1, 'Lalitpur Branch', 'Lalitpur')", []);
             let _ = conn.execute("INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')", []);
-            let _ = conn.execute("INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (2, 2, 'Staff Entry')", []);
-            // ----------------------------------------
-
-            let state = app.state::<AppState>();
-            let app_dir = app.path().app_data_dir().expect("Failed to resolve app data dir");
-            let conn = crate::db::init_db(&app_dir).expect("Failed to initialize SQLite"); let _ = conn.execute("INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (1, 1, 'Head Office', 'Kathmandu') ", []); let _ = conn.execute("INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')", []);
-
-            // Load stored cloud credentials and root folder ID on startup
-            let config: Option<(String, String, String, Option<String>)> = conn.query_row(
-                "SELECT client_email, private_key, project_id, root_folder_id FROM CloudConfig WHERE id = 1",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            ).ok();
             
             let state = app.state::<AppState>();
-            if let Some((email, pkey, pid, rid)) = config {
-                *state.service_account_key.lock().unwrap() = Some(ServiceAccountKey {
-                    client_email: email,
-                    private_key:  pkey,
-                    project_id:   pid,
-                });
+            *state.db.lock().unwrap() = Some(conn);
+            Ok(())
+        }) ;
                 *state.root_folder_id.lock().unwrap() = rid;
             }
 
@@ -3729,4 +3713,6 @@ async fn sync_employees_to_device(
         "total_employees": employees.len()
     }))
 }
+
+
 
