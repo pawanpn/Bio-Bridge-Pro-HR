@@ -4,10 +4,10 @@ async function sync() {
     try {
         await zkInstance.createSocket();
         const logs = await zkInstance.getAttendance();
-        console.log("--- DEVICE DATA ---");
-        console.table(logs.slice(0, 10));
+        console.log('--- DEVICE DATA RECEIVED ---');
+        console.table(logs.slice(0, 10)); 
         process.stdout.write(JSON.stringify(logs));
         await zkInstance.disconnect();
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error('Error:', e); }
 }
 sync();
