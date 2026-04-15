@@ -3729,3 +3729,4 @@ async fn sync_employees_to_device(
         "total_employees": employees.len()
     }))
 }
+
