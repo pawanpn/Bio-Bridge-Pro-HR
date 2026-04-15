@@ -34,6 +34,8 @@ interface ERPStats {
   pendingLeaveRequests: number;
   newHiresThisMonth: number;
   resignationsThisMonth: number;
+  absent: number;
+  totalStaff: number;
   
   // Finance Module
   totalRevenue: number;
@@ -82,6 +84,43 @@ interface Staff {
   id: number;
   name: string;
   time?: string;
+}
+
+interface CloudConfig {
+  configured: boolean;
+  clientEmail?: string;
+  projectId?: string;
+  rootFolderId?: string;
+}
+
+interface DeviceConfig {
+  id: number;
+  name: string;
+  ip_address: string;
+  ip: string;
+  port: number;
+  brand: string;
+  status: string;
+  is_default: boolean;
+}
+
+interface Stats {
+  totalEmployees: number;
+  presentToday: number;
+  absentToday: number;
+  onLeave: number;
+  lateToday: number;
+  pendingLeaveRequests: number;
+  newHiresThisMonth: number;
+  resignationsThisMonth: number;
+  absent: number;
+  totalStaff: number;
+  lastDeviceSync?: string;
+  presentStaff: Staff[];
+  absentStaff: Staff[];
+  lateStaff: Staff[];
+  leaveStaff: Staff[];
+  branches: BranchInfo[];
 }
 
 interface TodayPunchDetail {
@@ -166,7 +205,10 @@ export const Dashboard: React.FC = () => {
   useEffect(() => { isDeviceOnlineRef.current = isDeviceOnline; }, [isDeviceOnline]);
 
   const refreshStats = () => {
-    invoke<Stats>('get_dashboard_stats').then(s => { setStats(s); buildWeeklyChart(s); });
+    invoke<Stats>('get_dashboard_stats').then(s => { 
+      setStats(s as unknown as ERPStats); 
+      buildWeeklyChart(s); 
+    });
   };
 
   // Interactivity States
@@ -204,7 +246,11 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => {
     // Initial data load — runs ONCE on mount
-    invoke<Stats>('get_dashboard_stats').then(s => { setStats(s); buildWeeklyChart(s); });
+    invoke<Stats>('get_dashboard_stats').then(s => { 
+      // Cast Stats to ERPStats
+      setStats(s as unknown as ERPStats); 
+      buildWeeklyChart(s); 
+    });
     invoke<CloudConfig>('get_cloud_config').then(setCloud);
     loadAndTestDevice();
 
@@ -303,7 +349,10 @@ export const Dashboard: React.FC = () => {
         brand: dev.brand,
       });
       setSyncProgress(null);
-      invoke<Stats>('get_dashboard_stats').then(s => { setStats(s); buildWeeklyChart(s); });
+      invoke<Stats>('get_dashboard_stats').then(s => { 
+        setStats(s as unknown as ERPStats); 
+        buildWeeklyChart(s); 
+      });
     } catch (e) {
       setSyncError(String(e));
       setSyncProgress(null);
@@ -332,7 +381,10 @@ export const Dashboard: React.FC = () => {
         brand: device.brand,
       });
       setSyncProgress(null);
-      invoke<Stats>('get_dashboard_stats').then(s => { setStats(s); buildWeeklyChart(s); });
+      invoke<Stats>('get_dashboard_stats').then(s => { 
+        setStats(s as unknown as ERPStats); 
+        buildWeeklyChart(s); 
+      });
     } catch (e) {
       setSyncError(String(e));
       setSyncProgress(null);

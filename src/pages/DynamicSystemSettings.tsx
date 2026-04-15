@@ -117,7 +117,8 @@ export const DynamicSystemSettings: React.FC = () => {
       const { data, error } = await supabase
         .from('system_settings')
         .select('*')
-        .order('category', 'setting_key');
+        .order('category', { ascending: true })
+        .order('setting_key', { ascending: true });
 
       if (error) throw error;
       setSettings(data || []);

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { syncService, ConnectivityState } from '@/services/syncService';
 
 export function useConnectivity() {
@@ -38,7 +39,7 @@ export function useSyncQueue() {
   
   const getQueueCount = async (): Promise<number> => {
     try {
-      const items = await invoke('get_pending_sync_items');
+      const items = await invoke('get_pending_sync_items') as unknown[];
       return items.length;
     } catch {
       return 0;

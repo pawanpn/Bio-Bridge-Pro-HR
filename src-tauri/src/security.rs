@@ -60,6 +60,7 @@ pub fn decrypt_data(encrypted: &str) -> Result<String, String> {
 }
 
 /// Hash password for secure storage
+#[allow(dead_code)]
 pub fn hash_password(password: &str) -> Result<String, String> {
     let mut hasher = Sha256::new();
     hasher.update(password.as_bytes());
@@ -67,6 +68,7 @@ pub fn hash_password(password: &str) -> Result<String, String> {
 }
 
 /// Verify password against hash
+#[allow(dead_code)]
 pub fn verify_password(password: &str, hash: &str) -> bool {
     if let Ok(computed_hash) = hash_password(password) {
         computed_hash == hash
