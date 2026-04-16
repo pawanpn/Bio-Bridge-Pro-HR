@@ -1079,22 +1079,22 @@ fn get_localized_strings(_lang: String) -> Result<serde_json::Value, AppError> {
 }
 
 #[tauri::command]
-fn get_employee_profile(state: State<'_, AppState>, employee_id: i64) -> Result<serde_json::Value, AppError> {
+fn get_employee_profile(_state: State<'_, AppState>, employee_id: i64) -> Result<serde_json::Value, AppError> {
     Ok(serde_json::json!({"id": employee_id}))
 }
 
 #[tauri::command]
-fn set_master_pin(app: AppHandle, current_pin: String, new_pin: String) -> Result<(), AppError> {
+fn set_master_pin(_app: AppHandle, _current_pin: String, _new_pin: String) -> Result<(), AppError> {
     Ok(())
 }
 
 #[tauri::command]
-fn verify_master_pin(app: AppHandle, pin: String) -> Result<bool, AppError> {
+fn verify_master_pin(_app: AppHandle, pin: String) -> Result<bool, AppError> {
     Ok(pin == "admin123")
 }
 
 #[tauri::command]
-fn is_master_pin_set(app: AppHandle) -> bool {
+fn is_master_pin_set(_app: AppHandle) -> bool {
     true
 }
 
@@ -1182,7 +1182,7 @@ fn get_unread_count(_state: State<'_, AppState>) -> Result<i64, AppError> {
     Ok(0)
 }
 
-fn save_offline_token(_app: &AppHandle, _hw_id: &str, _expiry: &str) -> Result<(), AppError> {
+fn save_offline_token(app: &AppHandle, _hw_id: &str, _expiry: &str) -> Result<(), AppError> {
     let app_dir = app.path().app_data_dir().unwrap();
     let _ = fs::create_dir_all(&app_dir);
     Ok(())
