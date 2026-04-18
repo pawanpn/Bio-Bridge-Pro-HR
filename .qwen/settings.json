@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx *)",
+      "Bash(cargo check)",
+      "Bash(mkdir *)",
+      "Bash(npm run *)",
+      "Bash(taskkill *)",
+      "Bash(netstat *)",
+      "Bash(findstr *)",
+      "Bash(tasklist)",
+      "Bash(timeout *)",
+      "Bash(npm install *)",
+      "Bash(powershell *)",
+      "Bash(select-object *)",
+      "Bash(git show *)",
+      "Bash(dir *)",
+      "Bash(del *)",
+      "Bash(dumpbin *)",
+      "Bash(copy *)",
+      "Bash(npm *)",
+      "Bash(select-string *)"
+    ]
+  },
+  "$version": 3
+}

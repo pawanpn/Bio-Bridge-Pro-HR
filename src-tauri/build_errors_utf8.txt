@@ -1,0 +1,100 @@
+﻿cargo :     Checking tauri-app 
+v0.1.0 
+(C:\Users\Admin\Desktop\BioBridge 
+Pro HR\src-tauri)
+At line:1 char:1
++ cargo check > build_errors.txt 
+2>&1
++ 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSp 
+   ecified: (    Checking ta...o H  
+  R\src-tauri):String) [], Remote   
+ Exception
+    + FullyQualifiedErrorId : Nativ 
+   eCommandError
+ 
+error: future cannot be sent 
+between threads safely
+   --> src\lib.rs:125:1
+    |
+125 |   #[tauri::command]
+    |   ^^^^^^^^^^^^^^^^^ future 
+returned by `sync_device_logs` is 
+not `Send`
+...
+495 |           .invoke_handler(taur
+i::generate_handler![
+    |  _________________________-
+496 | |             
+get_license_info,
+497 | |             
+save_company_info,
+498 | |             
+update_calendar_mode,
+...   |
+510 | |             
+stop_realtime_sync,
+511 | |         ])
+    | |_________- in this macro 
+invocation
+    |
+    = help: within `impl 
+Future<Output = 
+Result<std::string::String, 
+AppError>>`, the trait `Send` is 
+not implemented for 
+`std::sync::MutexGuard<'_, 
+std::option::Option<Connection>>`
+note: future is not `Send` as this 
+value is used across an await
+   --> src\lib.rs:184:130
+    |
+153 | ...et db_guard = 
+state.db.lock().map_err(lock_err)?;
+    |       -------- has type 
+`std::sync::MutexGuard<'_, 
+std::option::Option<Connection>>` 
+which is not `Send`
+...
+184 | ...   let sync_result = cloud:
+:gdrive::sync_logs_to_drive(&key, 
+&root_id, &org_name, &branch_name, 
+&year, &month, &normalized).await;
+    |                               
+                                    
+                                    
+                         ^^^^^ 
+await occurs here, with `db_guard` 
+maybe used later
+note: required by a bound in 
+`ResultFutureTag::future`
+   --> C:\Users\Admin\.cargo\registr
+y\src\index.crates.io-1949cf8c6b5b55
+7f\tauri-2.10.3\src\ipc\command.rs:3
+14:42
+    |
+310 |     pub async fn future<T, E, 
+F>(self, value: F) -> 
+Result<InvokeResponseBody, 
+InvokeError>
+    |                  ------ 
+required by a bound in this 
+associated function
+...
+314 |       F: Future<Output = 
+Result<T, E>> + Send,
+    |                               
+           ^^^^ required by this 
+bound in `ResultFutureTag::future`
+    = note: this error originates 
+in the macro 
+`__cmd__sync_device_logs` which 
+comes from the expansion of the 
+macro `tauri::generate_handler` (in 
+Nightly builds, run with -Z 
+macro-backtrace for more info)
+
+error: could not compile 
+`tauri-app` (lib) due to 2 previous 
+errors
