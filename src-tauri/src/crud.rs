@@ -478,6 +478,37 @@ pub async fn create_employee(
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to create employee: {}", e)))?;
 
+    // Get the actual row ID if we can and push to sync queue
+    let employee_id = conn.last_insert_rowid();
+
+    // Prepare sync payload with ALL fields
+    let sync_payload = serde_json::json!({
+        "id": employee_id,
+        "employee_code": employee_code,
+        "first_name": first_name,
+        "middle_name": request.middle_name,
+        "last_name": last_name,
+        "date_of_birth": request.date_of_birth,
+        "gender": request.gender,
+        "department_id": request.department_id,
+        "designation_id": request.designation_id,
+        "branch_id": request.branch_id,
+        "employment_type": request.employment_type,
+        "employment_status": request.employment_status,
+        "biometric_id": request.biometric_id,
+        "local_name": request.local_name,
+        "national_id": request.national_id,
+        "contact_tel": request.contact_tel,
+        "religion": request.religion,
+        "city": request.city,
+        "card_no": request.card_no,
+        "mobile_punch": request.mobile_punch,
+        "app_role": request.app_role,
+        "status": "active"
+    });
+
+    let _ = crate::sync_service::_queue_for_sync(conn, "employees", "INSERT", &employee_id.to_string(), &sync_payload, "HIGH");
+
     // Log audit
     log_audit(
         conn,
@@ -930,6 +961,20 @@ pub async fn update_employee(
         "UPDATE",
         &format!("Updated employee #{}", employee_id),
     )?;
+
+    // Push to sync queue
+    let sync_payload = serde_json::json!({
+        "id": employee_id,
+        "first_name": request.first_name,
+        "last_name": request.last_name,
+        "department_id": request.department_id,
+        "branch_id": request.branch_id,
+        "employment_status": request.employment_status,
+        "biometric_id": request.biometric_id,
+        "mobile_punch": request.mobile_punch,
+        "updated_at": chrono::Utc::now().to_rfc3339()
+    });
+    let _ = crate::sync_service::_queue_for_sync(conn, "employees", "UPDATE", &employee_id.to_string(), &sync_payload, "HIGH");
 
     Ok(serde_json::json!({
         "success": true,
