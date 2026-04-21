@@ -16,7 +16,7 @@ interface CloudConfig {
   rootFolderId?: string;
 }
 
-type Tab = 'general' | 'directory' | 'master' | 'users';
+type Tab = 'general' | 'functionality' | 'directory' | 'master' | 'users';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Page
@@ -39,31 +39,37 @@ export const SystemSettings: React.FC = () => {
   }, []);
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 900 }}>
+    <div style={{ padding: '28px 32px', maxWidth: 1100 }}>
       {/* Page Header */}
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ margin: 0 }}>System Settings</h1>
         <p style={{ color: 'var(--text-muted)', marginTop: 6, marginBottom: 0 }}>
-          General configuration and protected Master Settings.
+          Manage application features, organization details, and core system preferences.
         </p>
       </div>
 
       {/* Tab Bar */}
-      <div style={{ display: 'flex', gap: 4, borderBottom: '2px solid var(--border-color)', marginBottom: 32 }}>
+      <div style={{ display: 'flex', gap: 4, borderBottom: '2px solid var(--border-color)', marginBottom: 32, overflowX: 'auto' }}>
         <TabButton
-          label="General Settings"
+          label="General"
           icon={<Settings size={15} />}
           active={activeTab === 'general'}
           onClick={() => handleTabChange('general')}
         />
         <TabButton
-          label="Employee Directory"
+          label="Functionality Control"
+          icon={<Settings size={15} />}
+          active={activeTab === 'functionality'}
+          onClick={() => handleTabChange('functionality')}
+        />
+        <TabButton
+          label="Directory"
           icon={<UsersIcon size={15} />}
           active={activeTab === 'directory'}
           onClick={() => handleTabChange('directory')}
         />
         <TabButton
-          label="Master Settings"
+          label="Master"
           icon={<Shield size={15} />}
           active={activeTab === 'master'}
           locked={!masterUnlocked}
@@ -71,7 +77,7 @@ export const SystemSettings: React.FC = () => {
         />
         {isSuperAdmin && (
           <TabButton
-            label="User Management"
+            label="Users"
             icon={<Shield size={15} />}
             active={activeTab === 'users'}
             onClick={() => handleTabChange('users')}
@@ -80,14 +86,149 @@ export const SystemSettings: React.FC = () => {
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'general' && <GeneralSettings />}
-      {activeTab === 'directory' && <EmployeeDirectory />}
-      {activeTab === 'users' && <UserManagement />}
-      {activeTab === 'master' && (
-        masterUnlocked
-          ? <MasterSettingsContent onLock={() => setMasterUnlocked(false)} />
-          : <MasterLoginGate onUnlock={() => setMasterUnlocked(true)} />
-      )}
+      <div style={{ minHeight: 600 }}>
+        {activeTab === 'general' && <GeneralSettings />}
+        {activeTab === 'functionality' && <FunctionalityControl />}
+        {activeTab === 'directory' && <EmployeeDirectory />}
+        {activeTab === 'users' && <UserManagement />}
+        {activeTab === 'master' && (
+          masterUnlocked
+            ? <MasterSettingsContent onLock={() => setMasterUnlocked(false)} />
+            : <MasterLoginGate onUnlock={() => setMasterUnlocked(true)} />
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Functionality Control (New Feature)
+// ─────────────────────────────────────────────────────────────────────────────
+const FunctionalityControl: React.FC = () => {
+  const categories = [
+    { id: 'general', label: 'General', icon: '⚙️' },
+    { id: 'company', label: 'Company', icon: '🏢' },
+    { id: 'localization', label: 'Localization', icon: '🌐' },
+    { id: 'security', label: 'Security', icon: '🔒' },
+    { id: 'notifications', label: 'Notifications', icon: '🔔' },
+    { id: 'attendance', label: 'Attendance', icon: '📅' },
+    { id: 'payroll', label: 'Payroll', icon: '💰' },
+    { id: 'database', label: 'Database', icon: '💾' },
+  ];
+
+  const [activeCat, setActiveCat] = useState('general');
+  const [configs, setConfigs] = useState<{key: string, value: string}[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState('');
+
+  const loadConfigs = async (cat: string) => {
+    setLoading(true);
+    try {
+      const data = await invoke<any[]>('get_system_configs', { category: cat });
+      setConfigs(data);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadConfigs(activeCat);
+  }, [activeCat]);
+
+  const handleSave = async (key: string, value: string) => {
+    setSaving(true);
+    try {
+      await invoke('save_system_config', { category: activeCat, key, value });
+      setStatus(`✅ ${key.replace('_', ' ')} saved!`);
+      setTimeout(() => setStatus(''), 2000);
+      loadConfigs(activeCat);
+    } catch (e) { setStatus('❌ Failed to save'); }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: 32, animation: 'fadeIn 0.3s ease-out' }}>
+      {/* Sidebar */}
+      <div style={{ width: 240, flexShrink: 0 }}>
+        {categories.map(cat => (
+          <button
+            key={cat.id}
+            onClick={() => setActiveCat(cat.id)}
+            style={{
+              width: '100%', textAlign: 'left', padding: '12px 16px', borderRadius: 8,
+              border: 'none', background: activeCat === cat.id ? 'var(--primary-color)' : 'transparent',
+              color: activeCat === cat.id ? 'white' : 'var(--text-color)',
+              cursor: 'pointer', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 12,
+              fontWeight: activeCat === cat.id ? 600 : 500, transition: 'all 0.2s',
+            }}
+          >
+            <span style={{ fontSize: 18 }}>{cat.icon}</span>
+            {cat.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Main Panel */}
+      <div style={{ flex: 1 }}>
+        <div style={cardStyle}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+            <h3 style={{ margin: 0 }}>{categories.find(c => c.id === activeCat)?.label} Functionality</h3>
+            {status && <span style={{ fontSize: 12, color: status.includes('✅') ? 'var(--success)' : 'var(--error)' }}>{status}</span>}
+          </div>
+
+          {loading ? (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading settings...</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              {configs.map(cfg => (
+                <div key={cfg.key} style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 20 }}>
+                  <label style={{ ...labelStyle, display: 'block', marginBottom: 8, textTransform: 'capitalize' }}>
+                    {cfg.key.replace(/_/g, ' ')}
+                  </label>
+                  
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <input
+                      type="text"
+                      value={cfg.value || ''}
+                      onChange={(e) => {
+                        const newVal = e.target.value;
+                        setConfigs(prev => prev.map(c => c.key === cfg.key ? { ...c, value: newVal } : c));
+                      }}
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                    <Button 
+                      variant="accent" 
+                      onClick={() => handleSave(cfg.key, cfg.value)}
+                      disabled={saving}
+                      className="h-10"
+                    >
+                      Update
+                    </Button>
+                  </div>
+                </div>
+              ))}
+
+              {/* Add New Setting Field for dynamic extensibility */}
+              <div style={{ marginTop: 20, padding: 20, border: '1px dashed var(--border-color)', borderRadius: 12 }}>
+                <h4 style={{ margin: '0 0 16px 0', fontSize: 14 }}>Add Functional Parameter</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12 }}>
+                  <input id="new-key" placeholder="Setting Key (e.g. auto_sync)" style={inputStyle} />
+                  <input id="new-val" placeholder="Initial Value" style={inputStyle} />
+                  <Button onClick={async () => {
+                    const k = (document.getElementById('new-key') as HTMLInputElement).value;
+                    const v = (document.getElementById('new-val') as HTMLInputElement).value;
+                    if(k) {
+                       await handleSave(k, v);
+                       (document.getElementById('new-key') as HTMLInputElement).value = '';
+                       (document.getElementById('new-val') as HTMLInputElement).value = '';
+                    }
+                  }}>Add</Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

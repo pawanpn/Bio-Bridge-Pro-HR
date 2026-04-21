@@ -2,6 +2,7 @@ use crate::AppState;
 use crate::errors::AppError;
 use crate::models::{AttendanceLog, DeviceBrand};
 use crate::hardware::{test_device, sync_device};
+use crate::sync_service;
 use rusqlite::params;
 use serde_json::{Value, json};
 
@@ -282,6 +283,90 @@ pub async fn import_csv_attendance(
         "skipped": skipped,
         "errors": errors
     }))
+}
+
+#[tauri::command]
+pub async fn get_system_configs(category: String, state: tauri::State<'_, AppState>) -> Result<Vec<Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn.prepare("SELECT key, value, category FROM SystemConfigs WHERE category = ?1")?;
+    let configs: Vec<Value> = stmt.query_map([category], |row| {
+        Ok(json!({ 
+            "setting_key": row.get::<_, String>(0)?, 
+            "setting_value": row.get::<_, Option<String>>(1)?,
+            "category": row.get::<_, String>(2)?,
+            "setting_type": "string",
+            "description": "",
+            "is_public": true
+        }))
+    })?.filter_map(|r| r.ok()).collect();
+
+    Ok(configs)
+}
+
+#[tauri::command]
+pub async fn get_all_system_configs(state: tauri::State<'_, AppState>) -> Result<Vec<Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn.prepare("SELECT key, value, category FROM SystemConfigs")?;
+    let configs: Vec<Value> = stmt.query_map([], |row| {
+        Ok(json!({ 
+            "setting_key": row.get::<_, String>(0)?, 
+            "setting_value": row.get::<_, Option<String>>(1)?,
+            "category": row.get::<_, String>(2)?,
+            "setting_type": "string",
+            "description": "",
+            "is_public": true
+        }))
+    })?.filter_map(|r| r.ok()).collect();
+
+    Ok(configs)
+}
+
+#[tauri::command]
+pub async fn save_system_config(category: String, key: String, value: String, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "INSERT INTO SystemConfigs (category, key, value) VALUES (?1, ?2, ?3)
+         ON CONFLICT(category, key) DO UPDATE SET value = excluded.value",
+        params![category, key, value],
+    )?;
+
+    // Queue for Cloud Sync
+    let payload = json!({
+        "category": category,
+        "setting_key": key,
+        "setting_value": value,
+        "setting_type": "string"
+    });
+    let _ = sync_service::_queue_for_sync(conn, "system_settings", "UPDATE", &key, &payload, "MEDIUM");
+
+    // Optional: Trigger background sync immediately
+    // spawn a task to sync in background
+    let state_clone = state.inner().clone();
+    tokio::spawn(async move {
+        // This is a rough way to trigger it, ideally we have a dedicated worker
+        // let _ = sync_service::sync_to_supabase(state_clone).await;
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_system_config(category: String, key: String, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "DELETE FROM SystemConfigs WHERE category = ?1 AND key = ?2",
+        params![category, key],
+    )?;
+
+    Ok(())
 }
 
 #[tauri::command]
