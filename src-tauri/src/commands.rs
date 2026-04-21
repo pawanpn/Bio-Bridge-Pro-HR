@@ -179,18 +179,6 @@ pub async fn pull_all_logs(
     sync_device_logs(ip, port, device_id, brand, state).await
 }
 
-#[tauri::command]
-pub async fn list_branches(state: tauri::State<'_, AppState>) -> Result<Vec<Value>, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-
-    let mut stmt = conn.prepare("SELECT id, name FROM Branches")?;
-    let branches: Vec<Value> = stmt.query_map([], |row| {
-        Ok(json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)? }))
-    })?.filter_map(|r| r.ok()).collect();
-
-    Ok(branches)
-}
 
 #[tauri::command]
 pub async fn list_gates(branch_id: i64, state: tauri::State<'_, AppState>) -> Result<Vec<Value>, AppError> {

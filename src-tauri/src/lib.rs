@@ -67,7 +67,6 @@ pub fn run() {
             commands::set_default_device,
             commands::sync_device_logs,
             commands::pull_all_logs,
-            commands::list_branches,
             commands::list_gates,
             commands::list_employees_for_select,
             commands::add_manual_attendance,

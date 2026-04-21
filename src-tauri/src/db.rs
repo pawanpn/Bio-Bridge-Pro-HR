@@ -300,6 +300,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("permanent_address", "TEXT"),
         ("citizenship_number", "TEXT"),
         ("pan_number", "TEXT"),
+        ("national_id", "TEXT"),
         ("department_id", "TEXT"),
         ("designation_id", "TEXT"),
         ("date_of_joining", "TEXT"),
