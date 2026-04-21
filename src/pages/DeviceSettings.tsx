@@ -59,6 +59,8 @@ export const DeviceSettings: React.FC = () => {
   const [discoveredDevices, setDiscoveredDevices] = useState<{ ip: string; brand: string }[]>([]);
   const [isScanning, setIsScanning] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const [previewLogs, setPreviewLogs] = useState<any[]>([]);
+  const [previewModalOpen, setPreviewModalOpen] = useState(false);
 
   // Offline Mode States
   const [showOfflineMode, setShowOfflineMode] = useState(false);
@@ -267,13 +269,15 @@ export const DeviceSettings: React.FC = () => {
   const handleSyncLogs = async (dev: Device) => {
     setSyncStatus(prev => ({ ...prev, [dev.id]: 'Syncing...' }));
     try {
-      const result = await invoke<string>('sync_device_logs', {
+      const logs = await invoke<any[]>('sync_device_logs', {
         ip: dev.ip,
         port: Number(dev.port),
         deviceId: dev.id,
         brand: dev.brand,
       });
-      setSyncStatus(prev => ({ ...prev, [dev.id]: `✅ ${result}` }));
+      setPreviewLogs(logs);
+      setPreviewModalOpen(true);
+      setSyncStatus(prev => ({ ...prev, [dev.id]: `✅ Pulled ${logs.length} logs` }));
     } catch (e) {
       setSyncStatus(prev => ({ ...prev, [dev.id]: `❌ ${e}` }));
     }
@@ -284,13 +288,15 @@ export const DeviceSettings: React.FC = () => {
     if (!confirm(`Pull ALL attendance logs from "${dev.name}"?\n\nThis will fetch every log from day one to now.\nDuplicate logs will be auto-skipped.`)) return;
     setSyncStatus(prev => ({ ...prev, [dev.id]: '🔄 Pulling ALL logs...' }));
     try {
-      const result = await invoke<string>('pull_all_logs', {
+      const logs = await invoke<any[]>('pull_all_logs', {
         ip: dev.ip,
         port: Number(dev.port),
         deviceId: dev.id,
         brand: dev.brand,
       });
-      setSyncStatus(prev => ({ ...prev, [dev.id]: `✅ ${result}` }));
+      setPreviewLogs(logs);
+      setPreviewModalOpen(true);
+      setSyncStatus(prev => ({ ...prev, [dev.id]: `✅ Pulled ${logs.length} logs` }));
     } catch (e) {
       setSyncStatus(prev => ({ ...prev, [dev.id]: `❌ ${e}` }));
     }
@@ -721,12 +727,56 @@ export const DeviceSettings: React.FC = () => {
       <div style={{ ...cardStyle, marginTop: 24, borderLeft: '4px solid var(--accent-color)' }}>
         <h4 style={{ marginBottom: 12 }}>Connection Tips</h4>
         <ul style={{ color: 'var(--text-muted)', fontSize: 14, paddingLeft: 20, lineHeight: 1.7, margin: 0 }}>
-          <li>Ensure the device is connected to the same local network (LAN).</li>
-          <li>For <strong>ZKTeco</strong>, the default port is <strong>4370</strong>. For <strong>Hikvision</strong>, use <strong>8000</strong> or <strong>80</strong>.</li>
-          <li>If the scanner fails, enter the device IP manually and click Test Connection first.</li>
-          <li>Use <strong>Sync Logs</strong> to pull attendance data from a specific device on demand.</li>
         </ul>
       </div>
+
+      {/* Preview Modal */}
+      {previewModalOpen && (
+        <div style={overlayStyle}>
+          <div style={{ ...cardStyle, width: '100%', maxWidth: 600, padding: 32, position: 'relative' }}>
+            <button onClick={() => setPreviewModalOpen(false)} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+            <h3 style={{ marginTop: 0, marginBottom: 20 }}>Data Pull Preview</h3>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>
+              The following logs were successfully pulled and saved to the database.
+            </p>
+            
+            <div style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid var(--border-color)', borderRadius: 8 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead style={{ position: 'sticky', top: 0, backgroundColor: 'var(--bg-color)', zIndex: 10 }}>
+                  <tr>
+                    <th style={{ ...thStyle, padding: '10px 16px' }}>Emp ID</th>
+                    <th style={{ ...thStyle, padding: '10px 16px' }}>Timestamp</th>
+                    <th style={{ ...thStyle, padding: '10px 16px' }}>Method</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {previewLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={3} style={{ textAlign: 'center', padding: 24, fontSize: 14, color: 'var(--text-muted)' }}>No new logs found.</td>
+                    </tr>
+                  ) : (
+                    previewLogs.map((log, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td style={{ ...tdStyle, padding: '10px 16px', fontWeight: 600 }}>{log.employee_id}</td>
+                        <td style={{ ...tdStyle, padding: '10px 16px', fontSize: 13 }}>{new Date(log.timestamp).toLocaleString()}</td>
+                        <td style={{ ...tdStyle, padding: '10px 16px' }}>
+                          <span style={{ fontSize: 11, backgroundColor: 'var(--bg-color)', padding: '2px 8px', borderRadius: 12, border: '1px solid var(--border-color)' }}>
+                            {log.punch_method}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ marginTop: 24, textAlign: 'right' }}>
+              <button onClick={() => setPreviewModalOpen(false)} style={primaryBtnStyle}>Close Preview</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -174,10 +174,8 @@ pub async fn pull_all_logs(
     device_id: i32,
     brand: String,
     state: tauri::State<'_, AppState>,
-) -> Result<String, AppError> {
-    // Similar to sync_device_logs but maybe with different parameters or just calling it
-    let logs = sync_device_logs(ip, port, device_id, brand, state).await?;
-    Ok(format!("Successfully pulled {} logs", logs.len()))
+) -> Result<Vec<AttendanceLog>, AppError> {
+    sync_device_logs(ip, port, device_id, brand, state).await
 }
 
 #[tauri::command]
@@ -240,6 +238,50 @@ pub async fn add_manual_attendance(
     ).map_err(|e| AppError::DatabaseError(format!("Failed to add manual log: {}", e)))?;
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn import_csv_attendance(
+    csv_content: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut imported = 0;
+    let mut skipped = 0;
+    let mut errors = Vec::new();
+
+    for line in csv_content.lines() {
+        let parts: Vec<&str> = line.split(',').collect();
+        if parts.len() >= 2 {
+            let emp_id = parts[0].trim().parse::<i64>();
+            let timestamp = parts[1].trim();
+            let method = parts.get(2).unwrap_or(&"Manual").trim();
+
+            match emp_id {
+                Ok(id) => {
+                    let res = conn.execute(
+                        "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, punch_method, branch_id, gate_id)
+                         VALUES (?1, ?2, ?3, 1, 1)",
+                        params![id, timestamp, method],
+                    );
+                    match res {
+                        Ok(1) => imported += 1,
+                        Ok(_) => skipped += 1,
+                        Err(e) => errors.push(format!("Row {}: {}", line, e)),
+                    }
+                }
+                Err(_) => errors.push(format!("Invalid ID: {}", parts[0])),
+            }
+        }
+    }
+
+    Ok(json!({
+        "imported": imported,
+        "skipped": skipped,
+        "errors": errors
+    }))
 }
 
 #[tauri::command]
