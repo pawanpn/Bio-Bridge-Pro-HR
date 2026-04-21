@@ -683,5 +683,32 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         );
     }
 
+    // Also seed some dummy invoices
+    let dummy_invoices = vec![
+        ("INV-2026-001", "ABC Company", "Sales", 56500.0, "Paid", "2026-04-01"),
+        ("INV-2026-002", "XYZ Suppliers", "Purchase", 39550.0, "Sent", "2026-04-05"),
+        ("INV-2026-003", "Tech Solutions", "Sales", 84750.0, "Overdue", "2026-03-25"),
+    ];
+    for (num, contact, inv_type, amount, status, date) in dummy_invoices {
+        let amt_str = amount.to_string();
+        let paid_str = if status == "Paid" { amount.to_string() } else if status == "Sent" { "20000.0".to_string() } else { "0.0".to_string() };
+        let bal_str = if status == "Paid" { "0.0".to_string() } else if status == "Sent" { (amount - 20000.0).to_string() } else { amount.to_string() };
+
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO Invoices (invoice_number, contact_name, invoice_type, total_amount, paid_amount, balance_amount, status, invoice_date, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))",
+            [
+                num, 
+                contact, 
+                inv_type, 
+                &amt_str, 
+                &paid_str, 
+                &bal_str, 
+                status,
+                date
+            ],
+        );
+    }
+
     Ok(conn)
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { invoke } from '@tauri-apps/api/core';
 import {
   DollarSign, Calculator, Download, FileText, Users, TrendingUp,
   Plus, Eye, Clock, AlertCircle
@@ -61,52 +62,11 @@ export const PayrollManagement: React.FC = () => {
   const loadPayrollData = async () => {
     setLoading(true);
     try {
-      // Mock data for demo - replace with actual invoke calls
-      const mockData: PayrollRecord[] = [
-        {
-          id: 1,
-          employee_name: 'Ram Sharma',
-          basic_salary: 45000,
-          total_earnings: 52000,
-          total_deductions: 8500,
-          net_pay: 43500,
-          pf_employer: 4500,
-          pf_employee: 4500,
-          tax_amount: 2500,
-          overtime_amount: 2000,
-          days_present: 26,
-          status: 'Processed',
-        },
-        {
-          id: 2,
-          employee_name: 'Sita Rai',
-          basic_salary: 40000,
-          total_earnings: 46000,
-          total_deductions: 7200,
-          net_pay: 38800,
-          pf_employer: 4000,
-          pf_employee: 4000,
-          tax_amount: 2000,
-          overtime_amount: 1200,
-          days_present: 25,
-          status: 'Processed',
-        },
-        {
-          id: 3,
-          employee_name: 'Hari Bahadur',
-          basic_salary: 35000,
-          total_earnings: 40000,
-          total_deductions: 6500,
-          net_pay: 33500,
-          pf_employer: 3500,
-          pf_employee: 3500,
-          tax_amount: 1800,
-          overtime_amount: 800,
-          days_present: 24,
-          status: 'Pending',
-        },
-      ];
-      setPayrollRecords(mockData);
+      const records = await invoke<PayrollRecord[]>('get_payroll_records', {
+        month: selectedMonth,
+        year: selectedYear,
+      });
+      setPayrollRecords(records);
     } catch (error) {
       console.error('Failed to load payroll data:', error);
     } finally {

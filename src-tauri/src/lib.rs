@@ -95,6 +95,7 @@ pub fn run() {
             crud::get_attendance_logs,
             crud::create_salary_structure,
             crud::get_salary_structure,
+            crud::get_payroll_records,
             crud::create_invoice,
             crud::list_invoices,
             crud::create_project,
