@@ -536,6 +536,8 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("attendance", "ot_enabled", "1"),
         ("payroll", "basic_salary_type", "Monthly"),
         ("database", "auto_backup", "1"),
+        ("database", "supabase_url", ""),
+        ("database", "supabase_key", ""),
     ];
     for (cat, key, val) in default_configs {
         let _ = conn.execute(

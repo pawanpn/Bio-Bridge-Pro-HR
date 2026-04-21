@@ -2019,3 +2019,60 @@ fn get_employee_for_audit(
     
     Ok(employee)
 }
+
+/// GET DASHBOARD STATS
+#[tauri::command]
+pub async fn get_dashboard_stats(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let total_staff: i64 = conn.query_row("SELECT COUNT(*) FROM Employees WHERE status != 'deleted'", [], |r| r.get(0))?;
+    
+    // Count distinct employees who have logged today
+    let present_today: i64 = conn.query_row(
+        "SELECT COUNT(DISTINCT employee_id) FROM AttendanceLogs WHERE date(timestamp) = date('now')",
+        [],
+        |r| r.get(0)
+    ).unwrap_or(0);
+    
+    let absent = if total_staff > present_today { total_staff - present_today } else { 0 };
+
+    // Get present staff list for the side panel
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT e.id, e.first_name || ' ' || e.last_name, strftime('%H:%M', al.timestamp)
+         FROM AttendanceLogs al
+         JOIN Employees e ON al.employee_id = e.id
+         WHERE date(al.timestamp) = date('now')
+         ORDER BY al.timestamp DESC"
+    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+
+    let present_staff: Vec<serde_json::Value> = stmt.query_map([], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "time": row.get::<_, String>(2)?,
+        }))
+    }).map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(serde_json::json!({
+        "totalEmployees": total_staff,
+        "totalStaff": total_staff,
+        "presentToday": present_today,
+        "absent": absent,
+        "absentToday": absent,
+        "lateToday": 0,
+        "onLeave": 0,
+        "pendingLeaveRequests": 0,
+        "newHiresThisMonth": 0,
+        "resignationsThisMonth": 0,
+        "presentStaff": present_staff,
+        "absentStaff": [],
+        "lateStaff": [],
+        "leaveStaff": [],
+        "branches": []
+    }))
+}
