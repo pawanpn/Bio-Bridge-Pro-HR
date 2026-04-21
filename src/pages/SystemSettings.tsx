@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { AppConfig } from '../config/appConfig';
-import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, UserPlus, UserCircle } from 'lucide-react';
+import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, UserPlus, UserCircle, Database } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { EmployeeProfileSidebar } from '../components/EmployeeProfileSidebar';
 
@@ -133,6 +133,28 @@ const FunctionalityControl: React.FC = () => {
 
   useEffect(() => {
     loadConfigs(activeCat);
+    
+    // Auto-initialize sync if we are in database tab and have keys
+    if (activeCat === 'database') {
+       const initSync = async () => {
+          try {
+             const data = await invoke<any[]>('get_system_configs', { category: 'database' });
+             const url = data.find(c => c.key === 'supabase_url')?.value;
+             const key = data.find(c => c.key === 'supabase_key')?.value;
+             if (url && key) {
+                await invoke('initialize_supabase_sync', { 
+                   config: { 
+                      supabase_url: url, 
+                      supabase_key: key, 
+                      organization_id: "1", // Default org
+                      encryption_key: null 
+                   } 
+                });
+             }
+          } catch (e) {}
+       };
+       initSync();
+    }
   }, [activeCat]);
 
   const handleSave = async (key: string, value: string) => {
@@ -173,8 +195,69 @@ const FunctionalityControl: React.FC = () => {
         <div style={cardStyle}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
             <h3 style={{ margin: 0 }}>{categories.find(c => c.id === activeCat)?.label} Functionality</h3>
-            {status && <span style={{ fontSize: 12, color: status.includes('✅') ? 'var(--success)' : 'var(--error)' }}>{status}</span>}
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+               {status && <span style={{ fontSize: 12, color: status.includes('✅') ? 'var(--success)' : 'var(--error)' }}>{status}</span>}
+               <Button 
+                 variant="outline" 
+                 size="sm" 
+                 onClick={async () => {
+                    setLoading(true);
+                    try {
+                      const res: any = await invoke('sync_to_supabase');
+                      setStatus(`✅ Synced: ${res.synced_count} records`);
+                    } catch (e) { setStatus('❌ Sync Error'); }
+                    setLoading(false);
+                 }}
+                 style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+               >
+                 <Database size={14} /> Sync Now
+               </Button>
+            </div>
           </div>
+
+          {activeCat === 'database' && (
+            <div style={{ 
+              marginBottom: 32, padding: 20, borderRadius: 12, 
+              background: 'rgba(79, 70, 229, 0.05)', border: '1px solid rgba(79, 70, 229, 0.1)' 
+            }}>
+               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                     <h4 style={{ margin: '0 0 12px 0', fontSize: 14, color: 'var(--primary-color)' }}>☁️ Cloud Database (Supabase)</h4>
+                     <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 20px 0' }}>
+                        Your data is backed up in real-time. Ensure your Supabase URL and Service Key are configured below.
+                     </p>
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={async () => {
+                        const url = configs.find(c => c.key === 'supabase_url')?.value;
+                        const key = configs.find(c => c.key === 'supabase_key')?.value;
+                        if (!url || !key) { setStatus('❌ Config missing'); return; }
+                        setStatus('⌛ Testing...');
+                        try {
+                           await invoke('test_supabase_connection', { config: { supabase_url: url, supabase_key: key, organization_id: "1" } });
+                           setStatus('✅ Connection Successful!');
+                        } catch (e) { setStatus('❌ Connection Failed'); }
+                    }}
+                  >
+                    Test Connection
+                  </Button>
+               </div>
+               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div style={{ padding: '12px 16px', background: 'var(--bg-color)', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                     <span style={labelStyle}>Bridge Status</span>
+                     <span style={{ fontSize: 14, fontWeight: 700, color: status.includes('✅') ? 'var(--success)' : 'var(--error)' }}>
+                        {status.includes('✅') ? '● Live Connected' : '● Waiting for Pulse'}
+                     </span>
+                  </div>
+                  <div style={{ padding: '12px 16px', background: 'var(--bg-color)', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                     <span style={labelStyle}>Last Activity</span>
+                     <span style={{ fontSize: 14, fontWeight: 700 }}>{new Date().toLocaleTimeString()}</span>
+                  </div>
+               </div>
+            </div>
+          )}
 
           {loading ? (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading settings...</div>
