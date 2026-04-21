@@ -48,6 +48,24 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS Departments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS Designations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT
+        )",
+        [],
+    )?;
+
     // LVL 3: Gates/Locations within a branch
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Gates (
@@ -578,6 +596,55 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         "INSERT OR IGNORE INTO Users (username, password_hash, role, must_change_password) VALUES ('admin', ?1, 'SUPER_ADMIN', 1)",
         [admin_pass_hash]
     );
+
+    // Seed corporate dummy data
+    let branches = vec![
+        (2, "Kathmandu Branch", "New Road, KTM"),
+        (3, "Pokhara Branch", "Lakeside, PKR"),
+        (4, "Butwal Branch", "Main Road, BTL"),
+    ];
+    for (id, name, loc) in branches {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (?1, 1, ?2, ?3)",
+            [id.to_string(), name.to_string(), loc.to_string()],
+        );
+        // Queue for Supabase Sync
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO SyncQueue (table_name, operation, record_id, payload, priority, status, created_at)
+             VALUES ('branches', 'INSERT', ?1, ?2, 'HIGH', 'PENDING', datetime('now'))",
+            [id.to_string(), serde_json::json!({"id": id, "name": name, "location": loc, "org_id": 1}).to_string()],
+        );
+    }
+
+    let departments = vec![
+        "Human Resources", "Information Technology", "Finance", 
+        "Marketing", "Sales", "Operations", "Logistics"
+    ];
+    for (i, dept) in departments.iter().enumerate() {
+        let dept_id = i + 1;
+        let _ = conn.execute("INSERT OR IGNORE INTO Departments (id, name) VALUES (?1, ?2)", [dept_id.to_string(), dept.to_string()]);
+        // Queue for Supabase Sync
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO SyncQueue (table_name, operation, record_id, payload, priority, status, created_at)
+             VALUES ('departments', 'INSERT', ?1, ?2, 'HIGH', 'PENDING', datetime('now'))",
+            [dept_id.to_string(), serde_json::json!({"id": dept_id, "name": dept}).to_string()],
+        );
+    }
+
+    let designations = vec![
+        "General Manager", "Department Head", "Senior Associate", 
+        "Junior Associate", "Accountant", "Developer", "Sales Representative"
+    ];
+    for (i, desig) in designations.iter().enumerate() {
+        let desig_id = i + 1;
+        let _ = conn.execute("INSERT OR IGNORE INTO Designations (id, name) VALUES (?1, ?2)", [desig_id.to_string(), desig.to_string()]);
+        // Queue for Supabase Sync
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO SyncQueue (table_name, operation, record_id, payload, priority, status, created_at)
+             VALUES ('designations', 'INSERT', ?1, ?2, 'HIGH', 'PENDING', datetime('now'))",
+            [desig_id.to_string(), serde_json::json!({"id": desig_id, "name": desig}).to_string()],
+        );
+    }
 
     let _ = conn.execute(
         "ALTER TABLE Employees ADD COLUMN biometric_id INTEGER",

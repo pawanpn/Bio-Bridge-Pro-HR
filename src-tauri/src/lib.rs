@@ -115,6 +115,11 @@ pub fn run() {
             crud::delete_asset,
             crud::get_asset_stats,
             crud::get_dashboard_stats,
+            crud::list_branches,
+            crud::list_departments,
+            crud::list_designations,
+            crud::create_department,
+            crud::create_designation,
             
             // From sync_service.rs (Cloud Sync)
             sync_service::initialize_supabase_sync,
