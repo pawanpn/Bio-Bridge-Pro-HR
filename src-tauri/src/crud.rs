@@ -1495,6 +1495,76 @@ pub async fn get_salary_structure(
     }
 }
 
+/// READ: Get comprehensive payroll records for the frontend
+#[tauri::command]
+pub async fn get_payroll_records(
+    _month: i32,
+    _year: i32,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    // We join Employees with SalaryStructures to generate payroll info.
+    // If SalaryStructures doesn't exist for an employee, we default to 0.
+    let mut stmt = conn.prepare(
+        "SELECT e.id, 
+                e.first_name || ' ' || e.last_name as employee_name, 
+                COALESCE(s.basic_salary, 0) as basic_salary,
+                COALESCE(s.allowances, 0) as allowances,
+                COALESCE(s.deductions, 0) as fixed_deductions,
+                COALESCE(s.overtime_rate, 0) as overtime_rate,
+                e.status
+         FROM Employees e
+         LEFT JOIN SalaryStructures s ON e.id = s.employee_id
+         WHERE e.status != 'deleted'"
+    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+
+    let records: Vec<serde_json::Value> = stmt.query_map([], |row| {
+        let id: i64 = row.get(0)?;
+        let employee_name: String = row.get(1)?;
+        let basic_salary: f64 = row.get(2)?;
+        let allowances: f64 = row.get(3)?;
+        let fixed_deductions: f64 = row.get(4)?;
+        let _overtime_rate: f64 = row.get(5)?;
+        
+        // Basic calculation logic
+        let pf_employee = basic_salary * 0.10; // 10% PF
+        let pf_employer = basic_salary * 0.10;
+        let tax_amount = if basic_salary > 40000.0 { (basic_salary - 40000.0) * 0.15 } else { 0.0 };
+        
+        let total_earnings = basic_salary + allowances;
+        let total_deductions = fixed_deductions + pf_employee + tax_amount;
+        let net_pay = total_earnings - total_deductions;
+        let days_present = 26; // Defaulting for demo
+        let status = "Processed"; // Defaulting for demo
+
+        Ok(serde_json::json!({
+            "id": id,
+            "employee_name": employee_name,
+            "basic_salary": basic_salary,
+            "total_earnings": total_earnings,
+            "total_deductions": total_deductions,
+            "net_pay": net_pay,
+            "pf_employer": pf_employer,
+            "pf_employee": pf_employee,
+            "tax_amount": tax_amount,
+            "overtime_amount": 0, // Placeholder
+            "days_present": days_present,
+            "status": status,
+        }))
+    }).map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    Ok(records)
+}
+
 // ============================================================================
 // FINANCE CRUD (Invoices & Payments)
 // ============================================================================

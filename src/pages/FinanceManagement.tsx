@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { invoke } from '@tauri-apps/api/core';
 import {
   FileText, Plus, Download, Eye, Edit2,
   DollarSign, TrendingUp, AlertCircle, Clock
@@ -51,54 +52,26 @@ export const FinanceManagement: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [invoiceDialog, setInvoiceDialog] = useState({ open: false, editing: null as Invoice | null });
 
-  // Mock data
   useEffect(() => {
-    const mockInvoices: Invoice[] = [
-      {
-        id: 1,
-        invoice_number: 'INV-2026-001',
-        invoice_date: '2026-04-01',
-        due_date: '2026-04-15',
-        contact_name: 'ABC Company',
-        contact_type: 'Customer',
-        invoice_type: 'Sales',
-        subtotal: 50000,
-        tax_amount: 6500,
-        total_amount: 56500,
-        paid_amount: 56500,
-        status: 'Paid',
-      },
-      {
-        id: 2,
-        invoice_number: 'INV-2026-002',
-        invoice_date: '2026-04-05',
-        due_date: '2026-04-20',
-        contact_name: 'XYZ Suppliers',
-        contact_type: 'Vendor',
-        invoice_type: 'Purchase',
-        subtotal: 35000,
-        tax_amount: 4550,
-        total_amount: 39550,
-        paid_amount: 20000,
-        status: 'Sent',
-      },
-      {
-        id: 3,
-        invoice_number: 'INV-2026-003',
-        invoice_date: '2026-03-25',
-        due_date: '2026-04-10',
-        contact_name: 'Tech Solutions',
-        contact_type: 'Customer',
-        invoice_type: 'Sales',
-        subtotal: 75000,
-        tax_amount: 9750,
-        total_amount: 84750,
-        paid_amount: 0,
-        status: 'Overdue',
-      },
-    ];
-    setInvoices(mockInvoices);
+    loadInvoices();
   }, []);
+
+  const loadInvoices = async () => {
+    setLoading(true);
+    try {
+      const response = await invoke<{ success: boolean; data: Invoice[] }>('list_invoices', {
+        invoiceType: null,
+        status: null,
+      });
+      if (response.success) {
+        setInvoices(response.data);
+      }
+    } catch (error) {
+      console.error('Failed to load invoices:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Stats
   const totalSales = invoices
