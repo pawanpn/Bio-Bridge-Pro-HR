@@ -301,6 +301,7 @@ pub struct CreateEmployeeRequest {
     pub whatsapp_exception: Option<bool>,
     pub whatsapp_punch: Option<bool>,
     pub supervisor_mobile: Option<String>,
+    pub biometric_id: Option<i32>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -361,6 +362,7 @@ pub struct UpdateEmployeeRequest {
     pub whatsapp_exception: Option<bool>,
     pub whatsapp_punch: Option<bool>,
     pub supervisor_mobile: Option<String>,
+    pub biometric_id: Option<i32>,
 }
 
 /// CREATE: Add new employee
@@ -411,10 +413,15 @@ pub async fn create_employee(
             employee_code, first_name, middle_name, last_name,
             date_of_birth, gender, personal_email, personal_phone,
             current_address, permanent_address, citizenship_number, pan_number,
-            department_id, designation_id, branch_id, date_of_joining,
             employment_type, employment_status, reporting_manager_id, bank_name,
-            account_number, status, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, 'active', datetime('now'), datetime('now'), ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52)",
+            account_number, status, created_at, updated_at, area_id, location_id,
+            photo, enable_self_service, enable_mobile_access, local_name, contact_tel,
+            office_tel, motorcycle_license, automobile_license, religion, city,
+            postcode, passport_no, nationality, verification_mode, device_privilege,
+            device_password, card_no, bio_photo, enable_attendance, enable_holiday,
+            outdoor_management, workflow_role, mobile_punch, app_role, whatsapp_alert,
+            whatsapp_exception, whatsapp_punch, supervisor_mobile, biometric_id
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, 'active', datetime('now'), datetime('now'), ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53)",
         params![
             employee_code,
             first_name,
@@ -467,6 +474,7 @@ pub async fn create_employee(
             request.whatsapp_exception.unwrap_or(false) as i32,
             request.whatsapp_punch.unwrap_or(false) as i32,
             request.supervisor_mobile,
+            request.biometric_id,
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to create employee: {}", e)))?;
 
@@ -893,6 +901,10 @@ pub async fn update_employee(
     if let Some(supervisor_mobile) = request.supervisor_mobile {
         updates.push("supervisor_mobile = ?");
         values.push(Box::new(sanitize_input(&supervisor_mobile)));
+    }
+    if let Some(biometric_id) = request.biometric_id {
+        updates.push("biometric_id = ?");
+        values.push(Box::new(biometric_id));
     }
 
     if updates.is_empty() {
