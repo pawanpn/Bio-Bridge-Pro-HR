@@ -89,6 +89,7 @@ interface EmployeeForm {
   whatsapp_exception: boolean;
   whatsapp_punch: boolean;
   supervisor_mobile: string;
+  biometric_id?: number | string;
 }
 
 const emptyForm: EmployeeForm = {
@@ -148,6 +149,7 @@ const emptyForm: EmployeeForm = {
   whatsapp_exception: false,
   whatsapp_punch: false,
   supervisor_mobile: '',
+  biometric_id: '',
 };
 
 export const EmployeeManagement: React.FC = () => {
@@ -321,6 +323,7 @@ export const EmployeeManagement: React.FC = () => {
         whatsapp_exception: formData.whatsapp_exception,
         whatsapp_punch: formData.whatsapp_punch,
         supervisor_mobile: formData.supervisor_mobile || undefined,
+        biometric_id: formData.biometric_id ? parseInt(String(formData.biometric_id)) : undefined,
       };
 
       // Save using the crud commands (local SQLite first)
@@ -950,6 +953,17 @@ export const EmployeeManagement: React.FC = () => {
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase text-muted-foreground">Card NO.</Label>
                       <Input value={formData.card_no} onChange={(e) => setFormData({ ...formData, card_no: e.target.value })} placeholder="RFID Card ID" />
+                    </div>
+                    <div className="space-y-2">
+                       <Label className="text-xs font-bold uppercase text-muted-foreground">Attendance ID (Manual)</Label>
+                       <Input 
+                         type="number" 
+                         value={formData.biometric_id} 
+                         onChange={(e) => setFormData({ ...formData, biometric_id: e.target.value })} 
+                         placeholder="Bio Device ID (e.g. 101)" 
+                         className="border-primary/30"
+                       />
+                       <p className="text-[10px] text-muted-foreground">This ID must match the ID on your hardware device for log linking.</p>
                     </div>
                     <div className="col-span-2 py-4">
                       <Button variant="outline" className="w-full border-dashed">

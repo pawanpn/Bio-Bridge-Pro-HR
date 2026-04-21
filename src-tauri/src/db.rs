@@ -575,11 +575,41 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [admin_pass_hash]
     );
 
-    // Fix existing database that might have the old master PIN hash instead of the user hash
     let _ = conn.execute(
-        "UPDATE Users SET password_hash = ?1, must_change_password = 1 WHERE username = 'admin' AND (password_hash = '10d196f790ed847684074fcc319a3b6a964be7cd7b4618e7d23d8c4749f7ba34' OR password_hash = 'ec625a85dfd20986840d198b6097caf0da50e6cb2040bfb22b51cfdd5c6bb5a4')",
-        [admin_pass_hash]
+        "ALTER TABLE Employees ADD COLUMN biometric_id INTEGER",
+        [],
     );
+
+    // Seed specific employees as requested
+    let branch_id = 1; // Default Head Office
+    let seed_employees = vec![
+        (2, "Ram Sharma", "Ram", "Sharma", "Operations", 45000.0, 101),
+        (3, "Sita Rai", "Sita", "Rai", "Sales", 40000.0, 102),
+        (4, "Hari Bahadur", "Hari", "Bahadur", "Maintenance", 35000.0, 103),
+    ];
+
+    for (id, name, first, last, dept, sal, bio_id) in seed_employees {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO Employees (id, name, first_name, last_name, department, branch_id, status, employee_code, biometric_id) 
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7, ?8)",
+            [
+                &id.to_string(), 
+                name, 
+                first, 
+                last, 
+                dept, 
+                &branch_id.to_string(), 
+                &format!("EMP-{:04}", id),
+                &bio_id.to_string()
+            ],
+        );
+        
+        // Also seed salary structure for payroll link
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO SalaryStructures (employee_id, basic_salary) VALUES (?1, ?2)",
+            [&id.to_string(), &sal.to_string()],
+        );
+    }
 
     Ok(conn)
 }
