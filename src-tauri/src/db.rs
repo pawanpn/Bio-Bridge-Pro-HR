@@ -8,7 +8,13 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     }
 
     // Create subfolders as requested
-    let dirs = vec!["Databases", "Attendance_Reports", "Employee_Photos", "OT_Reports", "Employee_Documents"];
+    let dirs = vec![
+        "Databases",
+        "Attendance_Reports",
+        "Employee_Photos",
+        "OT_Reports",
+        "Employee_Documents",
+    ];
     for d in dirs {
         let dir_path = app_dir.join(d);
         if !dir_path.exists() {
@@ -215,21 +221,49 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     )?;
 
     // Migration for existing tables (ensure columns exist)
-    let _ = conn.execute("ALTER TABLE Devices ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1", []);
-    let _ = conn.execute("ALTER TABLE Devices ADD COLUMN comm_key INTEGER DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE Devices ADD COLUMN is_default INTEGER DEFAULT 0", []);
+    let _ = conn.execute(
+        "ALTER TABLE Devices ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE Devices ADD COLUMN comm_key INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE Devices ADD COLUMN is_default INTEGER DEFAULT 0",
+        [],
+    );
     let columns = vec![
-        ("subnet_mask", "TEXT"), ("gateway", "TEXT"), ("dns", "TEXT"), 
-        ("dhcp", "INTEGER DEFAULT 0"), ("server_mode", "TEXT"), 
-        ("server_address", "TEXT"), ("https_enabled", "INTEGER DEFAULT 0")
+        ("subnet_mask", "TEXT"),
+        ("gateway", "TEXT"),
+        ("dns", "TEXT"),
+        ("dhcp", "INTEGER DEFAULT 0"),
+        ("server_mode", "TEXT"),
+        ("server_address", "TEXT"),
+        ("https_enabled", "INTEGER DEFAULT 0"),
     ];
     for (col, col_type) in columns {
-        let _ = conn.execute(&format!("ALTER TABLE Devices ADD COLUMN {} {}", col, col_type), []);
+        let _ = conn.execute(
+            &format!("ALTER TABLE Devices ADD COLUMN {} {}", col, col_type),
+            [],
+        );
     }
-    let _ = conn.execute("ALTER TABLE AttendanceLogs ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1", []);
-    let _ = conn.execute("ALTER TABLE AttendanceLogs ADD COLUMN punch_method TEXT", []);
-    let _ = conn.execute("ALTER TABLE Users ADD COLUMN must_change_password INTEGER DEFAULT 0", []);
-    let _ = conn.execute("ALTER TABLE Employees ADD COLUMN status TEXT DEFAULT 'active'", []);
+    let _ = conn.execute(
+        "ALTER TABLE AttendanceLogs ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE AttendanceLogs ADD COLUMN punch_method TEXT",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE Users ADD COLUMN must_change_password INTEGER DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE Employees ADD COLUMN status TEXT DEFAULT 'active'",
+        [],
+    );
 
     // Migration: Add all missing columns to Employees table for full CRUD support
     let employee_columns = vec![
@@ -291,7 +325,10 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("updated_at", "TEXT DEFAULT (datetime('now'))"),
     ];
     for (col, col_type) in employee_columns {
-        let _ = conn.execute(&format!("ALTER TABLE Employees ADD COLUMN {} {}", col, col_type), []);
+        let _ = conn.execute(
+            &format!("ALTER TABLE Employees ADD COLUMN {} {}", col, col_type),
+            [],
+        );
     }
 
     // Migrate existing data: populate first_name/last_name from name
@@ -313,7 +350,10 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     );
 
     // Migration for LeaveRequests table
-    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN leave_type TEXT DEFAULT 'Casual Leave'", []);
+    let _ = conn.execute(
+        "ALTER TABLE LeaveRequests ADD COLUMN leave_type TEXT DEFAULT 'Casual Leave'",
+        [],
+    );
     let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN reason TEXT", []);
     let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN approved_by TEXT", []);
 
@@ -369,21 +409,28 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
 
     // Offline-First Sync Queue table
     let _ = conn.execute(
-        "CREATE TABLE IF NOT EXISTS sync_queue (
+        "CREATE TABLE IF NOT EXISTS SyncQueue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             table_name TEXT NOT NULL,
             operation TEXT NOT NULL CHECK(operation IN ('INSERT', 'UPDATE', 'DELETE')),
             payload TEXT NOT NULL,
+            record_id TEXT NOT NULL,
             supabase_id TEXT,
+            priority TEXT DEFAULT 'MEDIUM',
+            status TEXT DEFAULT 'PENDING',
             created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
             synced_at TEXT,
             retry_count INTEGER DEFAULT 0,
             error_message TEXT
         )",
         [],
     );
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_sync_queue_pending ON sync_queue(synced_at) WHERE synced_at IS NULL", []);
-    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_sync_queue_table ON sync_queue(table_name)", []);
+    let _ = conn.execute("CREATE INDEX IF NOT EXISTS idx_sync_queue_pending ON SyncQueue(status) WHERE status = 'PENDING'", []);
+    let _ = conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sync_queue_table ON SyncQueue(table_name)",
+        [],
+    );
 
     // Inventory Items table
     let _ = conn.execute(
@@ -464,20 +511,62 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     );
 
+    // System Configuration table
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS SystemConfigs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL,
+            key TEXT NOT NULL,
+            value TEXT,
+            UNIQUE(category, key)
+        )",
+        [],
+    )?;
+
+    // Seed default configs
+    let default_configs = vec![
+        ("general", "app_name", "BioBridge Pro HR"),
+        ("general", "theme", "dark"),
+        ("company", "name", "Your Company Ltd."),
+        ("company", "address", "Kathmandu, Nepal"),
+        ("localization", "calendar_mode", "BS"),
+        ("localization", "currency", "NPR"),
+        ("security", "session_timeout", "30"),
+        ("notifications", "email_enabled", "0"),
+        ("attendance", "ot_enabled", "1"),
+        ("payroll", "basic_salary_type", "Monthly"),
+        ("database", "auto_backup", "1"),
+    ];
+    for (cat, key, val) in default_configs {
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO SystemConfigs (category, key, value) VALUES (?1, ?2, ?3)",
+            [cat, key, val],
+        );
+    }
+
     // Ensure uniqueness constraint for offline-first permanent sync
     let _ = conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_attendancelogs_emp_time ON AttendanceLogs (employee_id, timestamp)", []);
 
     // Seed default data
-    conn.execute("INSERT OR IGNORE INTO Organizations (id, name) VALUES (1, 'Default Organization')", [])?;
-    conn.execute("INSERT OR IGNORE INTO Branches (id, org_id, name) VALUES (1, 1, 'Head Office')", [])?;
-    conn.execute("INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')", [])?;
-    
+    conn.execute(
+        "INSERT OR IGNORE INTO Organizations (id, name) VALUES (1, 'Default Organization')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO Branches (id, org_id, name) VALUES (1, 1, 'Head Office')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')",
+        [],
+    )?;
+
     // Seed test employee for hardware bio-id 1
     conn.execute(
         "INSERT OR IGNORE INTO Employees (id, name, department, branch_id, status) VALUES (1, 'Admin Staff', 'Operations', 1, 'active')",
         []
     )?;
-    
+
     // Seed default Super Admin (admin / admin123)
     // bcrypt hash for 'admin123'
     let admin_pass_hash = "$2b$10$hmwXr.AU9waNfqdDwBPMwurCdtk5VT2mKSN4eqach.HlnACpNxv0y";
@@ -485,7 +574,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         "INSERT OR IGNORE INTO Users (username, password_hash, role, must_change_password) VALUES ('admin', ?1, 'SUPER_ADMIN', 1)",
         [admin_pass_hash]
     );
-    
+
     // Fix existing database that might have the old master PIN hash instead of the user hash
     let _ = conn.execute(
         "UPDATE Users SET password_hash = ?1, must_change_password = 1 WHERE username = 'admin' AND (password_hash = '10d196f790ed847684074fcc319a3b6a964be7cd7b4618e7d23d8c4749f7ba34' OR password_hash = 'ec625a85dfd20986840d198b6097caf0da50e6cb2040bfb22b51cfdd5c6bb5a4')",

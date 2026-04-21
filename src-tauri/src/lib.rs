@@ -24,10 +24,25 @@ pub fn run() {
             let app_dir = app.path().app_data_dir().expect("Failed to get app data dir");
             let conn = init_db(&app_dir).expect("Failed to initialize database");
             
-            app.manage(AppState {
+            let state = AppState {
                 db: Mutex::new(Some(conn)),
                 supabase_config: Mutex::new(None),
+            };
+            app.manage(state);
+
+            let state_handle = app.state::<AppState>();
+            let state_clone = state_handle.inner().clone();
+
+            // Automated Background Sync Loop (runs every 60 seconds)
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+                loop {
+                    interval.tick().await;
+                    // Attempt to sync pending changes to Supabase
+                    let _ = crate::sync_service::sync_to_supabase(tauri::State::from(&state_clone)).await;
+                }
             });
+
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
@@ -46,6 +61,10 @@ pub fn run() {
             commands::list_employees_for_select,
             commands::add_manual_attendance,
             commands::import_csv_attendance,
+            commands::get_system_configs,
+            commands::get_all_system_configs,
+            commands::save_system_config,
+            commands::delete_system_config,
             commands::scan_network,
             
             // From crud.rs (ERP Modules)

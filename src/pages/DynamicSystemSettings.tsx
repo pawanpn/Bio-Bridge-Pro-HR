@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,7 +21,6 @@ import {
   AlertCircle,
   CheckCircle2
 } from 'lucide-react';
-import { supabase } from '@/config/supabase';
 
 interface SystemSetting {
   id?: string;
@@ -114,17 +114,11 @@ export const DynamicSystemSettings: React.FC = () => {
   const loadSettings = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('system_settings')
-        .select('*')
-        .order('category', { ascending: true })
-        .order('setting_key', { ascending: true });
-
-      if (error) throw error;
+      const data = await invoke<SystemSetting[]>('get_all_system_configs');
       setSettings(data || []);
     } catch (error: any) {
       console.error('Error loading settings:', error);
-      setErrorMessage('Failed to load settings: ' + error.message);
+      setErrorMessage('Failed to load settings: ' + error);
     } finally {
       setLoading(false);
     }
@@ -136,78 +130,49 @@ export const DynamicSystemSettings: React.FC = () => {
       setSuccessMessage('');
       setErrorMessage('');
 
-      if (id) {
-        // Update existing
-        const { error } = await supabase
-          .from('system_settings')
-          .update({
-            setting_value: setting.setting_value,
-            setting_type: setting.setting_type,
-            description: setting.description,
-            is_public: setting.is_public,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', id);
+      await invoke('save_system_config', {
+          category: setting.category,
+          key: setting.setting_key,
+          value: setting.setting_value
+      });
 
-        if (error) throw error;
-        setSuccessMessage('Setting updated successfully');
-      } else {
-        // Create new
-        const { error } = await supabase
-          .from('system_settings')
-          .insert({
-            setting_key: setting.setting_key,
-            setting_value: setting.setting_value,
-            setting_type: setting.setting_type,
-            category: setting.category,
-            description: setting.description,
-            is_public: setting.is_public
-          });
-
-        if (error) throw error;
-        setSuccessMessage('Setting created successfully');
-        setShowAddSetting(false);
-        setNewSetting({
+      setSuccessMessage('Setting saved successfully');
+      setShowAddSetting(false);
+      setNewSetting({
           setting_key: '',
           setting_value: '',
           setting_type: 'string',
           category: 'general',
           description: '',
           is_public: true
-        });
-      }
+      });
 
-      // Reload settings
       await loadSettings();
-      
-      // Clear success message after 3 seconds
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (error: any) {
       console.error('Error saving setting:', error);
-      setErrorMessage('Failed to save setting: ' + error.message);
+      setErrorMessage('Failed to save setting: ' + error);
       setTimeout(() => setErrorMessage(''), 5000);
     } finally {
       setSaving(false);
     }
   };
 
-  const deleteSetting = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this setting?')) return;
+  const deleteSetting = async (setting: SystemSetting) => {
+    if (!confirm(`Are you sure you want to delete "${setting.setting_key}"?`)) return;
 
     try {
-      const { error } = await supabase
-        .from('system_settings')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
+      await invoke('delete_system_config', { 
+          category: setting.category, 
+          key: setting.setting_key 
+      });
 
       setSuccessMessage('Setting deleted successfully');
       await loadSettings();
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (error: any) {
       console.error('Error deleting setting:', error);
-      setErrorMessage('Failed to delete setting: ' + error.message);
+      setErrorMessage('Failed to delete setting: ' + error);
       setTimeout(() => setErrorMessage(''), 5000);
     }
   };
@@ -386,7 +351,7 @@ export const DynamicSystemSettings: React.FC = () => {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
-                              onClick={() => deleteSetting(setting.id!)}
+                              onClick={() => deleteSetting(setting)}
                             >
                               <Trash2 size={16} className="text-red-500" />
                             </Button>
