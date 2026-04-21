@@ -6,7 +6,7 @@ use base64::{engine::general_purpose, Engine as _};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
-const ENCRYPTION_KEY: &[u8] = b"BioBridgeProERP2026SecureKey123456"; // In production, use env var
+const ENCRYPTION_KEY: &[u8] = b"BioBridgeProERP2026SecureKey32ch"; // Exactly 32 bytes
 
 /// Encrypt sensitive data before storing
 pub fn encrypt_data(plaintext: &str) -> Result<String, String> {

@@ -42,8 +42,10 @@ pub fn run() {
                     
                     // Attempt to sync pending changes to Supabase
                     let config_opt = {
-                        let config_guard = state.supabase_config.lock().unwrap();
-                        config_guard.clone()
+                        match state.supabase_config.lock() {
+                            Ok(guard) => guard.clone(),
+                            Err(_) => None,
+                        }
                     };
                     
                     if let Some(config) = config_opt {
