@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import { Switch } from '@/components/ui/switch';
 import {
   Users, UserPlus, Search, Filter, Download, Upload,
   Edit2, Trash2, Eye, FileText, Calendar, MapPin, Phone, Mail,
-  HardDrive, Loader2, AlertCircle, CheckCircle, Info
+  HardDrive, Loader2, AlertCircle, CheckCircle, Info,
+  Settings, User, Shield, Clock, FileStack, Smartphone, MessageSquare, Plus, X
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -56,6 +58,37 @@ interface EmployeeForm {
   emergency_contact_name: string;
   emergency_contact_phone: string;
   emergency_contact_relation: string;
+  area_id: string;
+  location_id: string;
+  photo: string;
+  enable_self_service: boolean;
+  enable_mobile_access: boolean;
+  local_name: string;
+  national_id: string;
+  contact_tel: string;
+  office_tel: string;
+  motorcycle_license: string;
+  automobile_license: string;
+  religion: string;
+  city: string;
+  postcode: string;
+  passport_no: string;
+  nationality: string;
+  verification_mode: string;
+  device_privilege: string;
+  device_password: string;
+  card_no: string;
+  bio_photo: string;
+  enable_attendance: boolean;
+  enable_holiday: boolean;
+  outdoor_management: boolean;
+  workflow_role: string;
+  mobile_punch: boolean;
+  app_role: string;
+  whatsapp_alert: boolean;
+  whatsapp_exception: boolean;
+  whatsapp_punch: boolean;
+  supervisor_mobile: string;
 }
 
 const emptyForm: EmployeeForm = {
@@ -84,6 +117,37 @@ const emptyForm: EmployeeForm = {
   emergency_contact_name: '',
   emergency_contact_phone: '',
   emergency_contact_relation: '',
+  area_id: '',
+  location_id: '',
+  photo: '',
+  enable_self_service: false,
+  enable_mobile_access: false,
+  local_name: '',
+  national_id: '',
+  contact_tel: '',
+  office_tel: '',
+  motorcycle_license: '',
+  automobile_license: '',
+  religion: '',
+  city: '',
+  postcode: '',
+  passport_no: '',
+  nationality: '',
+  verification_mode: '',
+  device_privilege: '',
+  device_password: '',
+  card_no: '',
+  bio_photo: '',
+  enable_attendance: true,
+  enable_holiday: true,
+  outdoor_management: false,
+  workflow_role: '',
+  mobile_punch: false,
+  app_role: 'employee',
+  whatsapp_alert: false,
+  whatsapp_exception: false,
+  whatsapp_punch: false,
+  supervisor_mobile: '',
 };
 
 export const EmployeeManagement: React.FC = () => {
@@ -225,9 +289,38 @@ export const EmployeeManagement: React.FC = () => {
         reporting_manager_id: formData.reporting_manager_id || undefined,
         bank_name: formData.bank_name || undefined,
         account_number: formData.account_number || undefined,
-        emergency_contact_name: formData.emergency_contact_name || undefined,
-        emergency_contact_phone: formData.emergency_contact_phone || undefined,
         emergency_contact_relation: formData.emergency_contact_relation || undefined,
+        area_id: formData.area_id || undefined,
+        location_id: formData.location_id || undefined,
+        photo: formData.photo || undefined,
+        enable_self_service: formData.enable_self_service,
+        enable_mobile_access: formData.enable_mobile_access,
+        local_name: formData.local_name || undefined,
+        national_id: formData.national_id || undefined,
+        contact_tel: formData.contact_tel || undefined,
+        office_tel: formData.office_tel || undefined,
+        motorcycle_license: formData.motorcycle_license || undefined,
+        automobile_license: formData.automobile_license || undefined,
+        religion: formData.religion || undefined,
+        city: formData.city || undefined,
+        postcode: formData.postcode || undefined,
+        passport_no: formData.passport_no || undefined,
+        nationality: formData.nationality || undefined,
+        verification_mode: formData.verification_mode || undefined,
+        device_privilege: formData.device_privilege || undefined,
+        device_password: formData.device_password || undefined,
+        card_no: formData.card_no || undefined,
+        bio_photo: formData.bio_photo || undefined,
+        enable_attendance: formData.enable_attendance,
+        enable_holiday: formData.enable_holiday,
+        outdoor_management: formData.outdoor_management,
+        workflow_role: formData.workflow_role || undefined,
+        mobile_punch: formData.mobile_punch,
+        app_role: formData.app_role || undefined,
+        whatsapp_alert: formData.whatsapp_alert,
+        whatsapp_exception: formData.whatsapp_exception,
+        whatsapp_punch: formData.whatsapp_punch,
+        supervisor_mobile: formData.supervisor_mobile || undefined,
       };
 
       // Save using the crud commands (local SQLite first)
@@ -492,209 +585,562 @@ export const EmployeeManagement: React.FC = () => {
 
       {/* Add/Edit Employee Dialog */}
       <Dialog open={formDialog.open} onOpenChange={(open) => !open && setFormDialog({ open: false, editing: null })}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {formDialog.editing ? 'Edit Employee' : 'Add New Employee'}
-            </DialogTitle>
+        <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="p-6 border-b shrink-0">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                {formDialog.editing ? (
+                  <><Edit2 className="w-5 h-5 text-primary" /> Edit Employee</>
+                ) : (
+                  <><UserPlus className="w-5 h-5 text-primary" /> Add New Employee</>
+                )}
+              </DialogTitle>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setFormDialog({ open: false, editing: null })}>
+                  Discard
+                </Button>
+                <Button onClick={handleSaveEmployee} className="bg-primary text-white">
+                  Save
+                </Button>
+              </div>
+            </div>
           </DialogHeader>
 
-          <div className="space-y-6">
-            {/* Step Indicators */}
-            <div className="flex gap-2 mb-6">
-              {[1, 2, 3].map(step => (
+          <div className="flex flex-1 overflow-hidden">
+            {/* Sidebar Navigation */}
+            <div className="w-64 border-r bg-muted/30 overflow-y-auto p-4 space-y-1">
+              {[
+                { id: 1, label: 'Profile', icon: User },
+                { id: 2, label: 'Account Settings', icon: Settings },
+                { id: 3, label: 'Personal Information', icon: Info },
+                { id: 4, label: 'Device Settings', icon: Shield },
+                { id: 5, label: 'Attendance Setting', icon: Clock },
+                { id: 6, label: 'Document Setting', icon: FileStack },
+                { id: 7, label: 'Mobile App Settings', icon: Smartphone },
+                { id: 8, label: 'WhatsApp Settings', icon: MessageSquare },
+              ].map((section) => (
                 <button
-                  key={step}
-                  onClick={() => setFormStep(step)}
-                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                    formStep === step
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground'
+                  key={section.id}
+                  onClick={() => setFormStep(section.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    formStep === section.id
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                   }`}
                 >
-                  {step === 1 ? 'Personal Info' : step === 2 ? 'Employment' : 'Contact & Bank'}
+                  <section.icon className="w-4 h-4" />
+                  {section.label}
                 </button>
               ))}
             </div>
 
-            {/* Step 1: Personal Information */}
-            {formStep === 1 && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <Label>Employee Code *</Label>
-                  <Input
-                    value={formData.employee_code}
-                    onChange={(e) => setFormData({ ...formData, employee_code: e.target.value })}
-                    placeholder="EMP001"
-                  />
+            {/* Main Form Content */}
+            <div className="flex-1 overflow-y-auto p-8">
+              {formStatus && (
+                <div className={`mb-6 p-4 rounded-lg flex items-center gap-3 ${
+                  formStatus.includes('❌') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'
+                }`}>
+                  {formStatus.includes('❌') ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
+                  <p className="text-sm font-medium">{formStatus}</p>
                 </div>
-                <div>
-                  <Label>First Name *</Label>
-                  <Input
-                    value={formData.first_name}
-                    onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                    placeholder="John"
-                  />
-                </div>
-                <div>
-                  <Label>Middle Name</Label>
-                  <Input
-                    value={formData.middle_name}
-                    onChange={(e) => setFormData({ ...formData, middle_name: e.target.value })}
-                    placeholder="Kumar"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label>Last Name *</Label>
-                  <Input
-                    value={formData.last_name}
-                    onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                    placeholder="Doe"
-                  />
-                </div>
-                <div>
-                  <Label>Date of Birth</Label>
-                  <Input
-                    type="date"
-                    value={formData.date_of_birth}
-                    onChange={(e) => setFormData({ ...formData, date_of_birth: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <Label>Gender</Label>
-                  <select
-                    value={formData.gender}
-                    onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                  >
-                    <option value="">Select</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-              </div>
-            )}
+              )}
 
-            {/* Step 2: Employment Details */}
-            {formStep === 2 && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Branch</Label>
-                  <select
-                    value={formData.branch_id}
-                    onChange={(e) => setFormData({ ...formData, branch_id: e.target.value })}
-                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                  >
-                    <option value="">Select Branch</option>
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
+              {/* Section 1: Profile */}
+              {formStep === 1 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="flex justify-between items-start border-b pb-4">
+                    <div>
+                      <h3 className="text-lg font-semibold">Profile</h3>
+                      <p className="text-sm text-muted-foreground">Basic identity and employment assignment</p>
+                    </div>
+                    <div className="w-24 h-24 rounded-full border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors">
+                      <Upload className="w-6 h-6 text-muted-foreground mb-1" />
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold">Photo</span>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="emp_id" className="text-sm font-semibold">Employee ID *</Label>
+                      <Input
+                        id="emp_id"
+                        value={formData.employee_code}
+                        onChange={(e) => setFormData({ ...formData, employee_code: e.target.value })}
+                        placeholder="EMP-001"
+                        className="bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="email" className="text-sm font-semibold">Email</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={formData.personal_email}
+                        onChange={(e) => setFormData({ ...formData, personal_email: e.target.value })}
+                        placeholder="employee@company.com"
+                        className="bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="first_name" className="text-sm font-semibold">First Name *</Label>
+                      <Input
+                        id="first_name"
+                        value={formData.first_name}
+                        onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+                        placeholder="John"
+                        className="bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="last_name" className="text-sm font-semibold">Last Name *</Label>
+                      <Input
+                        id="last_name"
+                        value={formData.last_name}
+                        onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+                        placeholder="Doe"
+                        className="bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="doj" className="text-sm font-semibold">Date of Joining</Label>
+                      <Input
+                        id="doj"
+                        type="date"
+                        value={formData.date_of_joining}
+                        onChange={(e) => setFormData({ ...formData, date_of_joining: e.target.value })}
+                        className="bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="department" className="text-sm font-semibold">Department *</Label>
+                      <select
+                        id="department"
+                        value={formData.department_id}
+                        onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                      >
+                        <option value="">Select Department</option>
+                        {departments.map(d => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="area" className="text-sm font-semibold">Area *</Label>
+                      <select
+                        id="area"
+                        value={formData.area_id}
+                        onChange={(e) => setFormData({ ...formData, area_id: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                      >
+                        <option value="">Select Area</option>
+                        <option value="Headquarters">Headquarters</option>
+                        <option value="Branch A">Branch A</option>
+                        <option value="Branch B">Branch B</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="position" className="text-sm font-semibold">Position *</Label>
+                      <select
+                        id="position"
+                        value={formData.designation_id}
+                        onChange={(e) => setFormData({ ...formData, designation_id: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                      >
+                        <option value="">Select Position</option>
+                        {designations.map(d => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="location" className="text-sm font-semibold">Location</Label>
+                      <select
+                        id="location"
+                        value={formData.location_id}
+                        onChange={(e) => setFormData({ ...formData, location_id: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                      >
+                        <option value="">Select Location</option>
+                        {branches.map(b => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="emp_type" className="text-sm font-semibold">Employment Type</Label>
+                      <select
+                        id="emp_type"
+                        value={formData.employment_type}
+                        onChange={(e) => setFormData({ ...formData, employment_type: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                      >
+                        <option value="Full-time">Full-time</option>
+                        <option value="Part-time">Part-time</option>
+                        <option value="Contract">Contract</option>
+                        <option value="Intern">Intern</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <Label>Employment Type</Label>
-                  <select
-                    value={formData.employment_type}
-                    onChange={(e) => setFormData({ ...formData, employment_type: e.target.value })}
-                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                  >
-                    <option value="Full-time">Full-time</option>
-                    <option value="Part-time">Part-time</option>
-                    <option value="Contract">Contract</option>
-                    <option value="Intern">Intern</option>
-                  </select>
-                </div>
-                <div>
-                  <Label>Date of Joining</Label>
-                  <Input
-                    type="date"
-                    value={formData.date_of_joining}
-                    onChange={(e) => setFormData({ ...formData, date_of_joining: e.target.value })}
-                  />
-                </div>
-              </div>
-            )}
+              )}
 
-            {/* Step 3: Contact & Bank Details */}
-            {formStep === 3 && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Personal Email</Label>
-                  <Input
-                    type="email"
-                    value={formData.personal_email}
-                    onChange={(e) => setFormData({ ...formData, personal_email: e.target.value })}
-                    placeholder="john@example.com"
-                  />
-                </div>
-                <div>
-                  <Label>Personal Phone</Label>
-                  <Input
-                    value={formData.personal_phone}
-                    onChange={(e) => setFormData({ ...formData, personal_phone: e.target.value })}
-                    placeholder="+977-98XXXXXXXX"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label>Current Address</Label>
-                  <Textarea
-                    value={formData.current_address}
-                    onChange={(e) => setFormData({ ...formData, current_address: e.target.value })}
-                    placeholder="Current address..."
-                  />
-                </div>
-                <div>
-                  <Label>Bank Name</Label>
-                  <Input
-                    value={formData.bank_name}
-                    onChange={(e) => setFormData({ ...formData, bank_name: e.target.value })}
-                    placeholder="Bank name"
-                  />
-                </div>
-                <div>
-                  <Label>Account Number</Label>
-                  <Input
-                    value={formData.account_number}
-                    onChange={(e) => setFormData({ ...formData, account_number: e.target.value })}
-                    placeholder="Account number"
-                  />
-                </div>
-              </div>
-            )}
+              {/* Section 2: Account Settings */}
+              {formStep === 2 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="border-b pb-4">
+                    <h3 className="text-lg font-semibold">Account Settings</h3>
+                    <p className="text-sm text-muted-foreground">Manage system access and privileges</p>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between p-4 bg-muted/20 rounded-lg border">
+                      <div className="space-y-0.5">
+                        <Label className="text-base font-semibold">Enable Self-Service Login *</Label>
+                        <p className="text-xs text-muted-foreground">When enabled, employees can log in via the web portal.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.enable_self_service}
+                        onCheckedChange={(val) => setFormData({ ...formData, enable_self_service: val })}
+                      />
+                    </div>
 
-            {formStatus && (
-              <div className={`p-3 rounded-md ${
-                formStatus.includes('❌') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
-              }`}>
-                {formStatus}
-              </div>
-            )}
+                    <div className="flex items-center justify-between p-4 bg-muted/20 rounded-lg border">
+                      <div className="space-y-0.5">
+                        <Label className="text-base font-semibold">Enable Mobile App Access *</Label>
+                        <p className="text-xs text-muted-foreground">Allow access to the mobile application for this employee.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.enable_mobile_access}
+                        onCheckedChange={(val) => setFormData({ ...formData, enable_mobile_access: val })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Section 3: Personal Information */}
+              {formStep === 3 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="border-b pb-4">
+                    <h3 className="text-lg font-semibold text-primary flex items-center gap-2">
+                       Personal Information <Shield className="w-4 h-4 text-primary" />
+                    </h3>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-6">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Birth Date</Label>
+                      <Input type="date" value={formData.date_of_birth} onChange={(e) => setFormData({ ...formData, date_of_birth: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Local Name</Label>
+                      <Input value={formData.local_name} onChange={(e) => setFormData({ ...formData, local_name: e.target.value })} placeholder="Original script name" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">National ID Number</Label>
+                      <Input value={formData.national_id} onChange={(e) => setFormData({ ...formData, national_id: e.target.value })} placeholder="Citizenship / ID Card" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Mobile</Label>
+                      <Input value={formData.personal_phone} onChange={(e) => setFormData({ ...formData, personal_phone: e.target.value })} placeholder="+X XXX XXX XXXX" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Contact Tel</Label>
+                      <Input value={formData.contact_tel} onChange={(e) => setFormData({ ...formData, contact_tel: e.target.value })} placeholder="Emergency contact" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Office Tel</Label>
+                      <Input value={formData.office_tel} onChange={(e) => setFormData({ ...formData, office_tel: e.target.value })} placeholder="Direct extension" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Motorcycle License</Label>
+                      <Input value={formData.motorcycle_license} onChange={(e) => setFormData({ ...formData, motorcycle_license: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Automobile License</Label>
+                      <Input value={formData.automobile_license} onChange={(e) => setFormData({ ...formData, automobile_license: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Religion</Label>
+                      <Input value={formData.religion} onChange={(e) => setFormData({ ...formData, religion: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">City</Label>
+                      <Input value={formData.city} onChange={(e) => setFormData({ ...formData, city: e.target.value })} />
+                    </div>
+                    <div className="space-y-2 col-span-1">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Postcode</Label>
+                      <Input value={formData.postcode} onChange={(e) => setFormData({ ...formData, postcode: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Gender</Label>
+                      <select
+                        value={formData.gender}
+                        onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                      >
+                        <option value="">Select</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="col-span-2 space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Permanent Address</Label>
+                      <Input value={formData.permanent_address} onChange={(e) => setFormData({ ...formData, permanent_address: e.target.value })} placeholder="Full home address" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Passport NO.</Label>
+                      <Input value={formData.passport_no} onChange={(e) => setFormData({ ...formData, passport_no: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Nationality</Label>
+                      <Input value={formData.nationality} onChange={(e) => setFormData({ ...formData, nationality: e.target.value })} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Section 4: Device Settings */}
+              {formStep === 4 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="flex justify-between items-start border-b pb-4">
+                    <div>
+                      <h3 className="text-lg font-semibold">Device Settings</h3>
+                      <p className="text-sm text-muted-foreground">Hardware authentication configuration</p>
+                    </div>
+                    <div className="w-24 h-24 rounded-full border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors">
+                      <Upload className="w-6 h-6 text-muted-foreground mb-1" />
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold text-center">Bio-photo</span>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Verification Mode</Label>
+                      <select
+                        value={formData.verification_mode}
+                        onChange={(e) => setFormData({ ...formData, verification_mode: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                      >
+                        <option value="">Default Selection</option>
+                        <option value="FP/PW/RF">FP/PW/RF</option>
+                        <option value="Face/FP/PW">Face/FP/PW</option>
+                        <option value="Card">Card Only</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Device Privilege</Label>
+                      <select
+                        value={formData.device_privilege}
+                        onChange={(e) => setFormData({ ...formData, device_privilege: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                      >
+                        <option value="Normal User">Normal User</option>
+                        <option value="Registrar">Registrar</option>
+                        <option value="Admin">Device Admin</option>
+                        <option value="Super Admin">Super Device Admin</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Device Password</Label>
+                      <Input type="password" value={formData.device_password} onChange={(e) => setFormData({ ...formData, device_password: e.target.value })} placeholder="Hardware PIN" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Card NO.</Label>
+                      <Input value={formData.card_no} onChange={(e) => setFormData({ ...formData, card_no: e.target.value })} placeholder="RFID Card ID" />
+                    </div>
+                    <div className="col-span-2 py-4">
+                      <Button variant="outline" className="w-full border-dashed">
+                        Enroll Device Biometrics
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Section 5: Attendance Setting */}
+              {formStep === 5 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="border-b pb-4">
+                    <h3 className="text-lg font-semibold text-primary">Attendance Setting</h3>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between p-4 bg-muted/10 rounded-lg border">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-bold">Enable Attendance *</Label>
+                        <p className="text-xs text-muted-foreground italic">When enabled, the system will include the employee in attendance calculations.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.enable_attendance}
+                        onCheckedChange={(val) => setFormData({ ...formData, enable_attendance: val })}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-muted/10 rounded-lg border">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-bold">Enable Holiday *</Label>
+                        <p className="text-xs text-muted-foreground italic">When enabled, the system will automatically assign configured holidays.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.enable_holiday}
+                        onCheckedChange={(val) => setFormData({ ...formData, enable_holiday: val })}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-muted/10 rounded-lg border">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-bold">Outdoor Management *</Label>
+                        <p className="text-xs text-muted-foreground italic">Allows outdoor check-in/out permissions for field work management.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.outdoor_management}
+                        onCheckedChange={(val) => setFormData({ ...formData, outdoor_management: val })}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                       <Label className="text-xs font-bold uppercase text-muted-foreground">Workflow Role</Label>
+                       <select
+                        value={formData.workflow_role}
+                        onChange={(e) => setFormData({ ...formData, workflow_role: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                      >
+                        <option value="">Select Role</option>
+                        <option value="Self">Self Only</option>
+                        <option value="Manager">Line Manager</option>
+                        <option value="HR">HR Approver</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Section 6: Document Setting */}
+              {formStep === 6 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="flex justify-between items-center border-b pb-4">
+                    <h3 className="text-lg font-semibold">Document Setting</h3>
+                    <Button size="sm" className="bg-primary h-8 px-3">
+                      <Plus className="w-4 h-4 mr-1" /> Add Document
+                    </Button>
+                  </div>
+                  
+                  <Table className="border rounded-md">
+                    <TableHeader className="bg-muted/50">
+                      <TableRow>
+                        <TableHead className="w-[40%] text-xs font-bold">Document</TableHead>
+                        <TableHead className="text-xs font-bold">Valid Up To</TableHead>
+                        <TableHead className="text-xs font-bold text-center">Email Alert</TableHead>
+                        <TableHead className="text-xs font-bold">Alert Before</TableHead>
+                        <TableHead className="text-xs font-bold text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell colSpan={5} className="h-48 text-center text-muted-foreground italic">
+                           No documents uploaded for this employee
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {/* Section 7: Mobile App Settings */}
+              {formStep === 7 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="border-b pb-4">
+                    <h3 className="text-lg font-semibold">Mobile App Settings</h3>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between p-4 bg-muted/10 rounded-lg border">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-bold">Mobile App Punch *</Label>
+                        <p className="text-xs text-muted-foreground italic">When enabled, employees can use the mobile app to punch attendance.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.mobile_punch}
+                        onCheckedChange={(val) => setFormData({ ...formData, mobile_punch: val })}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                       <Label className="text-xs font-bold uppercase text-muted-foreground">App Role</Label>
+                       <select
+                        value={formData.app_role}
+                        onChange={(e) => setFormData({ ...formData, app_role: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                      >
+                        <option value="employee">Standard Employee</option>
+                        <option value="supervisor">Supervisor</option>
+                        <option value="hr">HR Manager</option>
+                        <option value="admin">System Admin</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Section 8: WhatsApp Settings */}
+              {formStep === 8 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="border-b pb-4">
+                    <h3 className="text-lg font-semibold">WhatsApp Settings</h3>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between p-5 bg-[#25D366]/5 rounded-xl border border-[#25D366]/20">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-bold flex items-center gap-2">
+                          <MessageSquare className="w-4 h-4 text-[#25D366]" /> 
+                          Enable WhatsApp Alert *
+                        </Label>
+                        <p className="text-xs text-muted-foreground italic">Send automatic organization messages through WhatsApp notifications.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.whatsapp_alert}
+                        onCheckedChange={(val) => setFormData({ ...formData, whatsapp_alert: val })}
+                      />
+                    </div>
+
+                    <div className="space-y-4 px-2">
+                      <div className="flex items-center gap-6">
+                        <div className="flex items-center gap-2 flex-1">
+                          <Switch 
+                            checked={formData.whatsapp_exception}
+                            onCheckedChange={(val) => setFormData({ ...formData, whatsapp_exception: val })}
+                          />
+                          <Label className="text-xs font-medium">Exception Alerts</Label>
+                        </div>
+                        <div className="flex items-center gap-2 flex-1">
+                          <Switch 
+                            checked={formData.whatsapp_punch}
+                            onCheckedChange={(val) => setFormData({ ...formData, whatsapp_punch: val })}
+                          />
+                          <Label className="text-xs font-medium">Punch Confirmation</Label>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 pt-2">
+                        <Label className="text-xs font-bold uppercase text-muted-foreground">Supervisor Mobile</Label>
+                        <Input 
+                          value={formData.supervisor_mobile} 
+                          onChange={(e) => setFormData({ ...formData, supervisor_mobile: e.target.value })} 
+                          placeholder="+977XXXXXXXXXX"
+                          className="font-mono"
+                        />
+                         <p className="text-[10px] text-muted-foreground italic">Required for escalation and reporting alerts</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-
-          <DialogFooter className="flex justify-between">
-            <div>
-              {formStep > 1 && (
-                <Button variant="outline" onClick={() => setFormStep(formStep - 1)}>
-                  Previous
-                </Button>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setFormDialog({ open: false, editing: null })}>
-                Cancel
-              </Button>
-              {formStep < 3 ? (
-                <Button onClick={() => setFormStep(formStep + 1)}>
-                  Next
-                </Button>
-              ) : (
-                <Button onClick={handleSaveEmployee}>
-                  {formDialog.editing ? 'Update' : 'Create'} Employee
-                </Button>
-              )}
-            </div>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 

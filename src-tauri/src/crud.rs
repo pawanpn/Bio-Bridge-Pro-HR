@@ -270,6 +270,37 @@ pub struct CreateEmployeeRequest {
     pub reporting_manager_id: Option<String>,
     pub bank_name: Option<String>,
     pub account_number: Option<String>,
+    pub area_id: Option<String>,
+    pub location_id: Option<String>,
+    pub photo: Option<String>,
+    pub enable_self_service: Option<bool>,
+    pub enable_mobile_access: Option<bool>,
+    pub local_name: Option<String>,
+    pub national_id: Option<String>,
+    pub contact_tel: Option<String>,
+    pub office_tel: Option<String>,
+    pub motorcycle_license: Option<String>,
+    pub automobile_license: Option<String>,
+    pub religion: Option<String>,
+    pub city: Option<String>,
+    pub postcode: Option<String>,
+    pub passport_no: Option<String>,
+    pub nationality: Option<String>,
+    pub verification_mode: Option<String>,
+    pub device_privilege: Option<String>,
+    pub device_password: Option<String>,
+    pub card_no: Option<String>,
+    pub bio_photo: Option<String>,
+    pub enable_attendance: Option<bool>,
+    pub enable_holiday: Option<bool>,
+    pub outdoor_management: Option<bool>,
+    pub workflow_role: Option<String>,
+    pub mobile_punch: Option<bool>,
+    pub app_role: Option<String>,
+    pub whatsapp_alert: Option<bool>,
+    pub whatsapp_exception: Option<bool>,
+    pub whatsapp_punch: Option<bool>,
+    pub supervisor_mobile: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -299,6 +330,37 @@ pub struct UpdateEmployeeRequest {
     pub emergency_contact_name: Option<String>,
     pub emergency_contact_phone: Option<String>,
     pub emergency_contact_relation: Option<String>,
+    pub area_id: Option<String>,
+    pub location_id: Option<String>,
+    pub photo: Option<String>,
+    pub enable_self_service: Option<bool>,
+    pub enable_mobile_access: Option<bool>,
+    pub local_name: Option<String>,
+    pub national_id: Option<String>,
+    pub contact_tel: Option<String>,
+    pub office_tel: Option<String>,
+    pub motorcycle_license: Option<String>,
+    pub automobile_license: Option<String>,
+    pub religion: Option<String>,
+    pub city: Option<String>,
+    pub postcode: Option<String>,
+    pub passport_no: Option<String>,
+    pub nationality: Option<String>,
+    pub verification_mode: Option<String>,
+    pub device_privilege: Option<String>,
+    pub device_password: Option<String>,
+    pub card_no: Option<String>,
+    pub bio_photo: Option<String>,
+    pub enable_attendance: Option<bool>,
+    pub enable_holiday: Option<bool>,
+    pub outdoor_management: Option<bool>,
+    pub workflow_role: Option<String>,
+    pub mobile_punch: Option<bool>,
+    pub app_role: Option<String>,
+    pub whatsapp_alert: Option<bool>,
+    pub whatsapp_exception: Option<bool>,
+    pub whatsapp_punch: Option<bool>,
+    pub supervisor_mobile: Option<String>,
 }
 
 /// CREATE: Add new employee
@@ -352,7 +414,7 @@ pub async fn create_employee(
             department_id, designation_id, branch_id, date_of_joining,
             employment_type, employment_status, reporting_manager_id, bank_name,
             account_number, status, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, 'active', datetime('now'), datetime('now'))",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, 'active', datetime('now'), datetime('now'), ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52)",
         params![
             employee_code,
             first_name,
@@ -375,6 +437,36 @@ pub async fn create_employee(
             request.reporting_manager_id,
             request.bank_name,
             account_encrypted,
+            request.area_id,
+            request.location_id,
+            request.photo,
+            request.enable_self_service.unwrap_or(false) as i32,
+            request.enable_mobile_access.unwrap_or(false) as i32,
+            request.local_name,
+            request.contact_tel,
+            request.office_tel,
+            request.motorcycle_license,
+            request.automobile_license,
+            request.religion,
+            request.city,
+            request.postcode,
+            request.passport_no,
+            request.nationality,
+            request.verification_mode,
+            request.device_privilege,
+            request.device_password,
+            request.card_no,
+            request.bio_photo,
+            request.enable_attendance.unwrap_or(true) as i32,
+            request.enable_holiday.unwrap_or(true) as i32,
+            request.outdoor_management.unwrap_or(false) as i32,
+            request.workflow_role,
+            request.mobile_punch.unwrap_or(false) as i32,
+            request.app_role,
+            request.whatsapp_alert.unwrap_or(false) as i32,
+            request.whatsapp_exception.unwrap_or(false) as i32,
+            request.whatsapp_punch.unwrap_or(false) as i32,
+            request.supervisor_mobile,
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to create employee: {}", e)))?;
 
@@ -444,6 +536,37 @@ pub async fn get_employee(
             "department_name": row.get::<_, Option<String>>(17)?,
             "designation_name": row.get::<_, Option<String>>(18)?,
             "branch_name": row.get::<_, Option<String>>(19)?,
+            "area_id": row.get::<_, Option<String>>(20)?,
+            "location_id": row.get::<_, Option<String>>(21)?,
+            "photo": row.get::<_, Option<String>>(22)?,
+            "enable_self_service": row.get::<_, Option<i32>>(23)?.unwrap_or(0) != 0,
+            "enable_mobile_access": row.get::<_, Option<i32>>(24)?.unwrap_or(0) != 0,
+            "local_name": row.get::<_, Option<String>>(25)?,
+            "national_id": row.get::<_, Option<String>>(26)?,
+            "contact_tel": row.get::<_, Option<String>>(27)?,
+            "office_tel": row.get::<_, Option<String>>(28)?,
+            "motorcycle_license": row.get::<_, Option<String>>(29)?,
+            "automobile_license": row.get::<_, Option<String>>(30)?,
+            "religion": row.get::<_, Option<String>>(31)?,
+            "city": row.get::<_, Option<String>>(32)?,
+            "postcode": row.get::<_, Option<String>>(33)?,
+            "passport_no": row.get::<_, Option<String>>(34)?,
+            "nationality": row.get::<_, Option<String>>(35)?,
+            "verification_mode": row.get::<_, Option<String>>(36)?,
+            "device_privilege": row.get::<_, Option<String>>(37)?,
+            "device_password": row.get::<_, Option<String>>(38)?,
+            "card_no": row.get::<_, Option<String>>(39)?,
+            "bio_photo": row.get::<_, Option<String>>(40)?,
+            "enable_attendance": row.get::<_, Option<i32>>(41)?.unwrap_or(1) != 0,
+            "enable_holiday": row.get::<_, Option<i32>>(42)?.unwrap_or(1) != 0,
+            "outdoor_management": row.get::<_, Option<i32>>(43)?.unwrap_or(0) != 0,
+            "workflow_role": row.get::<_, Option<String>>(44)?,
+            "mobile_punch": row.get::<_, Option<i32>>(45)?.unwrap_or(0) != 0,
+            "app_role": row.get::<_, Option<String>>(46)?,
+            "whatsapp_alert": row.get::<_, Option<i32>>(47)?.unwrap_or(0) != 0,
+            "whatsapp_exception": row.get::<_, Option<i32>>(48)?.unwrap_or(0) != 0,
+            "whatsapp_punch": row.get::<_, Option<i32>>(49)?.unwrap_or(0) != 0,
+            "supervisor_mobile": row.get::<_, Option<String>>(50)?,
         }))
     }).optional()
     .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
@@ -646,6 +769,130 @@ pub async fn update_employee(
     if let Some(emergency_relation) = request.emergency_contact_relation {
         updates.push("emergency_contact_relation = ?");
         values.push(Box::new(sanitize_input(&emergency_relation)));
+    }
+    if let Some(area_id) = request.area_id {
+        updates.push("area_id = ?");
+        values.push(Box::new(area_id));
+    }
+    if let Some(location_id) = request.location_id {
+        updates.push("location_id = ?");
+        values.push(Box::new(location_id));
+    }
+    if let Some(photo) = request.photo {
+        updates.push("photo = ?");
+        values.push(Box::new(photo));
+    }
+    if let Some(enable_self_service) = request.enable_self_service {
+        updates.push("enable_self_service = ?");
+        values.push(Box::new(enable_self_service as i32));
+    }
+    if let Some(enable_mobile_access) = request.enable_mobile_access {
+        updates.push("enable_mobile_access = ?");
+        values.push(Box::new(enable_mobile_access as i32));
+    }
+    if let Some(local_name) = request.local_name {
+        updates.push("local_name = ?");
+        values.push(Box::new(sanitize_input(&local_name)));
+    }
+    if let Some(national_id) = request.national_id {
+        updates.push("national_id = ?");
+        values.push(Box::new(sanitize_input(&national_id)));
+    }
+    if let Some(contact_tel) = request.contact_tel {
+        updates.push("contact_tel = ?");
+        values.push(Box::new(sanitize_input(&contact_tel)));
+    }
+    if let Some(office_tel) = request.office_tel {
+        updates.push("office_tel = ?");
+        values.push(Box::new(sanitize_input(&office_tel)));
+    }
+    if let Some(motorcycle_license) = request.motorcycle_license {
+        updates.push("motorcycle_license = ?");
+        values.push(Box::new(sanitize_input(&motorcycle_license)));
+    }
+    if let Some(automobile_license) = request.automobile_license {
+        updates.push("automobile_license = ?");
+        values.push(Box::new(sanitize_input(&automobile_license)));
+    }
+    if let Some(religion) = request.religion {
+        updates.push("religion = ?");
+        values.push(Box::new(sanitize_input(&religion)));
+    }
+    if let Some(city) = request.city {
+        updates.push("city = ?");
+        values.push(Box::new(sanitize_input(&city)));
+    }
+    if let Some(postcode) = request.postcode {
+        updates.push("postcode = ?");
+        values.push(Box::new(sanitize_input(&postcode)));
+    }
+    if let Some(passport_no) = request.passport_no {
+        updates.push("passport_no = ?");
+        values.push(Box::new(sanitize_input(&passport_no)));
+    }
+    if let Some(nationality) = request.nationality {
+        updates.push("nationality = ?");
+        values.push(Box::new(sanitize_input(&nationality)));
+    }
+    if let Some(verification_mode) = request.verification_mode {
+        updates.push("verification_mode = ?");
+        values.push(Box::new(verification_mode));
+    }
+    if let Some(device_privilege) = request.device_privilege {
+        updates.push("device_privilege = ?");
+        values.push(Box::new(device_privilege));
+    }
+    if let Some(device_password) = request.device_password {
+        updates.push("device_password = ?");
+        values.push(Box::new(device_password));
+    }
+    if let Some(card_no) = request.card_no {
+        updates.push("card_no = ?");
+        values.push(Box::new(card_no));
+    }
+    if let Some(bio_photo) = request.bio_photo {
+        updates.push("bio_photo = ?");
+        values.push(Box::new(bio_photo));
+    }
+    if let Some(enable_attendance) = request.enable_attendance {
+        updates.push("enable_attendance = ?");
+        values.push(Box::new(enable_attendance as i32));
+    }
+    if let Some(enable_holiday) = request.enable_holiday {
+        updates.push("enable_holiday = ?");
+        values.push(Box::new(enable_holiday as i32));
+    }
+    if let Some(outdoor_management) = request.outdoor_management {
+        updates.push("outdoor_management = ?");
+        values.push(Box::new(outdoor_management as i32));
+    }
+    if let Some(workflow_role) = request.workflow_role {
+        updates.push("workflow_role = ?");
+        values.push(Box::new(workflow_role));
+    }
+    if let Some(mobile_punch) = request.mobile_punch {
+        updates.push("mobile_punch = ?");
+        values.push(Box::new(mobile_punch as i32));
+    }
+    if let Some(app_role) = request.app_role {
+        updates.push("app_role = ?");
+        values.push(Box::new(app_role));
+    }
+    if let Some(whatsapp_alert) = request.whatsapp_alert {
+        updates.push("whatsapp_alert = ?");
+        values.push(Box::new(whatsapp_alert as i32));
+    }
+    if let Some(whatsapp_exception) = request.whatsapp_exception {
+        updates.push("whatsapp_exception = ?");
+        values.push(Box::new(whatsapp_exception as i32));
+    }
+    if let Some(whatsapp_punch) = request.whatsapp_punch {
+        updates.push("whatsapp_punch = ?");
+        values.push(Box::new(whatsapp_punch as i32));
+    }
+    if let Some(supervisor_mobile) = request.supervisor_mobile {
+        updates.push("supervisor_mobile = ?");
+        values.push(Box::new(sanitize_input(&supervisor_mobile)));
     }
 
     if updates.is_empty() {
