@@ -681,6 +681,16 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             "INSERT OR IGNORE INTO SalaryStructures (employee_id, basic_salary) VALUES (?1, ?2)",
             [&id.to_string(), &sal.to_string()],
         );
+
+        // Seed some attendance for today for Ram and Sita
+        if id < 4 {
+            let hour = if id == 2 { "09:15" } else { "08:45" };
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, device_id, branch_id, gate_id, punch_method)
+                 VALUES (?1, datetime('now', 'start of day', ?2), 1, 1, 1, 'Fingerprint')",
+                [&id.to_string(), &format!("+{} hours", hour.split(':').next().unwrap())],
+            );
+        }
     }
 
     // Also seed some dummy invoices

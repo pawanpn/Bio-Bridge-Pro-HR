@@ -703,6 +703,7 @@ pub async fn get_employee(
 /// READ: Get all employees
 #[tauri::command]
 pub async fn list_employees(
+    branch_id: Option<String>,
     filters: Option<serde_json::Value>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
@@ -723,49 +724,54 @@ pub async fn list_employees(
         LEFT JOIN Departments d ON e.department_id = d.id
         LEFT JOIN Designations des ON e.designation_id = des.id
         LEFT JOIN Branches b ON e.branch_id = b.id
-        WHERE e.status != 'deleted'",
+        WHERE (e.status IS NULL OR e.status != 'deleted')",
     );
 
-    // Apply filters
-    if let Some(f) = filters {
-        if let Some(dept_id) = f.get("department_id").and_then(|v| v.as_i64()) {
-            query.push_str(&format!(" AND e.department_id = {}", dept_id));
-        }
-        if let Some(branch_id) = f.get("branch_id").and_then(|v| v.as_i64()) {
-            query.push_str(&format!(" AND e.branch_id = {}", branch_id));
-        }
-        if let Some(status) = f.get("employment_status").and_then(|v| v.as_str()) {
-            query.push_str(&format!(
-                " AND e.employment_status = '{}'",
-                sanitize_input(status)
-            ));
+    let mut param_index = 1;
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(ref bid) = branch_id {
+        if !bid.is_empty() && bid != "all" {
+            query.push_str(&format!(" AND e.branch_id = ?{}", param_index));
+            params.push(Box::new(bid.clone()));
+            param_index += 1;
         }
     }
 
-    query.push_str(" ORDER BY e.first_name, e.last_name");
+    if let Some(f) = filters {
+        if let Some(dept_id) = f.get("department_id").and_then(|v| v.as_i64()) {
+            query.push_str(&format!(" AND e.department_id = ?{}", param_index));
+            params.push(Box::new(dept_id));
+            param_index += 1;
+        }
+    }
+
+    query.push_str(" ORDER BY e.id DESC");
 
     let mut stmt = conn
         .prepare(&query)
         .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|s| s.as_ref()).collect();
+
     let employees: Vec<serde_json::Value> = stmt
-        .query_map([], |row| {
+        .query_map(&param_refs[..], |row| {
             Ok(serde_json::json!({
                 "id": row.get::<_, i64>(0)?,
-                "employee_code": row.get::<_, String>(1)?,
-                "first_name": row.get::<_, String>(2)?,
+                "employee_code": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| format!("EMP-{:04}", row.get::<_, i64>(0).unwrap_or(0))),
+                "first_name": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 "middle_name": row.get::<_, Option<String>>(3)?,
-                "last_name": row.get::<_, String>(4)?,
+                "last_name": row.get::<_, Option<String>>(4)?.unwrap_or_default(),
                 "full_name": format!(
                     "{} {} {}",
-                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                     row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                    row.get::<_, String>(4)?
-                ).trim().to_string(),
+                    row.get::<_, Option<String>>(4)?.unwrap_or_default()
+                ).trim().replace("  ", " ").to_string(),
                 "gender": row.get::<_, Option<String>>(5)?,
                 "date_of_joining": row.get::<_, Option<String>>(6)?,
-                "employment_type": row.get::<_, String>(7)?,
-                "employment_status": row.get::<_, String>(8)?,
+                "employment_type": row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "Full-time".to_string()),
+                "employment_status": row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "Active".to_string()),
                 "department": row.get::<_, Option<String>>(9)?,
                 "designation": row.get::<_, Option<String>>(10)?,
                 "branch": row.get::<_, Option<String>>(11)?,
@@ -775,10 +781,18 @@ pub async fn list_employees(
         .filter_map(|r| r.ok())
         .collect();
 
+    let debug_count: i64 = conn.query_row("SELECT COUNT(*) FROM Employees", [], |r| r.get(0)).unwrap_or(-1);
+    let debug_active_count: i64 = conn.query_row("SELECT COUNT(*) FROM Employees WHERE status != 'deleted'", [], |r| r.get(0)).unwrap_or(-1);
+
     Ok(serde_json::json!({
         "success": true,
         "data": employees,
-        "count": employees.len()
+        "count": employees.len(),
+        "debug": {
+            "total_in_db": debug_count,
+            "total_active": debug_active_count,
+            "branch_filter": branch_id
+        }
     }))
 }
 
@@ -2432,7 +2446,7 @@ pub async fn get_dashboard_stats(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let total_staff: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM Employees WHERE status != 'deleted'",
+        "SELECT COUNT(*) FROM Employees WHERE (status IS NULL OR status != 'deleted')",
         [],
         |r| r.get(0),
     )?;
@@ -2471,6 +2485,49 @@ pub async fn get_dashboard_stats(
         .filter_map(|r| r.ok())
         .collect();
 
+    // Get absent staff list
+    let mut stmt = conn.prepare(
+        "SELECT id, first_name || ' ' || last_name 
+         FROM Employees 
+         WHERE status != 'deleted' 
+         AND id NOT IN (SELECT DISTINCT employee_id FROM AttendanceLogs WHERE date(timestamp) = date('now'))"
+    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+
+    let absent_staff: Vec<serde_json::Value> = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+            }))
+        })
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    // Get branch summary
+    let mut stmt = conn.prepare(
+        "SELECT b.id, b.name, b.location,
+                (SELECT COUNT(*) FROM Employees e WHERE e.branch_id = b.id AND e.status != 'deleted') as emp_count,
+                (SELECT COUNT(*) FROM Gates g WHERE g.branch_id = b.id) as gate_count,
+                (SELECT COUNT(*) FROM Devices d WHERE d.branch_id = b.id) as dev_count
+         FROM Branches b"
+    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+
+    let branches: Vec<serde_json::Value> = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "location": row.get::<_, Option<String>>(2)?,
+                "employee_count": row.get::<_, i64>(3)?,
+                "gate_count": row.get::<_, i64>(4)?,
+                "device_count": row.get::<_, i64>(5)?,
+            }))
+        })
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
+        .filter_map(|r| r.ok())
+        .collect();
+
     Ok(serde_json::json!({
         "totalEmployees": total_staff,
         "totalStaff": total_staff,
@@ -2483,10 +2540,10 @@ pub async fn get_dashboard_stats(
         "newHiresThisMonth": 0,
         "resignationsThisMonth": 0,
         "presentStaff": present_staff,
-        "absentStaff": [],
+        "absentStaff": absent_staff,
         "lateStaff": [],
         "leaveStaff": [],
-        "branches": []
+        "branches": branches
     }))
 }
 
@@ -2546,4 +2603,56 @@ pub async fn create_designation(name: String, state: tauri::State<'_, AppState>)
     conn.execute("INSERT INTO Designations (name) VALUES (?)", [name])
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     Ok(())
+}
+/// GET DAILY ATTENDANCE REPORTS
+#[tauri::command]
+pub async fn get_daily_reports(
+    branch_id: Option<i64>,
+    date: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut query = String::from(
+        "SELECT al.id, al.employee_id, e.first_name || ' ' || e.last_name as employee_name,
+                b.id as branch_id, b.name as branch_name, g.id as gate_id, g.name as gate_name,
+                al.device_id, al.timestamp, al.punch_method, al.sync_status
+         FROM AttendanceLogs al
+         LEFT JOIN Employees e ON al.employee_id = e.id
+         LEFT JOIN Branches b ON al.branch_id = b.id
+         LEFT JOIN Gates g ON al.gate_id = g.id
+         WHERE date(al.timestamp) = date(?1)"
+    );
+
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(date)];
+
+    if let Some(bid) = branch_id {
+        query.push_str(" AND al.branch_id = ?2");
+        params.push(Box::new(bid));
+    }
+
+    query.push_str(" ORDER BY al.timestamp DESC");
+
+    let mut stmt = conn.prepare(&query).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|s| s.as_ref()).collect();
+
+    let logs = stmt.query_map(&param_refs[..], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "employee_id": row.get::<_, i64>(1)?,
+            "employee_name": row.get::<_, Option<String>>(2)?,
+            "branch_id": row.get::<_, Option<i64>>(3)?,
+            "branch_name": row.get::<_, Option<String>>(4)?,
+            "gate_id": row.get::<_, Option<i64>>(5)?,
+            "gate_name": row.get::<_, Option<String>>(6)?,
+            "device_id": row.get::<_, Option<i64>>(7)?,
+            "timestamp": row.get::<_, String>(8)?,
+            "punch_method": row.get::<_, Option<String>>(9)?,
+            "is_synced": row.get::<_, Option<String>>(10)? == Some("SYNCED".to_string())
+        }))
+    }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
+
+    Ok(logs)
 }

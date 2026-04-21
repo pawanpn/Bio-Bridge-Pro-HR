@@ -157,11 +157,22 @@ pub async fn sync_device_logs(
         let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
         for log in &logs {
-            let _ = conn.execute(
-                "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, device_id, branch_id, gate_id, punch_method)
-                 VALUES (?1, ?2, ?3, 1, 1, ?4)",
-                params![log.employee_id, log.timestamp, log.device_id, log.punch_method],
-            );
+            // Map biometric_id/deviceUserId to local Employee ID
+            let local_id: Option<i64> = conn.query_row(
+                "SELECT id FROM Employees WHERE biometric_id = ?1 OR employee_code = ?1 OR id = ?1",
+                params![log.employee_id],
+                |r| r.get(0)
+            ).ok();
+
+            if let Some(eid) = local_id {
+                let _ = conn.execute(
+                    "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, device_id, branch_id, gate_id, punch_method)
+                     VALUES (?1, ?2, ?3, 1, 1, ?4)",
+                    params![eid, log.timestamp, log.device_id, log.punch_method],
+                );
+            } else {
+                println!("Warning: No matching employee found for biometric ID {}", log.employee_id);
+            }
         }
     }
 
