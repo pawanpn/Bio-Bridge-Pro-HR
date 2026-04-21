@@ -1,3 +1,4 @@
+#![recursion_limit = "512"]
 pub mod db;
 pub mod crud;
 pub mod hardware;
