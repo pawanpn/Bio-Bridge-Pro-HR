@@ -5,11 +5,11 @@
 // ERP module with proper validation, security, and audit logging.
 // ============================================================================
 
-use rusqlite::{Connection, params, OptionalExtension};
-use serde::{Deserialize, Serialize};
-use crate::AppState;
 use crate::errors::AppError;
-use crate::security::{encrypt_data, decrypt_data, sanitize_input, validate_email, validate_date};
+use crate::security::{decrypt_data, encrypt_data, sanitize_input, validate_date, validate_email};
+use crate::AppState;
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // INVENTORY CRUD OPERATIONS
@@ -45,8 +45,13 @@ pub async fn create_item(
     request: CreateItemRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let item_code = format!("ITM-{:06}", chrono::Utc::now().timestamp() % 1000000);
 
@@ -78,8 +83,13 @@ pub async fn create_item(
 pub async fn list_items(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut stmt = conn.prepare(
         "SELECT id, item_code, name, description, category, quantity, unit_price, reorder_level, supplier, location, is_active, created_at
@@ -117,8 +127,13 @@ pub async fn update_item(
     request: UpdateItemRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut updates = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -183,13 +198,19 @@ pub async fn delete_item(
     item_id: i64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "UPDATE Items SET is_active = 0 WHERE id = ?1",
         params![item_id],
-    ).map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
+    )
+    .map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
 
     Ok(serde_json::json!({
         "success": true,
@@ -204,13 +225,19 @@ pub async fn update_stock(
     adjustment: i32,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "UPDATE Items SET quantity = quantity + ?1, updated_at = datetime('now') WHERE id = ?2",
         params![adjustment, item_id],
-    ).map_err(|e| AppError::DatabaseError(format!("Stock update failed: {}", e)))?;
+    )
+    .map_err(|e| AppError::DatabaseError(format!("Stock update failed: {}", e)))?;
 
     Ok(serde_json::json!({
         "success": true,
@@ -223,13 +250,29 @@ pub async fn update_stock(
 pub async fn get_inventory_stats(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let total_items: i64 = conn.query_row("SELECT COUNT(*) FROM Items WHERE is_active = 1", [], |r| r.get(0))?;
-    let total_value: f64 = conn.query_row("SELECT COALESCE(SUM(quantity * unit_price), 0) FROM Items WHERE is_active = 1", [], |r| r.get(0))?;
+    let total_items: i64 =
+        conn.query_row("SELECT COUNT(*) FROM Items WHERE is_active = 1", [], |r| {
+            r.get(0)
+        })?;
+    let total_value: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(quantity * unit_price), 0) FROM Items WHERE is_active = 1",
+        [],
+        |r| r.get(0),
+    )?;
     let low_stock: i64 = conn.query_row("SELECT COUNT(*) FROM Items WHERE quantity <= reorder_level AND quantity > 0 AND is_active = 1", [], |r| r.get(0))?;
-    let out_of_stock: i64 = conn.query_row("SELECT COUNT(*) FROM Items WHERE quantity = 0 AND is_active = 1", [], |r| r.get(0))?;
+    let out_of_stock: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Items WHERE quantity = 0 AND is_active = 1",
+        [],
+        |r| r.get(0),
+    )?;
 
     Ok(serde_json::json!({
         "total_items": total_items,
@@ -371,8 +414,13 @@ pub async fn create_employee(
     request: CreateEmployeeRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     // Validate inputs
     let employee_code = sanitize_input(&request.employee_code);
@@ -408,20 +456,29 @@ pub async fn create_employee(
     };
 
     // Insert employee with all fields
-    let employee_id = conn.execute(
+    let _id = conn.execute(
         "INSERT INTO Employees (
             employee_code, first_name, middle_name, last_name,
             date_of_birth, gender, personal_email, personal_phone,
             current_address, permanent_address, citizenship_number, pan_number,
+            department_id, designation_id, branch_id, date_of_joining,
             employment_type, employment_status, reporting_manager_id, bank_name,
-            account_number, status, created_at, updated_at, area_id, location_id,
-            photo, enable_self_service, enable_mobile_access, local_name, contact_tel,
-            office_tel, motorcycle_license, automobile_license, religion, city,
-            postcode, passport_no, nationality, verification_mode, device_privilege,
-            device_password, card_no, bio_photo, enable_attendance, enable_holiday,
-            outdoor_management, workflow_role, mobile_punch, app_role, whatsapp_alert,
-            whatsapp_exception, whatsapp_punch, supervisor_mobile, biometric_id
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, 'active', datetime('now'), datetime('now'), ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53)",
+            account_number, area_id, location_id, photo,
+            enable_self_service, enable_mobile_access, local_name, national_id,
+            contact_tel, office_tel, motorcycle_license, automobile_license,
+            religion, city, postcode, passport_no, nationality, 
+            verification_mode, device_privilege, device_password, card_no,
+            bio_photo, enable_attendance, enable_holiday, outdoor_management,
+            workflow_role, mobile_punch, app_role, whatsapp_alert,
+            whatsapp_exception, whatsapp_punch, supervisor_mobile, biometric_id,
+            status, created_at, updated_at
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
+            ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
+            ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44,
+            ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53,
+            'active', datetime('now'), datetime('now')
+        )",
         params![
             employee_code,
             first_name,
@@ -450,6 +507,7 @@ pub async fn create_employee(
             request.enable_self_service.unwrap_or(false) as i32,
             request.enable_mobile_access.unwrap_or(false) as i32,
             request.local_name,
+            request.national_id,
             request.contact_tel,
             request.office_tel,
             request.motorcycle_license,
@@ -507,7 +565,14 @@ pub async fn create_employee(
         "status": "active"
     });
 
-    let _ = crate::sync_service::_queue_for_sync(conn, "employees", "INSERT", &employee_id.to_string(), &sync_payload, "HIGH");
+    let _ = crate::sync_service::_queue_for_sync(
+        conn,
+        "employees",
+        "INSERT",
+        &employee_id.to_string(),
+        &sync_payload,
+        "HIGH",
+    );
 
     // Log audit
     log_audit(
@@ -532,11 +597,17 @@ pub async fn get_employee(
     employee_id: i64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let mut stmt = conn.prepare(
-        "SELECT e.*, 
+    let mut stmt = conn
+        .prepare(
+            "SELECT e.*, 
             d.name as department_name,
             des.name as designation_name,
             b.name as branch_name
@@ -544,8 +615,9 @@ pub async fn get_employee(
         LEFT JOIN Departments d ON e.department_id = d.id
         LEFT JOIN Designations des ON e.designation_id = des.id
         LEFT JOIN Branches b ON e.branch_id = b.id
-        WHERE e.id = ?1 AND e.status != 'deleted'"
-    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+        WHERE e.id = ?1 AND e.status != 'deleted'",
+        )
+        .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let employee = stmt.query_row(params![employee_id], |row| {
         Ok(serde_json::json!({
@@ -612,12 +684,18 @@ pub async fn get_employee(
 
     match employee {
         Some(emp) => {
-            log_audit(conn, "Employees", Some(employee_id.to_string()), "VIEW", "Viewed employee")?;
+            log_audit(
+                conn,
+                "Employees",
+                Some(employee_id.to_string()),
+                "VIEW",
+                "Viewed employee",
+            )?;
             Ok(serde_json::json!({
                 "success": true,
                 "data": emp
             }))
-        },
+        }
         None => Err(AppError::NotFound("Employee not found".into())),
     }
 }
@@ -628,8 +706,13 @@ pub async fn list_employees(
     filters: Option<serde_json::Value>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut query = String::from(
         "SELECT e.id, e.employee_code, e.first_name, e.middle_name, e.last_name,
@@ -640,7 +723,7 @@ pub async fn list_employees(
         LEFT JOIN Departments d ON e.department_id = d.id
         LEFT JOIN Designations des ON e.designation_id = des.id
         LEFT JOIN Branches b ON e.branch_id = b.id
-        WHERE e.status != 'deleted'"
+        WHERE e.status != 'deleted'",
     );
 
     // Apply filters
@@ -652,13 +735,17 @@ pub async fn list_employees(
             query.push_str(&format!(" AND e.branch_id = {}", branch_id));
         }
         if let Some(status) = f.get("employment_status").and_then(|v| v.as_str()) {
-            query.push_str(&format!(" AND e.employment_status = '{}'", sanitize_input(status)));
+            query.push_str(&format!(
+                " AND e.employment_status = '{}'",
+                sanitize_input(status)
+            ));
         }
     }
 
     query.push_str(" ORDER BY e.first_name, e.last_name");
 
-    let mut stmt = conn.prepare(&query)
+    let mut stmt = conn
+        .prepare(&query)
         .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let employees: Vec<serde_json::Value> = stmt
@@ -702,8 +789,13 @@ pub async fn update_employee(
     request: UpdateEmployeeRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     // Fetch old values for audit
     let _old_values = get_employee_for_audit(conn, employee_id)?;
@@ -711,7 +803,7 @@ pub async fn update_employee(
     let mut updates = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
-    if let Some(first_name) = request.first_name {
+    if let Some(ref first_name) = request.first_name {
         updates.push("first_name = ?");
         values.push(Box::new(sanitize_input(&first_name)));
     }
@@ -719,7 +811,7 @@ pub async fn update_employee(
         updates.push("middle_name = ?");
         values.push(Box::new(sanitize_input(&middle_name)));
     }
-    if let Some(last_name) = request.last_name {
+    if let Some(ref last_name) = request.last_name {
         updates.push("last_name = ?");
         values.push(Box::new(sanitize_input(&last_name)));
     }
@@ -733,11 +825,11 @@ pub async fn update_employee(
         let encrypted = encrypt_data(&phone).map_err(|e| AppError::EncryptionError(e))?;
         values.push(Box::new(encrypted));
     }
-    if let Some(branch_id) = request.branch_id {
+    if let Some(ref branch_id) = request.branch_id {
         updates.push("branch_id = ?");
         values.push(Box::new(branch_id));
     }
-    if let Some(status) = request.employment_status {
+    if let Some(ref status) = request.employment_status {
         updates.push("employment_status = ?");
         values.push(Box::new(status));
     }
@@ -753,7 +845,7 @@ pub async fn update_employee(
         updates.push("pan_number = ?");
         values.push(Box::new(sanitize_input(&pan)));
     }
-    if let Some(dept_id) = request.department_id {
+    if let Some(ref dept_id) = request.department_id {
         updates.push("department_id = ?");
         values.push(Box::new(dept_id));
     }
@@ -949,7 +1041,7 @@ pub async fn update_employee(
     let query = format!("UPDATE Employees SET {} WHERE id = ?", set_clause);
 
     let params_vec: Vec<&dyn rusqlite::ToSql> = values.iter().map(|v| v.as_ref()).collect();
-    
+
     conn.execute(&query, &params_vec[..])
         .map_err(|e| AppError::DatabaseError(format!("Update failed: {}", e)))?;
 
@@ -974,7 +1066,14 @@ pub async fn update_employee(
         "mobile_punch": request.mobile_punch,
         "updated_at": chrono::Utc::now().to_rfc3339()
     });
-    let _ = crate::sync_service::_queue_for_sync(conn, "employees", "UPDATE", &employee_id.to_string(), &sync_payload, "HIGH");
+    let _ = crate::sync_service::_queue_for_sync(
+        conn,
+        "employees",
+        "UPDATE",
+        &employee_id.to_string(),
+        &sync_payload,
+        "HIGH",
+    );
 
     Ok(serde_json::json!({
         "success": true,
@@ -988,13 +1087,19 @@ pub async fn delete_employee(
     employee_id: i64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "UPDATE Employees SET status = 'deleted', updated_at = datetime('now') WHERE id = ?1",
         params![employee_id],
-    ).map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
+    )
+    .map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
 
     log_audit(
         conn,
@@ -1029,12 +1134,19 @@ pub async fn create_leave_request(
     request: CreateLeaveRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     // Validate dates
     if !validate_date(&request.start_date) || !validate_date(&request.end_date) {
-        return Err(AppError::ValidationError("Invalid date format. Use YYYY-MM-DD".into()));
+        return Err(AppError::ValidationError(
+            "Invalid date format. Use YYYY-MM-DD".into(),
+        ));
     }
 
     conn.execute(
@@ -1054,7 +1166,10 @@ pub async fn create_leave_request(
         "LeaveRequests",
         None,
         "CREATE",
-        &format!("Leave request submitted for employee #{}", request.employee_id),
+        &format!(
+            "Leave request submitted for employee #{}",
+            request.employee_id
+        ),
     )?;
 
     Ok(serde_json::json!({
@@ -1070,8 +1185,13 @@ pub async fn list_leave_requests(
     status: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut query = String::from(
         "SELECT lr.id, lr.employee_id, e.first_name, e.last_name,
@@ -1080,7 +1200,7 @@ pub async fn list_leave_requests(
         FROM LeaveRequests lr
         JOIN Employees e ON lr.employee_id = e.id
         LEFT JOIN LeaveTypes lt ON lr.leave_type_id = lt.id
-        WHERE 1=1"
+        WHERE 1=1",
     );
 
     if let Some(eid) = employee_id {
@@ -1092,7 +1212,8 @@ pub async fn list_leave_requests(
 
     query.push_str(" ORDER BY lr.applied_at DESC");
 
-    let mut stmt = conn.prepare(&query)
+    let mut stmt = conn
+        .prepare(&query)
         .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let requests: Vec<serde_json::Value> = stmt
@@ -1130,8 +1251,13 @@ pub async fn update_leave_status(
     rejection_reason: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let status_sanitized = sanitize_input(&status);
 
@@ -1145,7 +1271,8 @@ pub async fn update_leave_status(
             rejection_reason,
             leave_request_id
         ],
-    ).map_err(|e| AppError::DatabaseError(format!("Update failed: {}", e)))?;
+    )
+    .map_err(|e| AppError::DatabaseError(format!("Update failed: {}", e)))?;
 
     log_audit(
         conn,
@@ -1174,8 +1301,13 @@ pub async fn create_manual_attendance(
     punch_method: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "INSERT INTO AttendanceLogs (employee_id, timestamp, punch_type, punch_method, branch_id, gate_id, device_id, is_synced)
@@ -1210,15 +1342,20 @@ pub async fn get_attendance_logs(
     end_date: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut query = String::from(
         "SELECT al.id, al.employee_id, e.first_name, e.last_name,
                 al.timestamp, al.punch_type, al.punch_method, al.is_synced
         FROM AttendanceLogs al
         JOIN Employees e ON al.employee_id = e.id
-        WHERE 1=1"
+        WHERE 1=1",
     );
 
     if let Some(eid) = employee_id {
@@ -1233,7 +1370,8 @@ pub async fn get_attendance_logs(
 
     query.push_str(" ORDER BY al.timestamp DESC LIMIT 1000");
 
-    let mut stmt = conn.prepare(&query)
+    let mut stmt = conn
+        .prepare(&query)
         .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let logs: Vec<serde_json::Value> = stmt
@@ -1278,8 +1416,13 @@ pub async fn create_salary_structure(
     request: CreateSalaryStructure,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "INSERT OR REPLACE INTO SalaryStructures 
@@ -1292,14 +1435,18 @@ pub async fn create_salary_structure(
             request.deductions,
             request.overtime_rate,
         ],
-    ).map_err(|e| AppError::DatabaseError(format!("Failed to create salary structure: {}", e)))?;
+    )
+    .map_err(|e| AppError::DatabaseError(format!("Failed to create salary structure: {}", e)))?;
 
     log_audit(
         conn,
         "SalaryStructures",
         None,
         "CREATE",
-        &format!("Salary structure created for employee #{}", request.employee_id),
+        &format!(
+            "Salary structure created for employee #{}",
+            request.employee_id
+        ),
     )?;
 
     Ok(serde_json::json!({
@@ -1314,8 +1461,13 @@ pub async fn get_salary_structure(
     employee_id: i64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let structure = conn.query_row(
         "SELECT * FROM SalaryStructures WHERE employee_id = ?1",
@@ -1373,8 +1525,13 @@ pub async fn create_invoice(
     request: CreateInvoiceRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     if !validate_date(&request.invoice_date) {
         return Err(AppError::ValidationError("Invalid invoice date".into()));
@@ -1389,7 +1546,7 @@ pub async fn create_invoice(
         let line_total = item.quantity * item.unit_price;
         let line_discount = item.discount_rate.unwrap_or(0.0) / 100.0 * line_total;
         let line_tax = item.tax_rate / 100.0 * (line_total - line_discount);
-        
+
         subtotal += line_total;
         tax_amount += line_tax;
         discount_amount += line_discount;
@@ -1398,26 +1555,28 @@ pub async fn create_invoice(
     let total_amount = subtotal + tax_amount - discount_amount;
 
     // Insert invoice
-    let invoice_id = conn.execute(
-        "INSERT INTO Invoices 
+    let invoice_id = conn
+        .execute(
+            "INSERT INTO Invoices 
          (invoice_number, invoice_date, due_date, contact_name, invoice_type, 
           subtotal, tax_amount, discount_amount, total_amount, balance_amount, 
           status, notes, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'Draft', ?11, datetime('now'))",
-        params![
-            sanitize_input(&request.invoice_number),
-            request.invoice_date,
-            request.due_date,
-            sanitize_input(&request.contact_name),
-            sanitize_input(&request.invoice_type),
-            subtotal,
-            tax_amount,
-            discount_amount,
-            total_amount,
-            total_amount, // balance_amount initially equals total
-            request.notes.as_ref().map(|s| sanitize_input(s)),
-        ],
-    ).map_err(|e| AppError::DatabaseError(format!("Failed to create invoice: {}", e)))?;
+            params![
+                sanitize_input(&request.invoice_number),
+                request.invoice_date,
+                request.due_date,
+                sanitize_input(&request.contact_name),
+                sanitize_input(&request.invoice_type),
+                subtotal,
+                tax_amount,
+                discount_amount,
+                total_amount,
+                total_amount, // balance_amount initially equals total
+                request.notes.as_ref().map(|s| sanitize_input(s)),
+            ],
+        )
+        .map_err(|e| AppError::DatabaseError(format!("Failed to create invoice: {}", e)))?;
 
     // Insert invoice items
     for item in &request.items {
@@ -1459,14 +1618,19 @@ pub async fn list_invoices(
     status: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut query = String::from(
         "SELECT id, invoice_number, invoice_date, due_date, contact_name,
                 invoice_type, status, subtotal, tax_amount, discount_amount,
                 total_amount, paid_amount, balance_amount
-        FROM Invoices WHERE 1=1"
+        FROM Invoices WHERE 1=1",
     );
 
     if let Some(it) = invoice_type {
@@ -1478,7 +1642,8 @@ pub async fn list_invoices(
 
     query.push_str(" ORDER BY invoice_date DESC");
 
-    let mut stmt = conn.prepare(&query)
+    let mut stmt = conn
+        .prepare(&query)
         .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let invoices: Vec<serde_json::Value> = stmt
@@ -1530,8 +1695,13 @@ pub async fn create_project(
     request: CreateProjectRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let project_code = format!("PRJ-{:06}", chrono::Utc::now().timestamp() % 1000000);
 
@@ -1561,8 +1731,13 @@ pub async fn create_project(
 pub async fn list_projects(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut stmt = conn.prepare(
         "SELECT id, project_code, name, description, status, priority, start_date, end_date, budget, progress, team_size, created_at
@@ -1599,8 +1774,13 @@ pub async fn update_project(
     request: CreateProjectRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "UPDATE Projects SET name = ?1, description = ?2, status = ?3, priority = ?4, start_date = ?5, end_date = ?6, budget = ?7, updated_at = datetime('now') WHERE id = ?8",
@@ -1627,13 +1807,16 @@ pub async fn delete_project(
     project_id: i64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    conn.execute(
-        "DELETE FROM Projects WHERE id = ?1",
-        params![project_id],
-    ).map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
+    conn.execute("DELETE FROM Projects WHERE id = ?1", params![project_id])
+        .map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
 
     Ok(serde_json::json!({
         "success": true,
@@ -1645,13 +1828,30 @@ pub async fn delete_project(
 pub async fn get_project_stats(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let total_projects: i64 = conn.query_row("SELECT COUNT(*) FROM Projects", [], |r| r.get(0))?;
-    let active_projects: i64 = conn.query_row("SELECT COUNT(*) FROM Projects WHERE status = 'Active'", [], |r| r.get(0))?;
-    let completed_projects: i64 = conn.query_row("SELECT COUNT(*) FROM Projects WHERE status = 'Completed'", [], |r| r.get(0))?;
-    let overdue_projects: i64 = conn.query_row("SELECT COUNT(*) FROM Projects WHERE status = 'Active' AND end_date < date('now')", [], |r| r.get(0))?;
+    let active_projects: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Projects WHERE status = 'Active'",
+        [],
+        |r| r.get(0),
+    )?;
+    let completed_projects: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Projects WHERE status = 'Completed'",
+        [],
+        |r| r.get(0),
+    )?;
+    let overdue_projects: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Projects WHERE status = 'Active' AND end_date < date('now')",
+        [],
+        |r| r.get(0),
+    )?;
 
     Ok(serde_json::json!({
         "total_projects": total_projects,
@@ -1681,22 +1881,29 @@ pub async fn create_task(
     request: CreateTaskRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let task_id = conn.execute(
-        "INSERT INTO Tasks
+    let task_id = conn
+        .execute(
+            "INSERT INTO Tasks
          (project_id, task_name, description, assigned_to, status, priority, due_date, created_at)
          VALUES (?1, ?2, ?3, ?4, 'Todo', ?5, ?6, datetime('now'))",
-        params![
-            request.project_id,
-            sanitize_input(&request.task_name),
-            request.description.as_ref().map(|s| sanitize_input(s)),
-            request.assigned_to,
-            request.priority.as_deref().unwrap_or("Medium"),
-            request.due_date,
-        ],
-    ).map_err(|e| AppError::DatabaseError(format!("Failed to create task: {}", e)))?;
+            params![
+                request.project_id,
+                sanitize_input(&request.task_name),
+                request.description.as_ref().map(|s| sanitize_input(s)),
+                request.assigned_to,
+                request.priority.as_deref().unwrap_or("Medium"),
+                request.due_date,
+            ],
+        )
+        .map_err(|e| AppError::DatabaseError(format!("Failed to create task: {}", e)))?;
 
     Ok(serde_json::json!({
         "success": true,
@@ -1725,8 +1932,13 @@ pub async fn create_lead(
     request: CreateLeadRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let lead_code = format!("LEAD-{:06}", chrono::Utc::now().timestamp() % 1000000);
 
@@ -1756,13 +1968,20 @@ pub async fn create_lead(
 pub async fn list_leads(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let mut stmt = conn.prepare(
-        "SELECT id, lead_code, name, company, email, phone, status, source, value, created_at
-         FROM Leads ORDER BY created_at DESC"
-    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, lead_code, name, company, email, phone, status, source, value, created_at
+         FROM Leads ORDER BY created_at DESC",
+        )
+        .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let leads: Vec<serde_json::Value> = stmt
         .query_map([], |row| {
@@ -1792,8 +2011,13 @@ pub async fn update_lead(
     request: CreateLeadRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "UPDATE Leads SET name = ?1, company = ?2, email = ?3, phone = ?4, status = ?5, source = ?6, value = ?7 WHERE id = ?8",
@@ -1820,13 +2044,16 @@ pub async fn delete_lead(
     lead_id: i64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    conn.execute(
-        "DELETE FROM Leads WHERE id = ?1",
-        params![lead_id],
-    ).map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
+    conn.execute("DELETE FROM Leads WHERE id = ?1", params![lead_id])
+        .map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
 
     Ok(serde_json::json!({
         "success": true,
@@ -1838,14 +2065,33 @@ pub async fn delete_lead(
 pub async fn get_crm_stats(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let total_leads: i64 = conn.query_row("SELECT COUNT(*) FROM Leads", [], |r| r.get(0))?;
-    let new_leads: i64 = conn.query_row("SELECT COUNT(*) FROM Leads WHERE status = 'New'", [], |r| r.get(0))?;
-    let qualified_leads: i64 = conn.query_row("SELECT COUNT(*) FROM Leads WHERE status = 'Qualified'", [], |r| r.get(0))?;
-    let converted_leads: i64 = conn.query_row("SELECT COUNT(*) FROM Leads WHERE status = 'Won'", [], |r| r.get(0))?;
-    let total_pipeline_value: f64 = conn.query_row("SELECT COALESCE(SUM(value), 0) FROM Leads WHERE status NOT IN ('Won', 'Lost')", [], |r| r.get(0))?;
+    let new_leads: i64 =
+        conn.query_row("SELECT COUNT(*) FROM Leads WHERE status = 'New'", [], |r| {
+            r.get(0)
+        })?;
+    let qualified_leads: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Leads WHERE status = 'Qualified'",
+        [],
+        |r| r.get(0),
+    )?;
+    let converted_leads: i64 =
+        conn.query_row("SELECT COUNT(*) FROM Leads WHERE status = 'Won'", [], |r| {
+            r.get(0)
+        })?;
+    let total_pipeline_value: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(value), 0) FROM Leads WHERE status NOT IN ('Won', 'Lost')",
+        [],
+        |r| r.get(0),
+    )?;
 
     Ok(serde_json::json!({
         "total_leads": total_leads,
@@ -1879,8 +2125,13 @@ pub async fn create_asset(
     request: CreateAssetRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let asset_code = format!("AST-{:06}", chrono::Utc::now().timestamp() % 1000000);
 
@@ -1913,8 +2164,13 @@ pub async fn create_asset(
 pub async fn list_assets(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut stmt = conn.prepare(
         "SELECT id, asset_code, name, description, category, status, purchase_date, purchase_cost, assigned_to, location, warranty_expiry, condition, created_at
@@ -1952,8 +2208,13 @@ pub async fn update_asset(
     request: CreateAssetRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "UPDATE Assets SET name = ?1, description = ?2, category = ?3, status = ?4, purchase_date = ?5, purchase_cost = ?6, assigned_to = ?7, location = ?8, warranty_expiry = ?9, condition = ?10 WHERE id = ?11",
@@ -1983,13 +2244,16 @@ pub async fn delete_asset(
     asset_id: i64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    conn.execute(
-        "DELETE FROM Assets WHERE id = ?1",
-        params![asset_id],
-    ).map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
+    conn.execute("DELETE FROM Assets WHERE id = ?1", params![asset_id])
+        .map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
 
     Ok(serde_json::json!({
         "success": true,
@@ -2001,14 +2265,35 @@ pub async fn delete_asset(
 pub async fn get_asset_stats(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let total_assets: i64 = conn.query_row("SELECT COUNT(*) FROM Assets", [], |r| r.get(0))?;
-    let active_assets: i64 = conn.query_row("SELECT COUNT(*) FROM Assets WHERE status = 'Active'", [], |r| r.get(0))?;
-    let maintenance_assets: i64 = conn.query_row("SELECT COUNT(*) FROM Assets WHERE status = 'Maintenance'", [], |r| r.get(0))?;
-    let retired_assets: i64 = conn.query_row("SELECT COUNT(*) FROM Assets WHERE status = 'Retired'", [], |r| r.get(0))?;
-    let total_value: f64 = conn.query_row("SELECT COALESCE(SUM(purchase_cost), 0) FROM Assets", [], |r| r.get(0))?;
+    let active_assets: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Assets WHERE status = 'Active'",
+        [],
+        |r| r.get(0),
+    )?;
+    let maintenance_assets: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Assets WHERE status = 'Maintenance'",
+        [],
+        |r| r.get(0),
+    )?;
+    let retired_assets: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Assets WHERE status = 'Retired'",
+        [],
+        |r| r.get(0),
+    )?;
+    let total_value: f64 = conn.query_row(
+        "SELECT COALESCE(SUM(purchase_cost), 0) FROM Assets",
+        [],
+        |r| r.get(0),
+    )?;
 
     Ok(serde_json::json!({
         "total_assets": total_assets,
@@ -2033,14 +2318,10 @@ fn log_audit(
     conn.execute(
         "INSERT INTO AuditLogs (table_name, record_id, action, description, created_at)
          VALUES (?1, ?2, ?3, ?4, datetime('now'))",
-        params![
-            table_name,
-            record_id,
-            action,
-            description,
-        ],
-    ).map_err(|e| AppError::DatabaseError(format!("Audit log failed: {}", e)))?;
-    
+        params![table_name, record_id, action, description,],
+    )
+    .map_err(|e| AppError::DatabaseError(format!("Audit log failed: {}", e)))?;
+
     Ok(())
 }
 
@@ -2048,20 +2329,22 @@ fn get_employee_for_audit(
     conn: &Connection,
     employee_id: i64,
 ) -> Result<Option<serde_json::Value>, AppError> {
-    let employee = conn.query_row(
-        "SELECT * FROM Employees WHERE id = ?1",
-        params![employee_id],
-        |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "employee_code": row.get::<_, String>(1)?,
-                "first_name": row.get::<_, String>(2)?,
-                "last_name": row.get::<_, String>(4)?,
-            }))
-        },
-    ).optional()
-    .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
-    
+    let employee = conn
+        .query_row(
+            "SELECT * FROM Employees WHERE id = ?1",
+            params![employee_id],
+            |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, i64>(0)?,
+                    "employee_code": row.get::<_, String>(1)?,
+                    "first_name": row.get::<_, String>(2)?,
+                    "last_name": row.get::<_, String>(4)?,
+                }))
+            },
+        )
+        .optional()
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
+
     Ok(employee)
 }
 
@@ -2070,19 +2353,32 @@ fn get_employee_for_audit(
 pub async fn get_dashboard_stats(
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let total_staff: i64 = conn.query_row("SELECT COUNT(*) FROM Employees WHERE status != 'deleted'", [], |r| r.get(0))?;
-    
+    let total_staff: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Employees WHERE status != 'deleted'",
+        [],
+        |r| r.get(0),
+    )?;
+
     // Count distinct employees who have logged today
     let present_today: i64 = conn.query_row(
         "SELECT COUNT(DISTINCT employee_id) FROM AttendanceLogs WHERE date(timestamp) = date('now')",
         [],
         |r| r.get(0)
-    ).unwrap_or(0);
-    
-    let absent = if total_staff > present_today { total_staff - present_today } else { 0 };
+    ).unwrap_or_else(|_| 0);
+
+    let absent = if total_staff > present_today {
+        total_staff - present_today
+    } else {
+        0
+    };
 
     // Get present staff list for the side panel
     let mut stmt = conn.prepare(
@@ -2093,15 +2389,17 @@ pub async fn get_dashboard_stats(
          ORDER BY al.timestamp DESC"
     ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
-    let present_staff: Vec<serde_json::Value> = stmt.query_map([], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "name": row.get::<_, String>(1)?,
-            "time": row.get::<_, String>(2)?,
-        }))
-    }).map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
-    .filter_map(|r| r.ok())
-    .collect();
+    let present_staff: Vec<serde_json::Value> = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "time": row.get::<_, String>(2)?,
+            }))
+        })
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(serde_json::json!({
         "totalEmployees": total_staff,

@@ -68,6 +68,8 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             pin TEXT,
             department TEXT,
             status TEXT DEFAULT 'active',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
             FOREIGN KEY(branch_id) REFERENCES Branches(id)
         )",
         [],
