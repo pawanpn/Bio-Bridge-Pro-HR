@@ -716,15 +716,12 @@ pub async fn list_employees(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut query = String::from(
-        "SELECT e.id, e.employee_code, e.first_name, e.middle_name, e.last_name,
-                e.gender, e.date_of_joining, e.employment_type, e.employment_status,
-                d.name as department_name, des.name as designation_name,
-                b.name as branch_name
-        FROM Employees e
-        LEFT JOIN Departments d ON e.department_id = d.id
-        LEFT JOIN Designations des ON e.designation_id = des.id
-        LEFT JOIN Branches b ON e.branch_id = b.id
-        WHERE (e.status IS NULL OR e.status != 'deleted')",
+        "SELECT id, employee_code, first_name, middle_name, last_name,
+                gender, date_of_joining, employment_type, employment_status,
+                department_id as department_name, designation_id as designation_name,
+                status as branch_name
+        FROM Employees
+        WHERE (status IS NULL OR status != 'deleted')",
     );
 
     let mut param_index = 1;
@@ -732,21 +729,13 @@ pub async fn list_employees(
 
     if let Some(ref bid) = branch_id {
         if !bid.is_empty() && bid != "all" {
-            query.push_str(&format!(" AND e.branch_id = ?{}", param_index));
+            query.push_str(&format!(" AND (branch_id = ?{} OR CAST(branch_id AS TEXT) = ?{})", param_index, param_index));
             params.push(Box::new(bid.clone()));
             param_index += 1;
         }
     }
 
-    if let Some(f) = filters {
-        if let Some(dept_id) = f.get("department_id").and_then(|v| v.as_i64()) {
-            query.push_str(&format!(" AND e.department_id = ?{}", param_index));
-            params.push(Box::new(dept_id));
-            param_index += 1;
-        }
-    }
-
-    query.push_str(" ORDER BY e.id DESC");
+    query.push_str(" ORDER BY id DESC");
 
     let mut stmt = conn
         .prepare(&query)
@@ -772,6 +761,7 @@ pub async fn list_employees(
                 "date_of_joining": row.get::<_, Option<String>>(6)?,
                 "employment_type": row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "Full-time".to_string()),
                 "employment_status": row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "Active".to_string()),
+                "status": row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "Active".to_string()),
                 "department": row.get::<_, Option<String>>(9)?,
                 "designation": row.get::<_, Option<String>>(10)?,
                 "branch": row.get::<_, Option<String>>(11)?,
