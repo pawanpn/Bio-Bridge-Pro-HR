@@ -181,6 +181,7 @@ export const EmployeeManagement: React.FC = () => {
   const [formData, setFormData] = useState<EmployeeForm>(emptyForm);
   const [formStep, setFormStep] = useState(1);
   const [formStatus, setFormStatus] = useState('');
+  const [debugInfo, setDebugInfo] = useState<any>(null);
 
   // Load data
   useEffect(() => {
@@ -222,6 +223,9 @@ export const EmployeeManagement: React.FC = () => {
       setEmployees(empData);
       setBranches(branches);
       setDevices(devices);
+      if ((empResult as any)?.debug) {
+        setDebugInfo((empResult as any).debug);
+      }
     } catch (error) {
       console.error('Failed to load data:', error);
       setEmployees([]);
@@ -585,6 +589,15 @@ export const EmployeeManagement: React.FC = () => {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Debug Info Footer */}
+      {debugInfo && (
+        <div className="mt-4 p-2 bg-muted/30 rounded text-[10px] font-mono flex gap-4 text-muted-foreground uppercase">
+          <span>Row Count in DB: {debugInfo.total_in_db}</span>
+          <span>Active Count: {debugInfo.total_active}</span>
+          <span>Branch Filter: {JSON.stringify(debugInfo.branch_filter || 'None')}</span>
+        </div>
+      )}
 
       {/* Add/Edit Employee Dialog */}
       <Dialog open={formDialog.open} onOpenChange={(open) => !open && setFormDialog({ open: false, editing: null })}>

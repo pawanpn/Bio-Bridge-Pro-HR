@@ -652,18 +652,23 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     );
 
+    // Ensure some default departments exist
+    let _ = conn.execute("INSERT OR IGNORE INTO Departments (id, name) VALUES (1, 'Operations')", []);
+    let _ = conn.execute("INSERT OR IGNORE INTO Departments (id, name) VALUES (2, 'Sales')", []);
+    let _ = conn.execute("INSERT OR IGNORE INTO Departments (id, name) VALUES (3, 'Maintenance')", []);
+
     // Seed specific employees as requested
     let branch_id = 1; // Default Head Office
     let seed_employees = vec![
-        (2, "Ram Sharma", "Ram", "Sharma", "Operations", 45000.0, 101),
-        (3, "Sita Rai", "Sita", "Rai", "Sales", 40000.0, 102),
-        (4, "Hari Bahadur", "Hari", "Bahadur", "Maintenance", 35000.0, 103),
+        (2, "Ram Sharma", "Ram", "Sharma", "1", 45000.0, 101), // dept_id 1
+        (3, "Sita Rai", "Sita", "Rai", "2", 40000.0, 102),      // dept_id 2
+        (4, "Hari Bahadur", "Hari", "Bahadur", "3", 35000.0, 103), // dept_id 3
     ];
 
     for (id, name, first, last, dept, sal, bio_id) in seed_employees {
         let _ = conn.execute(
-            "INSERT OR IGNORE INTO Employees (id, name, first_name, last_name, department, branch_id, status, employee_code, biometric_id) 
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7, ?8)",
+            "INSERT OR REPLACE INTO Employees (id, name, first_name, last_name, department_id, branch_id, status, employee_code, biometric_id, employment_status) 
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7, ?8, 'Active')",
             [
                 &id.to_string(), 
                 name, 
@@ -676,11 +681,12 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             ],
         );
         
-        // Also seed salary structure for payroll link
+        // Ensure Salary Structure
         let _ = conn.execute(
-            "INSERT OR IGNORE INTO SalaryStructures (employee_id, basic_salary) VALUES (?1, ?2)",
+            "INSERT OR REPLACE INTO SalaryStructures (employee_id, basic_salary) VALUES (?1, ?2)",
             [&id.to_string(), &sal.to_string()],
         );
+    }
 
         // Seed some attendance for today for Ram and Sita
         if id < 4 {

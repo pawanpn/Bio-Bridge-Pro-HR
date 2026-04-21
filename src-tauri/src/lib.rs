@@ -1,16 +1,16 @@
 #![recursion_limit = "512"]
-pub mod db;
+pub mod commands;
 pub mod crud;
+pub mod db;
+pub mod errors;
 pub mod hardware;
 pub mod models;
-pub mod errors;
 pub mod security;
 pub mod sync_service;
-pub mod commands;
 
+use crate::db::init_db;
 use std::sync::Mutex;
 use tauri::Manager;
-use crate::db::init_db;
 
 pub struct AppState {
     pub db: Mutex<Option<rusqlite::Connection>>,
@@ -21,9 +21,12 @@ pub struct AppState {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let app_dir = app.path().app_data_dir().expect("Failed to get app data dir");
+            let app_dir = app
+                .path()
+                .app_data_dir()
+                .expect("Failed to get app data dir");
             let conn = init_db(&app_dir).expect("Failed to initialize database");
-            
+
             let state = AppState {
                 db: Mutex::new(Some(conn)),
                 supabase_config: Mutex::new(None),
@@ -37,9 +40,9 @@ pub fn run() {
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
                 loop {
                     interval.tick().await;
-                    
+
                     let state = app_handle.state::<AppState>();
-                    
+
                     // Attempt to sync pending changes to Supabase
                     let config_opt = {
                         match state.supabase_config.lock() {
@@ -47,9 +50,9 @@ pub fn run() {
                             Err(_) => None,
                         }
                     };
-                    
+
                     if let Some(config) = config_opt {
-                         let _ = crate::sync_service::sync_data_internal(&config, &state).await;
+                        let _ = crate::sync_service::sync_data_internal(&config, &state).await;
                     }
                 }
             });
@@ -76,7 +79,6 @@ pub fn run() {
             commands::save_system_config,
             commands::delete_system_config,
             commands::scan_network,
-            
             // From crud.rs (ERP Modules)
             crud::create_item,
             crud::list_items,
@@ -121,7 +123,6 @@ pub fn run() {
             crud::list_designations,
             crud::create_department,
             crud::create_designation,
-            
             // From sync_service.rs (Cloud Sync)
             sync_service::initialize_supabase_sync,
             sync_service::sync_to_supabase,

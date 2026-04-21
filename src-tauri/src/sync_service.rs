@@ -357,18 +357,31 @@ fn store_records_locally(
     let mut stored = 0;
 
     for record in records {
-        if let Some(id) = record.get("id").and_then(|v| v.as_str()) {
-            // Upsert logic: INSERT or REPLACE
-            let json_str = record.to_string();
-            conn.execute(
-                &format!(
-                    "INSERT OR REPLACE INTO {} (id, data, updated_at) VALUES (?1, ?2, datetime('now'))",
-                    table_name
-                ),
-                rusqlite::params![id, json_str],
-            )
-            .map_err(|e| AppError::DatabaseError(format!("Insert failed: {}", e)))?;
-            stored += 1;
+        if let Some(id) = record.get("id").and_then(|v| v.as_i64()) {
+            match table_name.to_lowercase().as_str() {
+                "employees" => {
+                    let first_name = record.get("first_name").and_then(|v| v.as_str()).unwrap_or("");
+                    let last_name = record.get("last_name").and_then(|v| v.as_str()).unwrap_or("");
+                    let employee_code = record.get("employee_code").and_then(|v| v.as_str()).unwrap_or("");
+                    let status = record.get("status").and_then(|v| v.as_str()).unwrap_or("Active");
+
+                    conn.execute(
+                        "INSERT OR REPLACE INTO Employees (id, first_name, last_name, employee_code, employment_status, status, branch_id) 
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
+                        rusqlite::params![id, first_name, last_name, employee_code, status, status],
+                    ).ok();
+                    stored += 1;
+                },
+                _ => {
+                    // Generic fallback for other tables if they have a 'data' column
+                    let json_str = record.to_string();
+                    let _ = conn.execute(
+                        &format!("INSERT OR REPLACE INTO {} (id, updated_at) VALUES (?1, datetime('now'))", table_name),
+                        rusqlite::params![id],
+                    );
+                    stored += 1;
+                }
+            }
         }
     }
 
