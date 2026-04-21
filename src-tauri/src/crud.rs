@@ -2419,3 +2419,61 @@ pub async fn get_dashboard_stats(
         "branches": []
     }))
 }
+
+// ============================================================================
+// CORPORATE STRUCTURE CRUD (Branches, Departments, Designations)
+// ============================================================================
+
+#[tauri::command]
+pub async fn list_branches(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let mut stmt = conn.prepare("SELECT id, name, location FROM Branches ORDER BY name")
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let branches = stmt.query_map([], |row| {
+        Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?, "location": row.get::<_, Option<String>>(2)? }))
+    }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
+    Ok(branches)
+}
+
+#[tauri::command]
+pub async fn list_departments(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let mut stmt = conn.prepare("SELECT id, name, description FROM Departments ORDER BY name")
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let results = stmt.query_map([], |row| {
+        Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?, "description": row.get::<_, Option<String>>(2)? }))
+    }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
+    Ok(results)
+}
+
+#[tauri::command]
+pub async fn list_designations(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let mut stmt = conn.prepare("SELECT id, name, description FROM Designations ORDER BY name")
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let results = stmt.query_map([], |row| {
+        Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?, "description": row.get::<_, Option<String>>(2)? }))
+    }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
+    Ok(results)
+}
+
+#[tauri::command]
+pub async fn create_department(name: String, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    conn.execute("INSERT INTO Departments (name) VALUES (?)", [name])
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn create_designation(name: String, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    conn.execute("INSERT INTO Designations (name) VALUES (?)", [name])
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    Ok(())
+}
