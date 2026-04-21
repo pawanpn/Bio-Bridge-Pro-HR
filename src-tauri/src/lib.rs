@@ -30,16 +30,25 @@ pub fn run() {
             };
             app.manage(state);
 
-            let state_handle = app.state::<AppState>();
-            let state_clone = state_handle.inner().clone();
+            let app_handle = app.handle().clone();
 
             // Automated Background Sync Loop (runs every 60 seconds)
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
                 loop {
                     interval.tick().await;
+                    
+                    let state = app_handle.state::<AppState>();
+                    
                     // Attempt to sync pending changes to Supabase
-                    let _ = crate::sync_service::sync_to_supabase(tauri::State::from(&state_clone)).await;
+                    let config_opt = {
+                        let config_guard = state.supabase_config.lock().unwrap();
+                        config_guard.clone()
+                    };
+                    
+                    if let Some(config) = config_opt {
+                         let _ = crate::sync_service::sync_data_internal(&config, &state).await;
+                    }
                 }
             });
 
@@ -110,6 +119,7 @@ pub fn run() {
             sync_service::pull_from_supabase,
             sync_service::resolve_sync_conflict,
             sync_service::get_sync_stats,
+            sync_service::test_supabase_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

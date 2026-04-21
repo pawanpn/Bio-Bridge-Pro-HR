@@ -345,14 +345,6 @@ pub async fn save_system_config(category: String, key: String, value: String, st
     });
     let _ = sync_service::_queue_for_sync(conn, "system_settings", "UPDATE", &key, &payload, "MEDIUM");
 
-    // Optional: Trigger background sync immediately
-    // spawn a task to sync in background
-    let state_clone = state.inner().clone();
-    tokio::spawn(async move {
-        // This is a rough way to trigger it, ideally we have a dedicated worker
-        // let _ = sync_service::sync_to_supabase(state_clone).await;
-    });
-
     Ok(())
 }
 

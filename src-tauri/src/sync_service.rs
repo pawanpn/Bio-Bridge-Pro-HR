@@ -77,6 +77,34 @@ pub async fn initialize_supabase_sync(
     }))
 }
 
+#[tauri::command]
+pub async fn test_supabase_connection(
+    config: SyncConfig,
+) -> Result<serde_json::Value, crate::errors::AppError> {
+    use crate::errors::AppError;
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/rest/v1/", config.supabase_url);
+
+    let response = client
+        .get(&url)
+        .header("apikey", &config.supabase_key)
+        .header("Authorization", format!("Bearer {}", config.supabase_key))
+        .send()
+        .await
+        .map_err(|e| AppError::NetworkError(format!("Connection failed: {}", e)))?;
+
+    if response.status().is_success() {
+        Ok(serde_json::json!({
+            "success": true,
+            "message": "Connected to Supabase successfully"
+        }))
+    } else {
+        let error_msg = response.text().await.unwrap_or_default();
+        Err(AppError::NetworkError(format!("Supabase error: {}", error_msg)))
+    }
+}
+
 /// Sync all pending changes to Supabase
 #[tauri::command]
 pub async fn sync_to_supabase(
@@ -95,6 +123,15 @@ pub async fn sync_to_supabase(
             .ok_or_else(|| AppError::ValidationError("Supabase not configured".into()))?
             .clone()
     };
+
+    sync_data_internal(&config, &state).await
+}
+
+pub async fn sync_data_internal(
+    config: &SyncConfig,
+    state: &crate::AppState,
+) -> Result<SyncResult, crate::errors::AppError> {
+    use crate::errors::AppError;
 
     // Get pending records
     let pending_records = {
