@@ -328,12 +328,12 @@ export const EmployeeManagement: React.FC = () => {
 
       // Save using the crud commands (local SQLite first)
       if (formDialog.editing) {
-        await invoke('crud::update_employee', {
+        await invoke('update_employee', {
           employeeId: formDialog.editing.id,
           request,
         });
       } else {
-        await invoke('crud::create_employee', { request });
+        await invoke('create_employee', { request });
       }
 
       setFormStatus('✅ Employee saved successfully!');
