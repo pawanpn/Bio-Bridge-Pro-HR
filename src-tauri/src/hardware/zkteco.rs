@@ -65,7 +65,7 @@ fn verify_node_available() -> Result<(), AppError> {
 impl DeviceDriver for ZKTecoDriver {
     fn brand_name(&self) -> &'static str { "ZKTeco" }
 
-    async fn sync_logs(&self, ip: &str, port: u16, _comm_key: i32, device_id: i32, _machine_number: i32, last_timestamp: Option<String>) -> Result<Vec<AttendanceLog>, AppError> {
+    async fn sync_logs(&self, ip: &str, port: u16, _comm_key: i32, device_id: i32, _machine_number: i32, last_timestamp: Option<String>) -> Result<(Vec<crate::models::UserInfo>, Vec<AttendanceLog>), AppError> {
         // Step 1: Quick TCP pre-check
         use std::net::TcpStream;
         use std::time::Duration;
@@ -97,7 +97,7 @@ impl DeviceDriver for ZKTecoDriver {
            .arg("sync")
            .arg(ip)
            .arg(port.to_string())
-           .arg("10000"); // 10s timeout
+           .arg("60000"); // 60s timeout
 
         if let Some(ts) = last_timestamp {
             cmd.arg(ts);
@@ -119,6 +119,22 @@ impl DeviceDriver for ZKTecoDriver {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let parsed = extract_json_from_stdout(&stdout);
         let mut attendance_logs = Vec::new();
+        let mut users = Vec::new();
+
+        if let Some(users_array) = parsed.get("users").and_then(|u| u.as_array()) {
+            for u in users_array {
+                let emp_str = u.get("userId").and_then(|v| v.as_str()).unwrap_or("0");
+                let employee_id = emp_str.parse::<i32>().unwrap_or(0);
+                let name = u.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+                if employee_id > 0 {
+                    users.push(crate::models::UserInfo {
+                        employee_id,
+                        name: if name.is_empty() { format!("User {}", employee_id) } else { name }
+                    });
+                }
+            }
+        }
 
         if let Some(attendances) = parsed.get("attendances").and_then(|a| a.as_array()) {
             for att in attendances {
@@ -137,7 +153,7 @@ impl DeviceDriver for ZKTecoDriver {
             }
         }
 
-        Ok(attendance_logs)
+        Ok((users, attendance_logs))
     }
 
     async fn get_all_user_info(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32) -> Result<Vec<crate::models::UserInfo>, AppError> {
