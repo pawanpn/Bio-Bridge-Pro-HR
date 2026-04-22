@@ -134,7 +134,7 @@ pub async fn sync_device_logs(
     device_id: i32,
     brand: String,
     state: tauri::State<'_, AppState>,
-) -> Result<Vec<AttendanceLog>, AppError> {
+) -> Result<serde_json::Value, AppError> {
     let dev_brand = match brand.as_str() {
         "ZKTeco" => DeviceBrand::ZKTeco,
         "Hikvision" => DeviceBrand::Hikvision,
@@ -161,7 +161,7 @@ pub async fn sync_device_logs(
                 "INSERT OR IGNORE INTO Employees (
                     name, first_name, employee_code, biometric_id, 
                     department_id, designation_id, branch_id, status, employment_status
-                 ) VALUES (?1, ?1, ?2, ?3, 1, 1, 1, 'active', 'Permanent')",
+                 ) VALUES (?1, ?1, ?2, ?3, NULL, NULL, NULL, 'active', 'Permanent')",
                 params![u.name, u.employee_id.to_string(), u.employee_id],
             );
         }
@@ -186,7 +186,22 @@ pub async fn sync_device_logs(
         }
     }
 
-    Ok(logs)
+    let mut ui_logs = Vec::new();
+    for log in &logs {
+        let name = device_users.iter().find(|u| u.employee_id == log.employee_id)
+            .map(|u| u.name.clone())
+            .unwrap_or_else(|| format!("User {}", log.employee_id));
+
+        ui_logs.push(serde_json::json!({
+            "employee_id": log.employee_id,
+            "employee_name": name,
+            "timestamp": log.timestamp,
+            "punch_method": log.punch_method,
+            "device_id": log.device_id
+        }));
+    }
+
+    Ok(serde_json::json!(ui_logs))
 }
 
 #[tauri::command]
@@ -196,7 +211,7 @@ pub async fn pull_all_logs(
     device_id: i32,
     brand: String,
     state: tauri::State<'_, AppState>,
-) -> Result<Vec<AttendanceLog>, AppError> {
+) -> Result<serde_json::Value, AppError> {
     sync_device_logs(ip, port, device_id, brand, state).await
 }
 

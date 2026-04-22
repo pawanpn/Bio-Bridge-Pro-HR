@@ -41,10 +41,16 @@ fn get_script_path() -> std::path::PathBuf {
 /// Extract JSON from stdout, skipping any debug text before the JSON object
 fn extract_json_from_stdout(raw: &str) -> serde_json::Value {
     if let Some(start) = raw.find('{') {
-        serde_json::from_str(&raw[start..]).unwrap_or_else(|_| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
+        if let Some(end) = raw.rfind('}') {
+            if end >= start {
+                return serde_json::from_str(&raw[start..=end]).unwrap_or_else(|e| {
+                    println!("JSON Parse error: {}", e);
+                    serde_json::json!({})
+                });
+            }
+        }
     }
+    serde_json::json!({})
 }
 
 /// Verify Node.js is available
@@ -121,7 +127,7 @@ impl DeviceDriver for ZKTecoDriver {
         let mut attendance_logs = Vec::new();
         let mut users = Vec::new();
 
-        if let Some(users_array) = parsed.get("users").and_then(|u| u.as_array()) {
+        if let Some(users_array) = parsed.get("users").and_then(|u| u.get("data")).and_then(|d| d.as_array()) {
             for u in users_array {
                 let emp_str = u.get("userId").and_then(|v| v.as_str()).unwrap_or("0");
                 let employee_id = emp_str.parse::<i32>().unwrap_or(0);
@@ -136,7 +142,7 @@ impl DeviceDriver for ZKTecoDriver {
             }
         }
 
-        if let Some(attendances) = parsed.get("attendances").and_then(|a| a.as_array()) {
+        if let Some(attendances) = parsed.get("attendances").and_then(|a| a.get("data")).and_then(|d| d.as_array()) {
             for att in attendances {
                 let emp_str = att.get("deviceUserId").and_then(|v| v.as_str()).unwrap_or("0");
                 let employee_id = emp_str.parse::<i32>().unwrap_or(0);
@@ -203,7 +209,7 @@ impl DeviceDriver for ZKTecoDriver {
         let parsed = extract_json_from_stdout(&stdout);
         let mut users = Vec::new();
 
-        if let Some(users_array) = parsed.get("users").and_then(|u| u.as_array()) {
+        if let Some(users_array) = parsed.get("users").and_then(|u| u.get("data")).and_then(|d| d.as_array()) {
             for u in users_array {
                 let emp_str = u.get("userId").and_then(|v| v.as_str()).unwrap_or("0");
                 let employee_id = emp_str.parse::<i32>().unwrap_or(0);
