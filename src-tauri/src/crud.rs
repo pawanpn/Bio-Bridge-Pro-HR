@@ -2405,14 +2405,14 @@ fn get_employee_for_audit(
 ) -> Result<Option<serde_json::Value>, AppError> {
     let employee = conn
         .query_row(
-            "SELECT * FROM Employees WHERE id = ?1",
+            "SELECT id, employee_code, first_name, last_name FROM Employees WHERE id = ?1",
             params![employee_id],
             |row| {
                 Ok(serde_json::json!({
                     "id": row.get::<_, i64>(0)?,
-                    "employee_code": row.get::<_, String>(1)?,
-                    "first_name": row.get::<_, String>(2)?,
-                    "last_name": row.get::<_, String>(4)?,
+                    "employee_code": row.get::<_, Option<String>>(1)?,
+                    "first_name": row.get::<_, Option<String>>(2)?,
+                    "last_name": row.get::<_, Option<String>>(3)?,
                 }))
             },
         )
