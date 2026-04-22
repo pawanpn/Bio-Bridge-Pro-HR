@@ -12,7 +12,7 @@ async function main() {
         await zkInstance.createSocket();
         
         if (command === 'sync') {
-            const logs = await zkInstance.getAttendance();
+            const logs = await zkInstance.getAttendances();
             const users = await zkInstance.getUsers();
             
             // Output as single JSON bundle for the Rust side to parse
@@ -21,6 +21,7 @@ async function main() {
                 attendances: logs,
                 users: users
             }));
+            await zkInstance.disconnect();
         } else if (command === 'realtime') {
             // Setup realtime events
             zkInstance.getRealTimeLogs((data) => {
@@ -40,6 +41,7 @@ async function main() {
             status: 'error',
             message: e.message
         }));
+        try { await zkInstance.disconnect(); } catch(err){}
         process.exit(1);
     }
 }

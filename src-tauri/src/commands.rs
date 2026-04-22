@@ -143,10 +143,9 @@ pub async fn sync_device_logs(
 
     println!("Backend Preview: Syncing logs from {} ({})", ip, brand);
     
-    // In a real scenario, we might want the last sync timestamp from DB
-    let logs = sync_device(&ip, port, 0, device_id, 1, dev_brand, None).await?;
+    let (device_users, logs) = sync_device(&ip, port, 0, device_id, 1, dev_brand, None).await?;
     
-    println!("Backend Preview: Pulled {} logs", logs.len());
+    println!("Backend Preview: Pulled {} users, {} logs", device_users.len(), logs.len());
     for log in &logs {
         println!("  Log: Employee {} at {}", log.employee_id, log.timestamp);
     }
@@ -156,11 +155,22 @@ pub async fn sync_device_logs(
         let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
         let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
+        // First, explicitly auto-register fetched users from device into Employees table
+        for u in device_users {
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO Employees (
+                    name, first_name, employee_code, biometric_id, 
+                    department_id, designation_id, branch_id, status, employment_status
+                 ) VALUES (?1, ?1, ?2, ?3, 1, 1, 1, 'active', 'Permanent')",
+                params![u.name, u.employee_id.to_string(), u.employee_id],
+            );
+        }
+
         for log in &logs {
             // Map biometric_id/deviceUserId to local Employee ID
             let local_id: Option<i64> = conn.query_row(
-                "SELECT id FROM Employees WHERE biometric_id = ?1 OR employee_code = ?1 OR id = ?1",
-                params![log.employee_id],
+                "SELECT id FROM Employees WHERE biometric_id = ?1 OR employee_code = ?2 OR id = ?1",
+                params![log.employee_id, log.employee_id.to_string()],
                 |r| r.get(0)
             ).ok();
 
