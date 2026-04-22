@@ -1355,10 +1355,10 @@ pub async fn get_attendance_logs(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut query = String::from(
-        "SELECT al.id, al.employee_id, e.first_name, e.last_name,
+        "SELECT al.id, al.employee_id, e.name,
                 al.timestamp, al.punch_type, al.punch_method, al.is_synced
         FROM AttendanceLogs al
-        JOIN Employees e ON al.employee_id = e.id
+        LEFT JOIN Employees e ON al.employee_id = e.id
         WHERE 1=1",
     );
 
@@ -1383,11 +1383,11 @@ pub async fn get_attendance_logs(
             Ok(serde_json::json!({
                 "id": row.get::<_, i64>(0)?,
                 "employee_id": row.get::<_, i64>(1)?,
-                "employee_name": format!("{} {}", row.get::<_, String>(2)?, row.get::<_, String>(3)?),
-                "timestamp": row.get::<_, String>(4)?,
-                "punch_type": row.get::<_, Option<String>>(5)?,
-                "punch_method": row.get::<_, Option<String>>(6)?,
-                "is_synced": row.get::<_, bool>(7)?,
+                "employee_name": row.get::<_, Option<String>>(2)?.unwrap_or("Unknown Employee".to_string()),
+                "timestamp": row.get::<_, String>(3)?,
+                "punch_type": row.get::<_, Option<String>>(4)?,
+                "punch_method": row.get::<_, Option<String>>(5)?,
+                "is_synced": row.get::<_, bool>(6).unwrap_or(false),
             }))
         })
         .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
@@ -2605,7 +2605,7 @@ pub async fn get_daily_reports(
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut query = String::from(
-        "SELECT al.id, al.employee_id, e.first_name || ' ' || e.last_name as employee_name,
+        "SELECT al.id, al.employee_id, e.name as employee_name,
                 b.id as branch_id, b.name as branch_name, g.id as gate_id, g.name as gate_name,
                 al.device_id, al.timestamp, al.punch_method, al.sync_status
          FROM AttendanceLogs al

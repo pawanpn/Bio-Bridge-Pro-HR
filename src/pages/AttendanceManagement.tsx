@@ -702,7 +702,7 @@ export const AttendanceManagement: React.FC = () => {
               <Table>
                 <TableHeader className="bg-muted/50 sticky top-0 z-10">
                   <TableRow>
-                    <TableHead>Biometric ID</TableHead>
+                    <TableHead>Employee</TableHead>
                     <TableHead>Timestamp</TableHead>
                     <TableHead>Method</TableHead>
                     <TableHead>Status</TableHead>
@@ -711,7 +711,9 @@ export const AttendanceManagement: React.FC = () => {
                 <TableBody>
                   {syncedLogs.map((log, i) => (
                     <TableRow key={i}>
-                      <TableCell className="font-mono text-xs">{log.employee_id}</TableCell>
+                      <TableCell className="font-medium text-xs">
+                        {log.employee_name} <span className="text-muted-foreground font-mono">(#{log.employee_id})</span>
+                      </TableCell>
                       <TableCell className="text-xs">{log.timestamp}</TableCell>
                       <TableCell><Badge variant="secondary" className="text-[10px]">{log.punch_method}</Badge></TableCell>
                       <TableCell>
