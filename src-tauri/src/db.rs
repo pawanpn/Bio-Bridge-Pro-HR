@@ -22,7 +22,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         }
     }
 
-    let db_path = app_dir.join("Databases").join("biobridge_pro.db");
+    let db_path = app_dir.join("Databases").join("biobridge_pro_v2.db");
     let conn = Connection::open(db_path)?;
 
     conn.execute(
@@ -680,13 +680,12 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
                 &bio_id.to_string()
             ],
         );
-        
+
         // Ensure Salary Structure
         let _ = conn.execute(
             "INSERT OR REPLACE INTO SalaryStructures (employee_id, basic_salary) VALUES (?1, ?2)",
             [&id.to_string(), &sal.to_string()],
         );
-    }
 
         // Seed some attendance for today for Ram and Sita
         if id < 4 {

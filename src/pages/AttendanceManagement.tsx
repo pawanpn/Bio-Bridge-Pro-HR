@@ -68,7 +68,7 @@ interface Device {
   is_default: boolean;
 }
 
-type TabType = 'daily' | 'manual' | 'import' | 'reports';
+type TabType = 'daily' | 'manual' | 'import' | 'history';
 
 // ── Main Component ──────────────────────────────────────────────────────────
 
@@ -87,6 +87,9 @@ export const AttendanceManagement: React.FC = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState('');
+  const [syncedLogs, setSyncedLogs] = useState<any[]>([]);
+  const [showPreview, setShowPreview] = useState(false);
+  const [allHistoryLogs, setAllHistoryLogs] = useState<AttendanceLog[]>([]);
 
   // Manual entry
   const [manualForm, setManualForm] = useState({
@@ -139,6 +142,16 @@ export const AttendanceManagement: React.FC = () => {
         date: selectedDate,
       });
       setDailyLogs(logs || []);
+      
+      // Also load full history if on history tab
+      if (activeTab === 'history') {
+        const historyRes = await invoke<any>('get_attendance_logs', {
+          employeeId: null,
+          startDate: null,
+          endDate: null
+        });
+        setAllHistoryLogs(historyRes.data || []);
+      }
     } catch (error) {
       console.error('Failed to load daily logs:', error);
     } finally {
@@ -149,22 +162,30 @@ export const AttendanceManagement: React.FC = () => {
   // Device sync function
   const handleSyncFromDevice = async (device: Device) => {
     setSyncing(true);
-    setSyncStatus(`🔄 Syncing from ${device.name} (${device.ip})...`);
+    setSyncedLogs([]);
+    setSyncStatus(`🔄 Syncing logs from ${device.name}...`);
     try {
-      await invoke('sync_device_logs', {
+      const logs = await invoke<any[]>('sync_device_logs', {
         ip: device.ip,
-        port: device.port,
-        deviceId: device.id,
+        port: Number(device.port),
+        deviceId: Number(device.id),
         brand: device.brand,
       });
-      setSyncStatus(`✅ Successfully synced from ${device.name}!`);
+      
+      if (logs && logs.length > 0) {
+        setSyncedLogs(logs);
+        setShowPreview(true);
+        setSyncStatus(`✅ Successfully pulled ${logs.length} logs from ${device.name}!`);
+      } else {
+        setSyncStatus(`ℹ️ No new logs found on ${device.name}.`);
+      }
       loadDailyLogs();
-      setTimeout(() => setSyncStatus(''), 5000);
     } catch (error) {
+      console.error('Sync failed:', error);
       setSyncStatus(`❌ Sync failed: ${error}`);
-      setTimeout(() => setSyncStatus(''), 5000);
     } finally {
       setSyncing(false);
+      setTimeout(() => setSyncStatus(''), 8000);
     }
   };
 
@@ -253,13 +274,71 @@ export const AttendanceManagement: React.FC = () => {
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-foreground mb-2">Attendance Management</h1>
-        <p className="text-muted-foreground">
-          Manage daily attendance, manual entries, and CSV imports
-        </p>
+    <div className="p-6 max-w-7xl mx-auto space-y-6">
+      {/* Header & Sync Status indicator */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Attendance Management</h1>
+          <p className="text-muted-foreground">Monitor daily attendance and sync data from biometric devices</p>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          {syncing && (
+            <div className="px-4 py-2 bg-primary/10 border border-primary/20 rounded-full text-xs font-medium animate-pulse flex items-center gap-2">
+              <RefreshCw className="w-3 h-3 animate-spin" />
+              {syncStatus}
+            </div>
+          )}
+          {!syncing && syncStatus && (
+            <div className="px-4 py-2 bg-green-500/10 border border-green-500/20 rounded-full text-[10px] font-medium text-green-700 flex items-center gap-2">
+              {syncStatus}
+            </div>
+          )}
+          <Button onClick={loadData} variant="outline" size="sm" disabled={loading}>
+            <RefreshCw className={`w-3 h-3 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      {/* Device Connection Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {devices.length === 0 ? (
+          <Card className="md:col-span-3 border-dashed bg-muted/20">
+            <CardContent className="h-20 flex items-center justify-center text-sm text-muted-foreground italic">
+              No attendance devices are currently configured.
+            </CardContent>
+          </Card>
+        ) : (
+          devices.map(device => (
+            <Card key={device.id} className="shadow-sm border-muted/60">
+              <CardContent className="p-4 py-3">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${device.status === 'Online' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-red-500'}`} />
+                    <span className="font-bold text-sm tracking-tight">{device.name}</span>
+                  </div>
+                  <Badge variant="outline" className="text-[9px] uppercase tracking-wider font-bold">
+                    {device.brand}
+                  </Badge>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-muted-foreground font-mono bg-muted/50 px-1.5 py-0.5 rounded">
+                    {device.ip}:{device.port}
+                  </span>
+                  <Button 
+                    size="sm" 
+                    className="h-7 px-4 text-xs font-bold" 
+                    onClick={() => handleSyncFromDevice(device)}
+                    disabled={syncing}
+                  >
+                    {syncing ? '...' : 'PULL LOGS'}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
       </div>
 
       {/* Filters */}
@@ -307,66 +386,6 @@ export const AttendanceManagement: React.FC = () => {
           </Button>
         </div>
       </div>
-
-      {/* Device Status */}
-      {syncStatus && (
-        <div className={`mb-4 p-4 rounded-md border ${
-          syncStatus.includes('❌') ? 'bg-red-50 border-red-200 text-red-700' : 
-          syncStatus.includes('✅') ? 'bg-green-50 border-green-200 text-green-700' :
-          'bg-blue-50 border-blue-200 text-blue-700'
-        }`}>
-          {syncStatus}
-        </div>
-      )}
-
-      {/* Connected Devices */}
-      {devices.length > 0 && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-lg">Connected Attendance Devices</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {devices.map(device => (
-                <div key={device.id} className="p-4 border rounded-lg bg-muted/30">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <Fingerprint className="w-4 h-4 text-primary" />
-                      <div>
-                        <p className="font-medium text-sm">{device.name}</p>
-                        <p className="text-xs text-muted-foreground font-mono">{device.ip}:{device.port}</p>
-                      </div>
-                    </div>
-                    <Badge variant={device.is_default ? 'default' : 'secondary'} className="text-xs">
-                      {device.is_default ? 'Default' : 'Backup'}
-                    </Badge>
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
-                      className="flex-1 h-8 text-xs"
-                      onClick={() => handleSyncFromDevice(device)}
-                      disabled={syncing}
-                    >
-                      {syncing ? 'Syncing...' : 'Sync'}
-                    </Button>
-                    <Button 
-                      size="sm" 
-                      variant="ghost" 
-                      className="h-8 w-8 p-0"
-                      onClick={() => handleTestDeviceConnection(device)}
-                      title="Test Connection"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -428,6 +447,12 @@ export const AttendanceManagement: React.FC = () => {
           active={activeTab === 'import'}
           onClick={() => setActiveTab('import')}
         />
+        <TabButton
+          icon={<Clock className="w-4 h-4" />}
+          label="All Logs History"
+          active={activeTab === 'history'}
+          onClick={() => setActiveTab('history')}
+        />
       </div>
 
       {/* Daily Attendance Tab */}
@@ -484,6 +509,56 @@ export const AttendanceManagement: React.FC = () => {
                 )}
               </TableBody>
             </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* History Tab */}
+      {activeTab === 'history' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span>Full Attendance History (Last 1000 logs)</span>
+              <Badge variant="outline">{allHistoryLogs.length} total logs</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="max-h-[600px] overflow-auto">
+              <Table>
+                <TableHeader className="bg-muted/50 sticky top-0 z-10 shadow-sm">
+                  <TableRow>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>ID</TableHead>
+                    <TableHead>Timestamp</TableHead>
+                    <TableHead>Method</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allHistoryLogs.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-40 text-center text-muted-foreground italic">
+                        No historical logs found. Pull data from your biometric device to see records.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    allHistoryLogs.map((log) => (
+                      <TableRow key={log.id} className="hover:bg-muted/30">
+                        <TableCell className="font-semibold">{log.employee_name || 'Unknown'}</TableCell>
+                        <TableCell className="text-xs font-mono text-muted-foreground">#{log.employee_id}</TableCell>
+                        <TableCell className="text-xs">{log.timestamp}</TableCell>
+                        <TableCell><Badge variant="secondary" className="text-[10px] font-normal">{log.punch_method}</Badge></TableCell>
+                        <TableCell>
+                          <Badge variant={log.is_synced ? 'default' : 'outline'} className="text-[10px]">
+                            {log.is_synced ? 'Cloud Synced' : 'Local Only'}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -607,6 +682,51 @@ export const AttendanceManagement: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+      )}
+      {/* Sync Preview Modal */}
+      {showPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <Card className="w-full max-w-4xl max-h-[80vh] flex flex-col shadow-2xl">
+            <CardHeader className="border-b bg-muted/30">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Device Sync Result</CardTitle>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Showing logs pulled from the biometric device. These have been automatically mapped to employees.
+                  </p>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setShowPreview(false)}>✕</Button>
+              </div>
+            </CardHeader>
+            <CardContent className="flex-1 overflow-auto p-0">
+              <Table>
+                <TableHeader className="bg-muted/50 sticky top-0 z-10">
+                  <TableRow>
+                    <TableHead>Biometric ID</TableHead>
+                    <TableHead>Timestamp</TableHead>
+                    <TableHead>Method</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {syncedLogs.map((log, i) => (
+                    <TableRow key={i}>
+                      <TableCell className="font-mono text-xs">{log.employee_id}</TableCell>
+                      <TableCell className="text-xs">{log.timestamp}</TableCell>
+                      <TableCell><Badge variant="secondary" className="text-[10px]">{log.punch_method}</Badge></TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-[10px] text-green-600 bg-green-50">Saved</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+            <div className="p-4 border-t bg-muted/10 flex justify-end">
+              <Button onClick={() => setShowPreview(false)}>Close Preview</Button>
+            </div>
+          </Card>
+        </div>
       )}
     </div>
   );

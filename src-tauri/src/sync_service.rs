@@ -364,11 +364,20 @@ fn store_records_locally(
                     let last_name = record.get("last_name").and_then(|v| v.as_str()).unwrap_or("");
                     let employee_code = record.get("employee_code").and_then(|v| v.as_str()).unwrap_or("");
                     let status = record.get("status").and_then(|v| v.as_str()).unwrap_or("Active");
+                    let name = format!("{} {}", first_name, last_name);
+                    let dept_id = record.get("department_id").and_then(|v| v.as_i64()).unwrap_or(1);
+                    let branch_id = record.get("branch_id").and_then(|v| v.as_i64()).unwrap_or(1);
 
                     conn.execute(
-                        "INSERT OR REPLACE INTO Employees (id, first_name, last_name, employee_code, employment_status, status, branch_id) 
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
-                        rusqlite::params![id, first_name, last_name, employee_code, status, status],
+                        "INSERT OR REPLACE INTO Employees (
+                            id, name, first_name, last_name, employee_code, 
+                            employment_status, status, department_id, branch_id,
+                            updated_at
+                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))",
+                        rusqlite::params![
+                            id, name, first_name, last_name, employee_code, 
+                            status, status, dept_id, branch_id
+                        ],
                     ).ok();
                     stored += 1;
                 },
