@@ -22,7 +22,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         }
     }
 
-    let db_path = app_dir.join("Databases").join("biobridge_pro_v2.db");
+    let db_path = app_dir.join("Databases").join("biobridge_pro.db");
     let conn = Connection::open(db_path)?;
 
     conn.execute(
@@ -80,11 +80,63 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            branch_id INTEGER NOT NULL,
             name TEXT NOT NULL,
-            rfid TEXT,
-            pin TEXT,
-            department TEXT,
+            first_name TEXT,
+            middle_name TEXT,
+            last_name TEXT,
+            employee_code TEXT UNIQUE,
+            personal_email TEXT,
+            personal_phone TEXT,
+            work_email TEXT,
+            work_phone TEXT,
+            date_of_birth TEXT,
+            gender TEXT,
+            current_address TEXT,
+            permanent_address TEXT,
+            citizenship_number TEXT,
+            pan_number TEXT,
+            marital_status TEXT,
+            date_of_joining TEXT,
+            department_id INTEGER,
+            designation_id INTEGER,
+            branch_id INTEGER,
+            reporting_manager_id INTEGER,
+            bank_name TEXT,
+            account_number TEXT,
+            area_id INTEGER,
+            location_id INTEGER,
+            photo TEXT,
+            enable_self_service INTEGER DEFAULT 1,
+            enable_mobile_access INTEGER DEFAULT 1,
+            local_name TEXT,
+            national_id TEXT,
+            contact_tel TEXT,
+            office_tel TEXT,
+            motorcycle_license TEXT,
+            automobile_license TEXT,
+            religion TEXT,
+            city TEXT,
+            postcode TEXT,
+            passport_no TEXT,
+            nationality TEXT,
+            verification_mode INTEGER,
+            device_privilege INTEGER,
+            device_password TEXT,
+            card_no TEXT,
+            bio_photo TEXT,
+            enable_attendance INTEGER DEFAULT 1,
+            enable_holiday INTEGER DEFAULT 1,
+            outdoor_management INTEGER DEFAULT 0,
+            workflow_role TEXT,
+            mobile_punch INTEGER DEFAULT 1,
+            app_role TEXT,
+            whatsapp_alert INTEGER DEFAULT 0,
+            whatsapp_exception INTEGER DEFAULT 0,
+            whatsapp_punch INTEGER DEFAULT 0,
+            supervisor_mobile TEXT,
+            biometric_id INTEGER,
+            employment_status TEXT DEFAULT 'Active',
+            employment_type TEXT DEFAULT 'Full-time',
             status TEXT DEFAULT 'active',
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now')),
@@ -92,6 +144,22 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         )",
         [],
     )?;
+
+    // Safe Migration Logic: Add columns one by one if they don't exist
+    let migrations = vec![
+        ("first_name", "TEXT"), ("last_name", "TEXT"), ("employee_code", "TEXT"),
+        ("department_id", "INTEGER"), ("designation_id", "INTEGER"), ("biometric_id", "INTEGER"),
+        ("pan_number", "TEXT"), ("citizenship_number", "TEXT"), ("date_of_joining", "TEXT"),
+        ("employment_status", "TEXT DEFAULT 'Active'"), ("employment_type", "TEXT"),
+        ("whatsapp_alert", "INTEGER DEFAULT 0"), ("mobile_punch", "INTEGER DEFAULT 1"),
+        ("full_name", "TEXT"), ("department", "TEXT") // Adding 'department' back to fix compatibility errors
+    ];
+
+    for (col, col_type) in migrations {
+        let _ = conn.execute(&format!("ALTER TABLE Employees ADD COLUMN {} {}", col, col_type), []);
+    }
+
+
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Devices (
@@ -178,6 +246,20 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             private_key TEXT,
             project_id TEXT,
             root_folder_id TEXT
+        )",
+        [],
+    )?;
+
+    // Audit Logs table for security and tracking
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS AuditLogs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            table_name TEXT NOT NULL,
+            record_id TEXT,
+            operation TEXT NOT NULL,
+            description TEXT,
+            user_id INTEGER,
+            created_at TEXT DEFAULT (datetime('now'))
         )",
         [],
     )?;

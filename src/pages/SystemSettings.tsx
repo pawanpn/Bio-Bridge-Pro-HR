@@ -5,6 +5,7 @@ import { AppConfig } from '../config/appConfig';
 import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, UserPlus, UserCircle, Database } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { EmployeeProfileSidebar } from '../components/EmployeeProfileSidebar';
+import { DeviceSettings as DeviceSettingsContent } from './DeviceSettings';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -16,7 +17,7 @@ interface CloudConfig {
   rootFolderId?: string;
 }
 
-type Tab = 'general' | 'functionality' | 'directory' | 'master' | 'users';
+type Tab = 'general' | 'functionality' | 'directory' | 'master' | 'users' | 'devices';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Page
@@ -75,6 +76,12 @@ export const SystemSettings: React.FC = () => {
           locked={!masterUnlocked}
           onClick={() => handleTabChange('master')}
         />
+        <TabButton
+          label="Devices"
+          icon={<Database size={15} />}
+          active={activeTab === 'devices'}
+          onClick={() => handleTabChange('devices')}
+        />
         {isSuperAdmin && (
           <TabButton
             label="Users"
@@ -91,6 +98,7 @@ export const SystemSettings: React.FC = () => {
         {activeTab === 'functionality' && <FunctionalityControl />}
         {activeTab === 'directory' && <EmployeeDirectory />}
         {activeTab === 'users' && <UserManagement />}
+        {activeTab === 'devices' && <DeviceSettingsContent />}
         {activeTab === 'master' && (
           masterUnlocked
             ? <MasterSettingsContent onLock={() => setMasterUnlocked(false)} />
