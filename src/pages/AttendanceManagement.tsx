@@ -724,7 +724,18 @@ export const AttendanceManagement: React.FC = () => {
               </Table>
             </CardContent>
             <div className="p-4 border-t bg-muted/10 flex justify-end">
-              <Button onClick={() => setShowPreview(false)}>Close Preview</Button>
+              <Button onClick={() => {
+                setShowPreview(false);
+                loadDailyLogs();
+                // If we are on history tab, refresh that as well
+                if (activeTab === 'history') {
+                    invoke<any>('get_attendance_logs', {
+                        employeeId: null,
+                        startDate: null,
+                        endDate: null
+                    }).then(res => setAllHistoryLogs(res.data || []));
+                }
+              }}>Save and Close</Button>
             </div>
           </Card>
         </div>

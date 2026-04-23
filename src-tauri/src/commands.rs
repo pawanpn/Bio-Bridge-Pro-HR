@@ -170,37 +170,74 @@ pub async fn sync_device_logs(
         let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
         let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
+        // 1. HARD CLEANUP: Remove known dummy data to prevent ID collisions
+        let _ = conn.execute("DELETE FROM Employees WHERE name IN ('Ram Sharma', 'Sita Rai', 'Dummy Employee')", []);
+        let _ = conn.execute("DELETE FROM AttendanceLogs WHERE employee_id NOT IN (SELECT id FROM Employees)", []);
+
+        // 2. FORCE SYNC EMPLOYEES: Ensure every user from device exists in local DB
         for u in &device_users {
-            if let Err(e) = conn.execute(
-                "INSERT OR IGNORE INTO Employees (
-                    name, first_name, employee_code, biometric_id, 
-                    department_id, designation_id, branch_id, status, employment_status
-                 ) VALUES (?1, ?1, ?2, ?3, NULL, NULL, NULL, 'active', 'Permanent')",
-                params![&u.name, &u.employee_id.to_string(), u.employee_id],
-            ) {
-                eprintln!("Failed to auto-register device user {}: {}", u.employee_id, e);
+            // Check if exists by biometric_id
+            let existing_id: Option<i64> = conn.query_row(
+                "SELECT id FROM Employees WHERE biometric_id = ?1",
+                params![u.employee_id],
+                |r| r.get(0)
+            ).ok();
+
+            if let Some(eid) = existing_id {
+                // Update name if it's currently a generic one or empty
+                let _ = conn.execute(
+                    "UPDATE Employees SET name = ?1 WHERE id = ?2 AND (name LIKE 'User %' OR name = '')",
+                    params![&u.name, eid]
+                );
+            } else {
+                // Create new employee
+                let _ = conn.execute(
+                    "INSERT INTO Employees (name, employee_code, biometric_id, status, employment_status) 
+                     VALUES (?1, ?2, ?3, 'active', 'Permanent')",
+                    params![&u.name, &u.employee_id.to_string(), u.employee_id],
+                );
+                
+                // Queue for Supabase Sync
+                let new_id = conn.last_insert_rowid();
+                let _ = crate::sync_service::_queue_for_sync(
+                    conn, "Employees", "INSERT", &new_id.to_string(), 
+                    &serde_json::json!({"name": &u.name, "employee_code": u.employee_id.to_string(), "biometric_id": u.employee_id}),
+                    "HIGH"
+                );
             }
         }
 
+        // 3. CAPTURE LOGS: Link to correct local IDs and queue for cloud
         for log in &logs {
-            // Map biometric_id/deviceUserId to local Employee ID
-            // Match target biometric_id, or employee_code, or check if the row exists by name/ID
             let local_id: Option<i64> = conn.query_row(
-                "SELECT id FROM Employees WHERE biometric_id = ?1 OR employee_code = ?2",
-                params![log.employee_id, log.employee_id.to_string()],
+                "SELECT id FROM Employees WHERE biometric_id = ?1",
+                params![log.employee_id],
                 |r| r.get(0)
             ).ok();
 
             if let Some(eid) = local_id {
-                if let Err(e) = conn.execute(
+                let res = conn.execute(
                     "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, device_id, branch_id, gate_id, punch_method)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![eid, log.timestamp, log.device_id, target_branch_id, target_gate_id, log.punch_method],
-                ) {
-                    eprintln!("Failed to insert log for employee {}: {}", eid, e);
+                );
+
+                if let Ok(affected) = res {
+                    if affected > 0 {
+                        let log_id = conn.last_insert_rowid();
+                        // Queue for Supabase Sync
+                        let _ = crate::sync_service::_queue_for_sync(
+                            conn, "AttendanceLogs", "INSERT", &log_id.to_string(),
+                            &serde_json::json!({
+                                "employee_id": eid, 
+                                "timestamp": log.timestamp, 
+                                "device_id": log.device_id,
+                                "punch_method": log.punch_method
+                            }),
+                            "MEDIUM"
+                        );
+                    }
                 }
-            } else {
-                println!("Warning: No matching employee found for biometric ID {}", log.employee_id);
             }
         }
     }
@@ -214,11 +251,18 @@ pub async fn sync_device_logs(
         ui_logs.push(serde_json::json!({
             "employee_id": log.employee_id,
             "employee_name": name,
-            "timestamp": log.timestamp,
-            "punch_method": log.punch_method,
+            "timestamp": log.timestamp.clone(),
+            "punch_method": log.punch_method.clone(),
             "device_id": log.device_id
         }));
     }
+
+    // Sort by timestamp DESC (Latest first)
+    ui_logs.sort_by(|a, b| {
+        let a_ts = a["timestamp"].as_str().unwrap_or("");
+        let b_ts = b["timestamp"].as_str().unwrap_or("");
+        b_ts.cmp(a_ts)
+    });
 
     Ok(serde_json::json!(ui_logs))
 }
