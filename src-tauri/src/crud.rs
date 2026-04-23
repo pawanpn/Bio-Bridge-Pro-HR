@@ -455,10 +455,13 @@ pub async fn create_employee(
         None
     };
 
+    // Generate display names
+    let full_name = format!("{} {} {}", first_name, request.middle_name.as_deref().unwrap_or(""), last_name).trim().replace("  ", " ");
+
     // Insert employee with all fields
     let _id = conn.execute(
         "INSERT INTO Employees (
-            employee_code, first_name, middle_name, last_name,
+            employee_code, first_name, middle_name, last_name, name, full_name,
             date_of_birth, gender, personal_email, personal_phone,
             current_address, permanent_address, citizenship_number, pan_number,
             department_id, designation_id, branch_id, date_of_joining,
@@ -476,63 +479,65 @@ pub async fn create_employee(
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
             ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
             ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44,
-            ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53,
+            ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53, ?54, ?55,
             'active', datetime('now'), datetime('now')
         )",
         params![
-            employee_code,
-            first_name,
-            request.middle_name.as_ref().map(|s| sanitize_input(s)),
-            last_name,
-            request.date_of_birth,
-            request.gender,
-            email_encrypted,
-            phone_encrypted,
-            address_encrypted,
-            request.permanent_address.as_ref().map(|s| encrypt_data(&sanitize_input(s))).transpose().map_err(|e| AppError::EncryptionError(e))?,
-            request.citizenship_number.as_ref().map(|s| sanitize_input(s)),
-            request.pan_number.as_ref().map(|s| sanitize_input(s)),
-            request.department_id,
-            request.designation_id,
-            request.branch_id,
-            request.date_of_joining,
-            request.employment_type.as_deref().unwrap_or("Full-time"),
-            request.employment_status.as_deref().unwrap_or("Active"),
-            request.reporting_manager_id,
-            request.bank_name,
-            account_encrypted,
-            request.area_id,
-            request.location_id,
-            request.photo,
-            request.enable_self_service.unwrap_or(false) as i32,
-            request.enable_mobile_access.unwrap_or(false) as i32,
-            request.local_name,
-            request.national_id,
-            request.contact_tel,
-            request.office_tel,
-            request.motorcycle_license,
-            request.automobile_license,
-            request.religion,
-            request.city,
-            request.postcode,
-            request.passport_no,
-            request.nationality,
-            request.verification_mode,
-            request.device_privilege,
-            request.device_password,
-            request.card_no,
-            request.bio_photo,
-            request.enable_attendance.unwrap_or(true) as i32,
-            request.enable_holiday.unwrap_or(true) as i32,
-            request.outdoor_management.unwrap_or(false) as i32,
-            request.workflow_role,
-            request.mobile_punch.unwrap_or(false) as i32,
-            request.app_role,
-            request.whatsapp_alert.unwrap_or(false) as i32,
-            request.whatsapp_exception.unwrap_or(false) as i32,
-            request.whatsapp_punch.unwrap_or(false) as i32,
-            request.supervisor_mobile,
-            request.biometric_id,
+            &employee_code,
+            &first_name,
+            &request.middle_name.as_ref().map(|s| sanitize_input(s)),
+            &last_name,
+            &full_name.clone(),
+            &full_name,
+            &request.date_of_birth,
+            &request.gender,
+            &email_encrypted,
+            &phone_encrypted,
+            &address_encrypted,
+            &request.permanent_address.as_ref().map(|s| encrypt_data(&sanitize_input(s))).transpose().map_err(|e| AppError::EncryptionError(e))?,
+            &request.citizenship_number.as_ref().map(|s| sanitize_input(s)),
+            &request.pan_number.as_ref().map(|s| sanitize_input(s)),
+            &request.department_id,
+            &request.designation_id,
+            &request.branch_id,
+            &request.date_of_joining,
+            &request.employment_type.as_deref().unwrap_or("Full-time"),
+            &request.employment_status.as_deref().unwrap_or("Active"),
+            &request.reporting_manager_id,
+            &request.bank_name,
+            &account_encrypted,
+            &request.area_id,
+            &request.location_id,
+            &request.photo,
+            &(request.enable_self_service.unwrap_or(false) as i32),
+            &(request.enable_mobile_access.unwrap_or(false) as i32),
+            &request.local_name,
+            &request.national_id,
+            &request.contact_tel,
+            &request.office_tel,
+            &request.motorcycle_license,
+            &request.automobile_license,
+            &request.religion,
+            &request.city,
+            &request.postcode,
+            &request.passport_no,
+            &request.nationality,
+            &request.verification_mode,
+            &request.device_privilege,
+            &request.device_password,
+            &request.card_no,
+            &request.bio_photo,
+            &(request.enable_attendance.unwrap_or(true) as i32),
+            &(request.enable_holiday.unwrap_or(true) as i32),
+            &(request.outdoor_management.unwrap_or(false) as i32),
+            &request.workflow_role,
+            &(request.mobile_punch.unwrap_or(false) as i32),
+            &request.app_role,
+            &(request.whatsapp_alert.unwrap_or(false) as i32),
+            &(request.whatsapp_exception.unwrap_or(false) as i32),
+            &(request.whatsapp_punch.unwrap_or(false) as i32),
+            &request.supervisor_mobile,
+            &request.biometric_id,
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to create employee: {}", e)))?;
 
@@ -607,15 +612,26 @@ pub async fn get_employee(
 
     let mut stmt = conn
         .prepare(
-            "SELECT e.*, 
-            d.name as department_name,
-            des.name as designation_name,
-            b.name as branch_name
+            "SELECT 
+                e.id, e.employee_code, e.first_name, e.middle_name, e.last_name, 
+                e.date_of_birth, e.gender, e.personal_email, e.personal_phone, e.current_address,
+                e.department_id, e.designation_id, e.branch_id, e.date_of_joining, e.employment_type,
+                e.employment_status, e.bank_name,
+                d.name as department_name,
+                des.name as designation_name,
+                b.name as branch_name,
+                e.area_id, e.location_id, e.photo, e.enable_self_service, e.enable_mobile_access,
+                e.local_name, e.national_id, e.contact_tel, e.office_tel, e.motorcycle_license,
+                e.automobile_license, e.religion, e.city, e.postcode, e.passport_no,
+                e.nationality, e.verification_mode, e.device_privilege, e.device_password, e.card_no,
+                e.bio_photo, e.enable_attendance, e.enable_holiday, e.outdoor_management, e.workflow_role,
+                e.mobile_punch, e.app_role, e.whatsapp_alert, e.whatsapp_exception, e.whatsapp_punch,
+                e.supervisor_mobile, e.biometric_id
         FROM Employees e
         LEFT JOIN Departments d ON e.department_id = d.id
         LEFT JOIN Designations des ON e.designation_id = des.id
         LEFT JOIN Branches b ON e.branch_id = b.id
-        WHERE e.id = ?1 AND e.status != 'deleted'",
+        WHERE e.id = ?1 AND (e.status IS NULL OR e.status != 'deleted')",
         )
         .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
@@ -815,7 +831,7 @@ pub async fn update_employee(
         updates.push("first_name = ?");
         values.push(Box::new(sanitize_input(&first_name)));
     }
-    if let Some(middle_name) = request.middle_name {
+    if let Some(ref middle_name) = request.middle_name {
         updates.push("middle_name = ?");
         values.push(Box::new(sanitize_input(&middle_name)));
     }
@@ -823,12 +839,12 @@ pub async fn update_employee(
         updates.push("last_name = ?");
         values.push(Box::new(sanitize_input(&last_name)));
     }
-    if let Some(email) = request.personal_email {
+    if let Some(ref email) = request.personal_email {
         updates.push("personal_email = ?");
         let encrypted = encrypt_data(&email).map_err(|e| AppError::EncryptionError(e))?;
         values.push(Box::new(encrypted));
     }
-    if let Some(phone) = request.personal_phone {
+    if let Some(ref phone) = request.personal_phone {
         updates.push("personal_phone = ?");
         let encrypted = encrypt_data(&phone).map_err(|e| AppError::EncryptionError(e))?;
         values.push(Box::new(encrypted));
@@ -841,15 +857,15 @@ pub async fn update_employee(
         updates.push("employment_status = ?");
         values.push(Box::new(status));
     }
-    if let Some(emp_type) = request.employment_type {
+    if let Some(ref emp_type) = request.employment_type {
         updates.push("employment_type = ?");
         values.push(Box::new(emp_type));
     }
-    if let Some(citizenship) = request.citizenship_number {
+    if let Some(ref citizenship) = request.citizenship_number {
         updates.push("citizenship_number = ?");
         values.push(Box::new(sanitize_input(&citizenship)));
     }
-    if let Some(pan) = request.pan_number {
+    if let Some(ref pan) = request.pan_number {
         updates.push("pan_number = ?");
         values.push(Box::new(sanitize_input(&pan)));
     }
@@ -857,23 +873,23 @@ pub async fn update_employee(
         updates.push("department_id = ?");
         values.push(Box::new(dept_id));
     }
-    if let Some(desig_id) = request.designation_id {
+    if let Some(ref desig_id) = request.designation_id {
         updates.push("designation_id = ?");
         values.push(Box::new(desig_id));
     }
-    if let Some(dob) = request.date_of_birth {
+    if let Some(ref dob) = request.date_of_birth {
         updates.push("date_of_birth = ?");
         values.push(Box::new(dob));
     }
-    if let Some(gender) = request.gender {
+    if let Some(ref gender) = request.gender {
         updates.push("gender = ?");
         values.push(Box::new(gender));
     }
-    if let Some(addr) = request.current_address {
+    if let Some(ref addr) = request.current_address {
         updates.push("current_address = ?");
         values.push(Box::new(sanitize_input(&addr)));
     }
-    if let Some(permanent_addr) = request.permanent_address {
+    if let Some(ref permanent_addr) = request.permanent_address {
         updates.push("permanent_address = ?");
         values.push(Box::new(sanitize_input(&permanent_addr)));
     }
@@ -893,7 +909,7 @@ pub async fn update_employee(
         updates.push("marital_status = ?");
         values.push(Box::new(marital));
     }
-    if let Some(doj) = request.date_of_joining {
+    if let Some(ref doj) = request.date_of_joining {
         updates.push("date_of_joining = ?");
         values.push(Box::new(doj));
     }
@@ -909,15 +925,15 @@ pub async fn update_employee(
         updates.push("emergency_contact_relation = ?");
         values.push(Box::new(sanitize_input(&emergency_relation)));
     }
-    if let Some(area_id) = request.area_id {
+    if let Some(ref area_id) = request.area_id {
         updates.push("area_id = ?");
         values.push(Box::new(area_id));
     }
-    if let Some(location_id) = request.location_id {
+    if let Some(ref location_id) = request.location_id {
         updates.push("location_id = ?");
         values.push(Box::new(location_id));
     }
-    if let Some(photo) = request.photo {
+    if let Some(ref photo) = request.photo {
         updates.push("photo = ?");
         values.push(Box::new(photo));
     }
@@ -973,23 +989,23 @@ pub async fn update_employee(
         updates.push("nationality = ?");
         values.push(Box::new(sanitize_input(&nationality)));
     }
-    if let Some(verification_mode) = request.verification_mode {
+    if let Some(ref verification_mode) = request.verification_mode {
         updates.push("verification_mode = ?");
         values.push(Box::new(verification_mode));
     }
-    if let Some(device_privilege) = request.device_privilege {
+    if let Some(ref device_privilege) = request.device_privilege {
         updates.push("device_privilege = ?");
         values.push(Box::new(device_privilege));
     }
-    if let Some(device_password) = request.device_password {
+    if let Some(ref device_password) = request.device_password {
         updates.push("device_password = ?");
         values.push(Box::new(device_password));
     }
-    if let Some(card_no) = request.card_no {
+    if let Some(ref card_no) = request.card_no {
         updates.push("card_no = ?");
         values.push(Box::new(card_no));
     }
-    if let Some(bio_photo) = request.bio_photo {
+    if let Some(ref bio_photo) = request.bio_photo {
         updates.push("bio_photo = ?");
         values.push(Box::new(bio_photo));
     }
@@ -1005,7 +1021,7 @@ pub async fn update_employee(
         updates.push("outdoor_management = ?");
         values.push(Box::new(outdoor_management as i32));
     }
-    if let Some(workflow_role) = request.workflow_role {
+    if let Some(ref workflow_role) = request.workflow_role {
         updates.push("workflow_role = ?");
         values.push(Box::new(workflow_role));
     }
@@ -1013,7 +1029,7 @@ pub async fn update_employee(
         updates.push("mobile_punch = ?");
         values.push(Box::new(mobile_punch as i32));
     }
-    if let Some(app_role) = request.app_role {
+    if let Some(ref app_role) = request.app_role {
         updates.push("app_role = ?");
         values.push(Box::new(app_role));
     }
@@ -1029,7 +1045,7 @@ pub async fn update_employee(
         updates.push("whatsapp_punch = ?");
         values.push(Box::new(whatsapp_punch as i32));
     }
-    if let Some(supervisor_mobile) = request.supervisor_mobile {
+    if let Some(ref supervisor_mobile) = request.supervisor_mobile {
         updates.push("supervisor_mobile = ?");
         values.push(Box::new(sanitize_input(&supervisor_mobile)));
     }
@@ -1038,11 +1054,23 @@ pub async fn update_employee(
         values.push(Box::new(biometric_id));
     }
 
+    // Dynamic Full Name Regeneration
+    let first = request.first_name.clone().or_else(|| _old_values.as_ref().and_then(|v| v["first_name"].as_str().map(|s| s.to_string()))).unwrap_or_default();
+    let middle = request.middle_name.clone().or_else(|| _old_values.as_ref().and_then(|v| v["middle_name"].as_str().map(|s| s.to_string()))).unwrap_or_default();
+    let last = request.last_name.clone().or_else(|| _old_values.as_ref().and_then(|v| v["last_name"].as_str().map(|s| s.to_string()))).unwrap_or_default();
+    
+    let full_name = format!("{} {} {}", first, middle, last).trim().replace("  ", " ");
+    updates.push("name = ?");
+    values.push(Box::new(full_name.clone()));
+    updates.push("full_name = ?");
+    values.push(Box::new(full_name));
+
     if updates.is_empty() {
         return Err(AppError::ValidationError("No fields to update".into()));
     }
 
     updates.push("updated_at = datetime('now')");
+    // ID comes AFTER all field placeholders
     values.push(Box::new(employee_id));
 
     let set_clause = updates.join(", ");
@@ -1051,7 +1079,7 @@ pub async fn update_employee(
     let params_vec: Vec<&dyn rusqlite::ToSql> = values.iter().map(|v| v.as_ref()).collect();
 
     conn.execute(&query, &params_vec[..])
-        .map_err(|e| AppError::DatabaseError(format!("Update failed: {}", e)))?;
+        .map_err(|e| AppError::DatabaseError(format!("Update failed: {} | Query: {}", e, query)))?;
 
     // Log audit
     log_audit(
@@ -2409,14 +2437,15 @@ fn get_employee_for_audit(
 ) -> Result<Option<serde_json::Value>, AppError> {
     let employee = conn
         .query_row(
-            "SELECT id, employee_code, first_name, last_name FROM Employees WHERE id = ?1",
+            "SELECT id, employee_code, first_name, middle_name, last_name FROM Employees WHERE id = ?1",
             params![employee_id],
             |row| {
                 Ok(serde_json::json!({
                     "id": row.get::<_, i64>(0)?,
                     "employee_code": row.get::<_, Option<String>>(1)?,
                     "first_name": row.get::<_, Option<String>>(2)?,
-                    "last_name": row.get::<_, Option<String>>(3)?,
+                    "middle_name": row.get::<_, Option<String>>(3)?,
+                    "last_name": row.get::<_, Option<String>>(4)?,
                 }))
             },
         )
@@ -2598,55 +2627,230 @@ pub async fn create_designation(name: String, state: tauri::State<'_, AppState>)
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     Ok(())
 }
-/// GET DAILY ATTENDANCE REPORTS
+/// GET DAILY ATTENDANCE REPORTS (Enhanced)
 #[tauri::command]
 pub async fn get_daily_reports(
+    from_date: String,
+    to_date: String,
+    dept: String,
+    search: String,
     branch_id: Option<i64>,
-    date: String,
+    gate_id: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut query = String::from(
-        "SELECT al.id, al.employee_id, e.name as employee_name,
-                b.id as branch_id, b.name as branch_name, g.id as gate_id, g.name as gate_name,
-                al.device_id, al.timestamp, al.punch_method, al.is_synced
-         FROM AttendanceLogs al
-         LEFT JOIN Employees e ON al.employee_id = e.id
-         LEFT JOIN Branches b ON al.branch_id = b.id
-         LEFT JOIN Gates g ON al.gate_id = g.id
-         WHERE date(al.timestamp) = date(?1)"
+        "SELECT e.id, e.name, e.department, 
+                date(al.timestamp, 'localtime') as att_date,
+                MIN(datetime(al.timestamp, 'localtime')) as first_in,
+                MAX(datetime(al.timestamp, 'localtime')) as last_out,
+                GROUP_CONCAT(strftime('%H:%M', al.timestamp, 'localtime'), ' | ') as all_punches,
+                e.employee_code,
+                b.name as branch_name,
+                al.punch_method
+         FROM Employees e
+         JOIN AttendanceLogs al ON e.id = al.employee_id
+         LEFT JOIN Branches b ON e.branch_id = b.id
+         WHERE date(al.timestamp, 'localtime') BETWEEN date(?1) AND date(?2)"
     );
 
-    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(date)];
+    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![
+        Box::new(from_date),
+        Box::new(to_date),
+    ];
 
-    if let Some(bid) = branch_id {
-        query.push_str(" AND al.branch_id = ?2");
-        params.push(Box::new(bid));
+    if dept != "All" {
+        query.push_str(" AND e.department = ?");
+        params_vec.push(Box::new(dept));
     }
 
-    query.push_str(" ORDER BY al.timestamp DESC");
+    if !search.is_empty() {
+        query.push_str(" AND (e.name LIKE ? OR e.employee_code LIKE ?)");
+        let s = format!("%{}%", search);
+        params_vec.push(Box::new(s.clone()));
+        params_vec.push(Box::new(s));
+    }
+
+    if let Some(bid) = branch_id {
+        query.push_str(" AND e.branch_id = ?");
+        params_vec.push(Box::new(bid));
+    }
+
+    query.push_str(" GROUP BY e.id, att_date ORDER BY att_date DESC, e.name ASC");
 
     let mut stmt = conn.prepare(&query).map_err(|e| AppError::DatabaseError(e.to_string()))?;
-    
-    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|s| s.as_ref()).collect();
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|s| s.as_ref()).collect();
+
+    let results = stmt.query_map(&param_refs[..], |row| {
+        let first_in: String = row.get(4)?;
+        let last_out: String = row.get(5)?;
+        let all_punches: String = row.get(6)?;
+        
+        let in_time = first_in.split_whitespace().nth(1).unwrap_or("00:00:00");
+        let is_late = in_time > "09:15:00";
+        
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "department": row.get::<_, Option<String>>(2)?,
+            "date": row.get::<_, String>(3)?,
+            "first_in": first_in,
+            "last_out": if last_out == first_in { "—".to_string() } else { last_out },
+            "all_punches": all_punches,
+            "employee_code": row.get::<_, Option<String>>(7)?,
+            "branch_name": row.get::<_, Option<String>>(8)?,
+            "method": row.get::<_, Option<String>>(9)?,
+            "status": if is_late { "Late" } else { "On-time" }
+        }))
+    }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
+
+    Ok(results)
+}
+
+/// GET MONTHLY LEDGER
+#[tauri::command]
+pub async fn get_monthly_ledger(
+    year_month: String, // YYYY-MM
+    branch_id: Option<i64>,
+    gate_id: Option<i64>,
+    dept: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut query = String::from(
+        "SELECT e.id, e.name, strftime('%d', al.timestamp, 'localtime') as day, COUNT(*)
+         FROM Employees e
+         JOIN AttendanceLogs al ON e.id = al.employee_id
+         WHERE strftime('%Y-%m', al.timestamp, 'localtime') = ?1"
+    );
+
+    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(year_month)];
+
+    if let Some(bid) = branch_id {
+        query.push_str(" AND e.branch_id = ?");
+        params_vec.push(Box::new(bid));
+    }
+
+    query.push_str(" GROUP BY e.id, day ORDER BY e.name");
+
+    let mut stmt = conn.prepare(&query).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|s| s.as_ref()).collect();
+
+    let mut ledger_map: std::collections::HashMap<i64, (String, std::collections::HashMap<String, String>)> = std::collections::HashMap::new();
+
+    let mut rows = stmt.query(&param_refs[..]).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    while let Some(row) = rows.next().map_err(|e| AppError::DatabaseError(e.to_string()))? {
+        let id: i64 = row.get(0)?;
+        let name: String = row.get(1)?;
+        let day: String = row.get(2)?;
+        
+        let entry = ledger_map.entry(id).or_insert((name, std::collections::HashMap::new()));
+        entry.1.insert(day, "P".to_string());
+    }
+
+    let results: Vec<serde_json::Value> = ledger_map.into_iter().map(|(id, (name, att))| {
+        serde_json::json!({
+            "id": id,
+            "name": name,
+            "attendance": att
+        })
+    }).collect();
+
+    Ok(results)
+}
+
+/// GET SALARY SHEET
+#[tauri::command]
+pub async fn get_salary_sheet(
+    year_month: String,
+    branch_id: Option<i64>,
+    gate_id: Option<i64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.name, e.department, COUNT(DISTINCT date(al.timestamp, 'localtime')) as present_days
+         FROM Employees e
+         JOIN AttendanceLogs al ON e.id = al.employee_id
+         WHERE strftime('%Y-%m', al.timestamp, 'localtime') = ?1
+         GROUP BY e.id"
+    ).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+
+    let results = stmt.query_map([year_month], |row| {
+        let present: i64 = row.get(3)?;
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "department": row.get::<_, Option<String>>(2)?,
+            "present_days": present,
+            "paid_leaves": 0,
+            "payable_days": present
+        }))
+    }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
+
+    Ok(results)
+}
+
+/// GET RAW LOGS
+#[tauri::command]
+pub async fn get_raw_logs(
+    from_date: String,
+    to_date: String,
+    search: String,
+    branch_id: Option<i64>,
+    gate_id: Option<i64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut query = String::from(
+        "SELECT al.id, e.name, datetime(al.timestamp, 'localtime'), al.punch_method, b.name as branch_name
+         FROM AttendanceLogs al
+         JOIN Employees e ON al.employee_id = e.id
+         LEFT JOIN Branches b ON al.branch_id = b.id
+         WHERE date(al.timestamp, 'localtime') BETWEEN date(?1) AND date(?2)"
+    );
+
+    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![
+        Box::new(from_date),
+        Box::new(to_date),
+    ];
+
+    if !search.is_empty() {
+        query.push_str(" AND (e.name LIKE ? OR e.employee_code LIKE ?)");
+        let s = format!("%{}%", search);
+        params_vec.push(Box::new(s.clone()));
+        params_vec.push(Box::new(s));
+    }
+
+    query.push_str(" ORDER BY al.timestamp DESC LIMIT 1000");
+
+    let mut stmt = conn.prepare(&query).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|s| s.as_ref()).collect();
 
     let logs = stmt.query_map(&param_refs[..], |row| {
         Ok(serde_json::json!({
             "id": row.get::<_, i64>(0)?,
-            "employee_id": row.get::<_, i64>(1)?,
-            "employee_name": row.get::<_, Option<String>>(2)?,
-            "branch_id": row.get::<_, Option<i64>>(3)?,
-            "branch_name": row.get::<_, Option<String>>(4)?,
-            "gate_id": row.get::<_, Option<i64>>(5)?,
-            "gate_name": row.get::<_, Option<String>>(6)?,
-            "device_id": row.get::<_, Option<i64>>(7)?,
-            "timestamp": row.get::<_, String>(8)?,
-            "punch_method": row.get::<_, Option<String>>(9)?,
-            "is_synced": row.get::<_, i32>(10)? == 1
+            "name": row.get::<_, String>(1)?,
+            "timestamp": row.get::<_, String>(2)?,
+            "type": row.get::<_, Option<String>>(3)?,
+            "device": row.get::<_, Option<String>>(4)?
         }))
     }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
 
     Ok(logs)
+}
+
+#[tauri::command]
+pub async fn export_usb_db(_state: tauri::State<'_, AppState>) -> Result<String, AppError> {
+    // In a real app, this would copy the SQLite file to a detected USB drive.
+    // For now, we'll just return a success message.
+    Ok("C:/BioBridge_USB_Backup.db".into())
 }

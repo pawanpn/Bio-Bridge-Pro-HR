@@ -1,15 +1,20 @@
-use crate::AppState;
 use crate::errors::AppError;
+use crate::hardware::{sync_device, test_device};
 use crate::models::DeviceBrand;
-use crate::hardware::{test_device, sync_device};
 use crate::sync_service;
+use crate::AppState;
 use rusqlite::params;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 #[tauri::command]
 pub async fn list_all_devices(state: tauri::State<'_, AppState>) -> Result<Vec<Value>, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut stmt = conn.prepare(
         "SELECT d.id, d.name, d.brand, d.ip_address, d.port, d.comm_key, d.machine_number, d.is_default, d.status,
@@ -19,25 +24,27 @@ pub async fn list_all_devices(state: tauri::State<'_, AppState>) -> Result<Vec<V
          LEFT JOIN Gates g ON d.gate_id = g.id"
     ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
-    let devices: Vec<Value> = stmt.query_map([], |row| {
-        Ok(json!({
-            "id": row.get::<_, i64>(0)?,
-            "name": row.get::<_, String>(1)?,
-            "brand": row.get::<_, String>(2)?,
-            "ip": row.get::<_, String>(3)?,
-            "port": row.get::<_, i32>(4)?,
-            "comm_key": row.get::<_, i32>(5)?,
-            "machine_number": row.get::<_, i32>(6)?,
-            "is_default": row.get::<_, i32>(7)? != 0,
-            "status": row.get::<_, String>(8)?,
-            "branch_name": row.get::<_, Option<String>>(9)?,
-            "gate_name": row.get::<_, Option<String>>(10)?,
-            "branch_id": row.get::<_, Option<i64>>(11)?,
-            "gate_id": row.get::<_, Option<i64>>(12)?,
-        }))
-    }).map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
-    .filter_map(|r| r.ok())
-    .collect();
+    let devices: Vec<Value> = stmt
+        .query_map([], |row| {
+            Ok(json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "brand": row.get::<_, String>(2)?,
+                "ip": row.get::<_, String>(3)?,
+                "port": row.get::<_, i32>(4)?,
+                "comm_key": row.get::<_, i32>(5)?,
+                "machine_number": row.get::<_, i32>(6)?,
+                "is_default": row.get::<_, i32>(7)? != 0,
+                "status": row.get::<_, String>(8)?,
+                "branch_name": row.get::<_, Option<String>>(9)?,
+                "gate_name": row.get::<_, Option<String>>(10)?,
+                "branch_id": row.get::<_, Option<i64>>(11)?,
+                "gate_id": row.get::<_, Option<i64>>(12)?,
+            }))
+        })
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(devices)
 }
@@ -55,17 +62,19 @@ pub async fn test_device_connection(
         "Hikvision" => DeviceBrand::Hikvision,
         _ => DeviceBrand::Unknown,
     };
-    
+
     test_device(&ip, port, comm_key, machine_number, dev_brand).await
 }
 
 #[tauri::command]
-pub async fn add_device(
-    device: Value,
-    state: tauri::State<'_, AppState>,
-) -> Result<(), AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+pub async fn add_device(device: Value, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "INSERT INTO Devices (name, brand, ip_address, port, comm_key, machine_number, branch_id, gate_id, status)
@@ -91,8 +100,13 @@ pub async fn update_device(
     device: Value,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, machine_number=?6, branch_id=?7, gate_id=?8 WHERE id=?9",
@@ -114,20 +128,36 @@ pub async fn update_device(
 
 #[tauri::command]
 pub async fn delete_device(id: i64, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute("DELETE FROM Devices WHERE id = ?1", params![id])?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn set_default_device(id: i64, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+pub async fn set_default_device(
+    id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute("UPDATE Devices SET is_default = 0", [])?;
-    conn.execute("UPDATE Devices SET is_default = 1 WHERE id = ?1", params![id])?;
+    conn.execute(
+        "UPDATE Devices SET is_default = 1 WHERE id = ?1",
+        params![id],
+    )?;
     Ok(())
 }
 
@@ -147,32 +177,52 @@ pub async fn sync_device_logs(
         _ => DeviceBrand::Unknown,
     };
 
-    println!("Backend Preview: Syncing logs from {} ({}) to Branch {}", ip, brand, target_branch_id);
-    
+    println!(
+        "Backend Preview: Syncing logs from {} ({}) to Branch {}",
+        ip, brand, target_branch_id
+    );
+
     let (device_users, logs) = sync_device(&ip, port, 0, device_id, 1, dev_brand, None).await?;
-    
-    println!("Backend Preview: Pulled {} users, {} logs", device_users.len(), logs.len());
+
+    println!(
+        "Backend Preview: Pulled {} users, {} logs",
+        device_users.len(),
+        logs.len()
+    );
     for log in &logs {
         println!("  Log: Employee {} at {}", log.employee_id, log.timestamp);
     }
 
     // Automatically save to DB
     {
-        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard
+            .as_ref()
+            .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
         // 1. HARD CLEANUP: Remove known dummy data to prevent ID collisions
-        let _ = conn.execute("DELETE FROM Employees WHERE name IN ('Ram Sharma', 'Sita Rai', 'Dummy Employee')", []);
-        let _ = conn.execute("DELETE FROM AttendanceLogs WHERE employee_id NOT IN (SELECT id FROM Employees)", []);
+        let _ = conn.execute(
+            "DELETE FROM Employees WHERE name IN ('Ram Sharma', 'Sita Rai', 'Dummy Employee')",
+            [],
+        );
+        let _ = conn.execute(
+            "DELETE FROM AttendanceLogs WHERE employee_id NOT IN (SELECT id FROM Employees)",
+            [],
+        );
 
         // 2. FORCE SYNC EMPLOYEES: Ensure every user from device exists in local DB
         for u in &device_users {
             // Check if exists by biometric_id or employee_code
-            let existing_id: Option<i64> = conn.query_row(
-                "SELECT id FROM Employees WHERE biometric_id = ?1 OR employee_code = ?2",
-                params![u.employee_id, u.employee_id.to_string()],
-                |r| r.get(0)
-            ).ok();
+            let existing_id: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM Employees WHERE biometric_id = ?1 OR employee_code = ?2",
+                    params![u.employee_id, u.employee_id.to_string()],
+                    |r| r.get(0),
+                )
+                .ok();
 
             if let Some(eid) = existing_id {
                 // Update name if it's currently a generic one or empty, and ensure biometric_id is set
@@ -187,14 +237,17 @@ pub async fn sync_device_logs(
                      VALUES (?1, ?2, ?3, ?4, 'active', 'Permanent')",
                     params![&u.name, &u.employee_id.to_string(), u.employee_id, target_branch_id],
                 );
-                
+
                 if let Ok(_) = insert_res {
                     // Queue for Supabase Sync
                     let new_id = conn.last_insert_rowid();
                     let _ = crate::sync_service::_queue_for_sync(
-                        conn, "Employees", "INSERT", &new_id.to_string(), 
+                        conn,
+                        "Employees",
+                        "INSERT",
+                        &new_id.to_string(),
                         &serde_json::json!({"name": &u.name, "employee_code": u.employee_id.to_string(), "biometric_id": u.employee_id}),
-                        "HIGH"
+                        "HIGH",
                     );
                 } else {
                     println!("Warning: Failed to insert new employee {} from device. Perhaps employee_code is conflicting?", u.employee_id);
@@ -204,11 +257,13 @@ pub async fn sync_device_logs(
 
         // 3. CAPTURE LOGS: Link to correct local IDs and queue for cloud
         for log in &logs {
-            let local_id: Option<i64> = conn.query_row(
-                "SELECT id FROM Employees WHERE biometric_id = ?1",
-                params![log.employee_id],
-                |r| r.get(0)
-            ).ok();
+            let local_id: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM Employees WHERE biometric_id = ?1",
+                    params![log.employee_id],
+                    |r| r.get(0),
+                )
+                .ok();
 
             if let Some(eid) = local_id {
                 let res = conn.execute(
@@ -222,14 +277,17 @@ pub async fn sync_device_logs(
                         let log_id = conn.last_insert_rowid();
                         // Queue for Supabase Sync
                         let _ = crate::sync_service::_queue_for_sync(
-                            conn, "AttendanceLogs", "INSERT", &log_id.to_string(),
+                            conn,
+                            "AttendanceLogs",
+                            "INSERT",
+                            &log_id.to_string(),
                             &serde_json::json!({
-                                "employee_id": eid, 
-                                "timestamp": log.timestamp, 
+                                "employee_id": eid,
+                                "timestamp": log.timestamp,
                                 "device_id": log.device_id,
                                 "punch_method": log.punch_method
                             }),
-                            "MEDIUM"
+                            "MEDIUM",
                         );
                     }
                 }
@@ -239,7 +297,9 @@ pub async fn sync_device_logs(
 
     let mut ui_logs = Vec::new();
     for log in &logs {
-        let name = device_users.iter().find(|u| u.employee_id == log.employee_id)
+        let name = device_users
+            .iter()
+            .find(|u| u.employee_id == log.employee_id)
             .map(|u| u.name.clone())
             .unwrap_or_else(|| format!("User {}", log.employee_id));
 
@@ -272,53 +332,80 @@ pub async fn pull_all_logs(
     target_gate_id: i64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    sync_device_logs(ip, port, device_id, brand, target_branch_id, target_gate_id, state).await
+    sync_device_logs(
+        ip,
+        port,
+        device_id,
+        brand,
+        target_branch_id,
+        target_gate_id,
+        state,
+    )
+    .await
 }
 
-
 #[tauri::command]
-pub async fn list_gates(branch_id: Option<i64>, state: tauri::State<'_, AppState>) -> Result<Vec<Value>, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+pub async fn list_gates(
+    branch_id: Option<i64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let (query, params_vec): (String, Vec<Box<dyn rusqlite::ToSql>>) = match branch_id {
         Some(bid) => (
             "SELECT id, name, branch_id FROM Gates WHERE branch_id = ?1".to_string(),
-            vec![Box::new(bid)]
+            vec![Box::new(bid)],
         ),
-        None => (
-            "SELECT id, name, branch_id FROM Gates".to_string(),
-            vec![]
-        )
+        None => ("SELECT id, name, branch_id FROM Gates".to_string(), vec![]),
     };
 
     let mut stmt = conn.prepare(&query)?;
     let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
-    
-    let gates: Vec<Value> = stmt.query_map(&param_refs[..], |row| {
-        Ok(json!({ 
-            "id": row.get::<_, i64>(0)?, 
-            "name": row.get::<_, String>(1)?,
-            "branch_id": row.get::<_, i64>(2)?
-        }))
-    })?.filter_map(|r| r.ok()).collect();
+
+    let gates: Vec<Value> = stmt
+        .query_map(&param_refs[..], |row| {
+            Ok(json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "branch_id": row.get::<_, i64>(2)?
+            }))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(gates)
 }
 
 #[tauri::command]
-pub async fn list_employees_for_select(state: tauri::State<'_, AppState>) -> Result<Vec<Value>, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+pub async fn list_employees_for_select(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let mut stmt = conn.prepare("SELECT id, name, department FROM Employees WHERE status != 'deleted'")?;
-    let employees: Vec<Value> = stmt.query_map([], |row| {
-        Ok(json!({
-            "id": row.get::<_, i64>(0)?,
-            "name": row.get::<_, String>(1)?,
-            "department": row.get::<_, Option<String>>(2).unwrap_or(Some("N/A".to_string()))
-        }))
-    })?.filter_map(|r| r.ok()).collect();
+    let mut stmt =
+        conn.prepare("SELECT id, name, department FROM Employees WHERE status != 'deleted'")?;
+    let employees: Vec<Value> = stmt
+        .query_map([], |row| {
+            Ok(json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "department": row.get::<_, Option<String>>(2).unwrap_or(Some("N/A".to_string()))
+            }))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(employees)
 }
@@ -330,14 +417,20 @@ pub async fn add_manual_attendance(
     punch_method: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "INSERT INTO AttendanceLogs (employee_id, timestamp, punch_method, branch_id, gate_id)
          VALUES (?1, ?2, ?3, 1, 1)",
         params![employee_id, timestamp, punch_method],
-    ).map_err(|e| AppError::DatabaseError(format!("Failed to add manual log: {}", e)))?;
+    )
+    .map_err(|e| AppError::DatabaseError(format!("Failed to add manual log: {}", e)))?;
 
     Ok(())
 }
@@ -347,8 +440,13 @@ pub async fn import_csv_attendance(
     csv_content: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut imported = 0;
     let mut skipped = 0;
@@ -387,49 +485,81 @@ pub async fn import_csv_attendance(
 }
 
 #[tauri::command]
-pub async fn get_system_configs(category: String, state: tauri::State<'_, AppState>) -> Result<Vec<Value>, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+pub async fn get_system_configs(
+    category: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let mut stmt = conn.prepare("SELECT key, value, category FROM SystemConfigs WHERE category = ?1")?;
-    let configs: Vec<Value> = stmt.query_map([category], |row| {
-        Ok(json!({ 
-            "setting_key": row.get::<_, String>(0)?, 
-            "setting_value": row.get::<_, Option<String>>(1)?,
-            "category": row.get::<_, String>(2)?,
-            "setting_type": "string",
-            "description": "",
-            "is_public": true
-        }))
-    })?.filter_map(|r| r.ok()).collect();
+    let mut stmt =
+        conn.prepare("SELECT key, value, category FROM SystemConfigs WHERE category = ?1")?;
+    let configs: Vec<Value> = stmt
+        .query_map([category], |row| {
+            Ok(json!({
+                "setting_key": row.get::<_, String>(0)?,
+                "setting_value": row.get::<_, Option<String>>(1)?,
+                "category": row.get::<_, String>(2)?,
+                "setting_type": "string",
+                "description": "",
+                "is_public": true
+            }))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(configs)
 }
 
 #[tauri::command]
-pub async fn get_all_system_configs(state: tauri::State<'_, AppState>) -> Result<Vec<Value>, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+pub async fn get_all_system_configs(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Value>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut stmt = conn.prepare("SELECT key, value, category FROM SystemConfigs")?;
-    let configs: Vec<Value> = stmt.query_map([], |row| {
-        Ok(json!({ 
-            "setting_key": row.get::<_, String>(0)?, 
-            "setting_value": row.get::<_, Option<String>>(1)?,
-            "category": row.get::<_, String>(2)?,
-            "setting_type": "string",
-            "description": "",
-            "is_public": true
-        }))
-    })?.filter_map(|r| r.ok()).collect();
+    let configs: Vec<Value> = stmt
+        .query_map([], |row| {
+            Ok(json!({
+                "setting_key": row.get::<_, String>(0)?,
+                "setting_value": row.get::<_, Option<String>>(1)?,
+                "category": row.get::<_, String>(2)?,
+                "setting_type": "string",
+                "description": "",
+                "is_public": true
+            }))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(configs)
 }
 
 #[tauri::command]
-pub async fn save_system_config(category: String, key: String, value: String, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+pub async fn save_system_config(
+    category: String,
+    key: String,
+    value: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "INSERT INTO SystemConfigs (category, key, value) VALUES (?1, ?2, ?3)
@@ -444,15 +574,25 @@ pub async fn save_system_config(category: String, key: String, value: String, st
         "setting_value": value,
         "setting_type": "string"
     });
-    let _ = sync_service::_queue_for_sync(conn, "system_settings", "UPDATE", &key, &payload, "MEDIUM");
+    let _ =
+        sync_service::_queue_for_sync(conn, "system_settings", "UPDATE", &key, &payload, "MEDIUM");
 
     Ok(())
 }
 
 #[tauri::command]
-pub async fn delete_system_config(category: String, key: String, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+pub async fn delete_system_config(
+    category: String,
+    key: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
         "DELETE FROM SystemConfigs WHERE category = ?1 AND key = ?2",
@@ -472,17 +612,22 @@ pub async fn scan_network(_base_ip: String) -> Result<(), AppError> {
 pub async fn add_branch(
     name: String,
     location: Option<String>,
-    state: tauri::State<'_, AppState>
+    state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
     // Default org_id = 1 for now
     conn.execute(
         "INSERT INTO Branches (org_id, name, location) VALUES (1, ?1, ?2)",
         params![name, location],
     )?;
-    
+
     Ok(serde_json::json!({"success": true}))
 }
 
@@ -491,24 +636,34 @@ pub async fn update_branch(
     id: i64,
     name: String,
     location: Option<String>,
-    state: tauri::State<'_, AppState>
+    state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
     conn.execute(
         "UPDATE Branches SET name = ?1, location = ?2 WHERE id = ?3",
         params![name, location, id],
     )?;
-    
+
     Ok(serde_json::json!({"success": true}))
 }
 
 #[tauri::command]
 pub async fn delete_branch(id: i64, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
     // Prevent delete if Gates or Employees or Devices exist
     conn.execute("DELETE FROM Branches WHERE id = ?1", params![id])?;
     Ok(())
@@ -518,16 +673,21 @@ pub async fn delete_branch(id: i64, state: tauri::State<'_, AppState>) -> Result
 pub async fn add_gate(
     branch_id: i64,
     name: String,
-    state: tauri::State<'_, AppState>
+    state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
     conn.execute(
         "INSERT INTO Gates (branch_id, name) VALUES (?1, ?2)",
         params![branch_id, name],
     )?;
-    
+
     Ok(serde_json::json!({"success": true}))
 }
 
@@ -536,25 +696,34 @@ pub async fn update_gate(
     id: i64,
     branch_id: i64,
     name: String,
-    state: tauri::State<'_, AppState>
+    state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
     conn.execute(
         "UPDATE Gates SET branch_id = ?1, name = ?2 WHERE id = ?3",
         params![branch_id, name, id],
     )?;
-    
+
     Ok(serde_json::json!({"success": true}))
 }
 
 #[tauri::command]
 pub async fn delete_gate(id: i64, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
-    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
     conn.execute("DELETE FROM Gates WHERE id = ?1", params![id])?;
     Ok(())
 }
-
