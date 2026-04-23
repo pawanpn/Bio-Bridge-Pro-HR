@@ -163,34 +163,38 @@ pub async fn sync_device_logs(
 
         // 2. FORCE SYNC EMPLOYEES: Ensure every user from device exists in local DB
         for u in &device_users {
-            // Check if exists by biometric_id
+            // Check if exists by biometric_id or employee_code
             let existing_id: Option<i64> = conn.query_row(
-                "SELECT id FROM Employees WHERE biometric_id = ?1",
-                params![u.employee_id],
+                "SELECT id FROM Employees WHERE biometric_id = ?1 OR employee_code = ?2",
+                params![u.employee_id, u.employee_id.to_string()],
                 |r| r.get(0)
             ).ok();
 
             if let Some(eid) = existing_id {
-                // Update name if it's currently a generic one or empty
+                // Update name if it's currently a generic one or empty, and ensure biometric_id is set
                 let _ = conn.execute(
-                    "UPDATE Employees SET name = ?1 WHERE id = ?2 AND (name LIKE 'User %' OR name = '')",
-                    params![&u.name, eid]
+                    "UPDATE Employees SET name = ?1, biometric_id = ?3 WHERE id = ?2 AND (name LIKE 'User %' OR name = '')",
+                    params![&u.name, eid, u.employee_id]
                 );
             } else {
-                // Create new employee and assign to branch
-                let _ = conn.execute(
+                // Create new employee and assign to branch. Make sure employee_code is robustly inserted.
+                let insert_res = conn.execute(
                     "INSERT INTO Employees (name, employee_code, biometric_id, branch_id, status, employment_status) 
                      VALUES (?1, ?2, ?3, ?4, 'active', 'Permanent')",
                     params![&u.name, &u.employee_id.to_string(), u.employee_id, target_branch_id],
                 );
                 
-                // Queue for Supabase Sync
-                let new_id = conn.last_insert_rowid();
-                let _ = crate::sync_service::_queue_for_sync(
-                    conn, "Employees", "INSERT", &new_id.to_string(), 
-                    &serde_json::json!({"name": &u.name, "employee_code": u.employee_id.to_string(), "biometric_id": u.employee_id}),
-                    "HIGH"
-                );
+                if let Ok(_) = insert_res {
+                    // Queue for Supabase Sync
+                    let new_id = conn.last_insert_rowid();
+                    let _ = crate::sync_service::_queue_for_sync(
+                        conn, "Employees", "INSERT", &new_id.to_string(), 
+                        &serde_json::json!({"name": &u.name, "employee_code": u.employee_id.to_string(), "biometric_id": u.employee_id}),
+                        "HIGH"
+                    );
+                } else {
+                    println!("Warning: Failed to insert new employee {} from device. Perhaps employee_code is conflicting?", u.employee_id);
+                }
             }
         }
 

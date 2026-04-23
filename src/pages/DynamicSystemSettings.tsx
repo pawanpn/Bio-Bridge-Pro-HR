@@ -124,7 +124,11 @@ export const DynamicSystemSettings: React.FC = () => {
     }
   };
 
-  const updateSetting = async (id: string | undefined, setting: SystemSetting) => {
+  const updateSettingLocal = (id: string | undefined, value: string) => {
+    setSettings(prev => prev.map(s => s.id === id ? { ...s, setting_value: value } : s));
+  };
+
+  const saveSettingToBackend = async (setting: SystemSetting) => {
     try {
       setSaving(true);
       setSuccessMessage('');
@@ -136,7 +140,7 @@ export const DynamicSystemSettings: React.FC = () => {
           value: setting.setting_value
       });
 
-      setSuccessMessage('Setting saved successfully');
+      setSuccessMessage('Setting saved: ' + setting.setting_key);
       setShowAddSetting(false);
       setNewSetting({
           setting_key: '',
@@ -182,12 +186,9 @@ export const DynamicSystemSettings: React.FC = () => {
       case 'boolean':
         return (
           <select
-            className="w-full px-3 py-2 border rounded-md"
+            className="w-full px-3 py-2 border rounded-md outline-none focus:ring-1 focus:ring-primary"
             value={setting.setting_value}
-            onChange={(e) => {
-              const updated = { ...setting, setting_value: e.target.value };
-              updateSetting(setting.id, updated);
-            }}
+            onChange={(e) => updateSettingLocal(setting.id, e.target.value)}
           >
             <option value="true">Enabled</option>
             <option value="false">Disabled</option>
@@ -199,23 +200,17 @@ export const DynamicSystemSettings: React.FC = () => {
           <Input
             type="number"
             value={setting.setting_value}
-            onChange={(e) => {
-              const updated = { ...setting, setting_value: e.target.value };
-              updateSetting(setting.id, updated);
-            }}
+            onChange={(e) => updateSettingLocal(setting.id, e.target.value)}
           />
         );
       
       case 'json':
         return (
           <textarea
-            className="w-full px-3 py-2 border rounded-md font-mono text-sm"
+            className="w-full px-3 py-2 border rounded-md font-mono text-sm outline-none focus:ring-1 focus:ring-primary"
             rows={4}
             value={setting.setting_value}
-            onChange={(e) => {
-              const updated = { ...setting, setting_value: e.target.value };
-              updateSetting(setting.id, updated);
-            }}
+            onChange={(e) => updateSettingLocal(setting.id, e.target.value)}
           />
         );
       
@@ -224,10 +219,7 @@ export const DynamicSystemSettings: React.FC = () => {
           <Input
             type="text"
             value={setting.setting_value}
-            onChange={(e) => {
-              const updated = { ...setting, setting_value: e.target.value };
-              updateSetting(setting.id, updated);
-            }}
+            onChange={(e) => updateSettingLocal(setting.id, e.target.value)}
           />
         );
     }
@@ -347,14 +339,25 @@ export const DynamicSystemSettings: React.FC = () => {
                                 </p>
                               )}
                             </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => deleteSetting(setting)}
-                            >
-                              <Trash2 size={16} className="text-red-500" />
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={saving}
+                                onClick={() => saveSettingToBackend(setting)}
+                              >
+                                Save Changes
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 hover:bg-red-50"
+                                onClick={() => deleteSetting(setting)}
+                                title="Delete setting"
+                              >
+                                <Trash2 size={16} className="text-red-500" />
+                              </Button>
+                            </div>
                           </div>
                           {renderSettingInput(setting)}
                         </div>

@@ -219,6 +219,8 @@ export const BranchGateDeviceManagement: React.FC = () => {
         port: device.port,
         deviceId: device.id,
         brand: device.brand,
+        targetBranchId: Number(device.branch_id) || 1,
+        targetGateId: Number(device.gate_id) || 1,
       });
       setSyncMessages(prev => ({ ...prev, [device.id]: `✅ ${result}` }));
       setTimeout(() => {

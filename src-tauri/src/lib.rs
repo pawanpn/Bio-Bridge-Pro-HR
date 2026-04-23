@@ -79,6 +79,12 @@ pub fn run() {
             commands::save_system_config,
             commands::delete_system_config,
             commands::scan_network,
+            commands::add_branch,
+            commands::update_branch,
+            commands::delete_branch,
+            commands::add_gate,
+            commands::update_gate,
+            commands::delete_gate,
             // From crud.rs (ERP Modules)
             crud::create_item,
             crud::list_items,
