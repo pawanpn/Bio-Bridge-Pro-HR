@@ -2634,6 +2634,7 @@ pub async fn get_daily_reports(
     to_date: String,
     dept: String,
     search: String,
+    employee_id: Option<i64>,
     branch_id: Option<i64>,
     gate_id: Option<i64>,
     state: tauri::State<'_, AppState>,
@@ -2660,6 +2661,11 @@ pub async fn get_daily_reports(
         Box::new(from_date),
         Box::new(to_date),
     ];
+
+    if let Some(eid) = employee_id {
+        query.push_str(" AND e.id = ?");
+        params_vec.push(Box::new(eid));
+    }
 
     if dept != "All" {
         query.push_str(" AND e.department = ?");
@@ -2803,6 +2809,7 @@ pub async fn get_raw_logs(
     from_date: String,
     to_date: String,
     search: String,
+    employee_id: Option<i64>,
     branch_id: Option<i64>,
     gate_id: Option<i64>,
     state: tauri::State<'_, AppState>,
@@ -2822,6 +2829,11 @@ pub async fn get_raw_logs(
         Box::new(from_date),
         Box::new(to_date),
     ];
+
+    if let Some(eid) = employee_id {
+        query.push_str(" AND e.id = ?");
+        params_vec.push(Box::new(eid));
+    }
 
     if !search.is_empty() {
         query.push_str(" AND (e.name LIKE ? OR e.employee_code LIKE ?)");
