@@ -246,6 +246,30 @@ export const EmployeeManagement: React.FC = () => {
   });
 
   // Form handlers
+  const handleNextStep = () => {
+    if (formStep < 8) setFormStep(s => s + 1);
+  };
+
+  const handlePrevStep = () => {
+    if (formStep > 1) setFormStep(s => s - 1);
+  };
+
+  const handleNextEmployee = () => {
+    if (!formDialog.editing) return;
+    const currentIndex = filteredEmployees.findIndex(e => e.id === formDialog.editing.id);
+    if (currentIndex < filteredEmployees.length - 1) {
+      handleEditEmployee(filteredEmployees[currentIndex + 1]);
+    }
+  };
+
+  const handlePrevEmployee = () => {
+    if (!formDialog.editing) return;
+    const currentIndex = filteredEmployees.findIndex(e => e.id === formDialog.editing.id);
+    if (currentIndex > 0) {
+      handleEditEmployee(filteredEmployees[currentIndex - 1]);
+    }
+  };
+
   const handleAddEmployee = () => {
     setFormData(emptyForm);
     setFormStep(1);
@@ -611,13 +635,41 @@ export const EmployeeManagement: React.FC = () => {
                   <><UserPlus className="w-5 h-5 text-primary" /> Add New Employee</>
                 )}
               </DialogTitle>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setFormDialog({ open: false, editing: null })}>
-                  Discard
-                </Button>
-                <Button onClick={handleSaveEmployee} className="bg-primary text-white">
-                  Save
-                </Button>
+              <div className="flex items-center gap-4 pr-10">
+                {formDialog.editing && (
+                  <div className="flex items-center gap-1 mr-4 border-r pr-4 bg-muted/20 rounded-l-lg">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={handlePrevEmployee}
+                      disabled={filteredEmployees.findIndex(e => e.id === formDialog.editing.id) <= 0}
+                      className="h-8 px-2"
+                    >
+                      <span className="text-xs font-bold text-muted-foreground hover:text-primary transition-colors">← Prev Employee</span>
+                    </Button>
+                    <div className="text-[10px] text-muted-foreground font-mono px-2 bg-background/50 py-0.5 rounded border border-slate-100">
+                       {filteredEmployees.findIndex(e => e.id === formDialog.editing.id) + 1} / {filteredEmployees.length}
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={handleNextEmployee}
+                      disabled={filteredEmployees.findIndex(e => e.id === formDialog.editing.id) >= filteredEmployees.length - 1}
+                      className="h-8 px-2"
+                    >
+                      <span className="text-xs font-bold text-muted-foreground hover:text-primary transition-colors">Next Employee →</span>
+                    </Button>
+                  </div>
+                )}
+                
+                <div className="flex gap-2">
+                  <Button variant="ghost" onClick={() => setFormDialog({ open: false, editing: null })}>
+                    Discard
+                  </Button>
+                  <Button onClick={handleSaveEmployee} className="bg-primary hover:bg-primary/95 text-white min-w-[80px] shadow-sm">
+                    Save
+                  </Button>
+                </div>
               </div>
             </div>
           </DialogHeader>
@@ -1181,6 +1233,43 @@ export const EmployeeManagement: React.FC = () => {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Modal Footer: Form Step Navigation */}
+          <div className="p-4 border-t bg-muted/10 flex items-center justify-between shrink-0">
+             <div className="flex items-center gap-3 pl-4">
+                <div className="h-2 w-32 bg-slate-100 rounded-full overflow-hidden">
+                   <div 
+                      className="h-full bg-blue-600 transition-all duration-300" 
+                      style={{ width: `${(formStep / 8) * 100}%` }}
+                   />
+                </div>
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                   Progress: {Math.round((formStep / 8) * 100)}%
+                </span>
+             </div>
+             
+             <div className="flex items-center gap-3 pr-4">
+                <div className="text-[11px] font-bold text-muted-foreground mr-4 h-9 flex items-center px-3 bg-white border border-slate-100 rounded-lg shadow-sm">
+                   Section {formStep} of 8
+                </div>
+                <Button 
+                  variant="outline" 
+                  onClick={handlePrevStep}
+                  disabled={formStep === 1}
+                  className="h-9 px-5 rounded-lg border-slate-200 text-xs font-bold"
+                >
+                  ← Back
+                </Button>
+                <Button 
+                  variant="default" 
+                  onClick={handleNextStep}
+                  disabled={formStep === 8}
+                  className="h-9 px-5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-md active:scale-95"
+                >
+                  Continue →
+                </Button>
+             </div>
           </div>
         </DialogContent>
       </Dialog>
