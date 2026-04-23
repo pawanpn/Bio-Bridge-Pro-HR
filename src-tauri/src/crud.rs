@@ -2394,7 +2394,7 @@ fn log_audit(
     description: &str,
 ) -> Result<(), AppError> {
     conn.execute(
-        "INSERT INTO AuditLogs (table_name, record_id, action, description, created_at)
+        "INSERT INTO AuditLogs (table_name, record_id, operation, description, created_at)
          VALUES (?1, ?2, ?3, ?4, datetime('now'))",
         params![table_name, record_id, action, description,],
     )

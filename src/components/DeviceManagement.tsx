@@ -114,9 +114,15 @@ export const DeviceManagement: React.FC = () => {
         port: device.port,
         deviceId: device.id,
         brand: device.brand,
+        targetBranchId: Number(device.branch_id) || 1,
+        targetGateId: Number(device.gate_id) || 1,
       });
       const logs = result as any[];
       setSyncMessages(prev => ({ ...prev, [device.id]: `✅ Successfully synced ${logs.length} logs!` }));
+      
+      // Notify other components (like EmployeeManagement) that new data is available
+      window.dispatchEvent(new CustomEvent('data-synced', { detail: { table: 'employees' } }));
+
       setTimeout(() => {
         setSyncMessages(prev => {
           const updated = { ...prev };
