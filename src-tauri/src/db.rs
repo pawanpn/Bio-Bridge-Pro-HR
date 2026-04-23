@@ -147,12 +147,27 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
 
     // Safe Migration Logic: Add columns one by one if they don't exist
     let migrations = vec![
-        ("first_name", "TEXT"), ("last_name", "TEXT"), ("employee_code", "TEXT"),
-        ("department_id", "INTEGER"), ("designation_id", "INTEGER"), ("biometric_id", "INTEGER"),
-        ("pan_number", "TEXT"), ("citizenship_number", "TEXT"), ("date_of_joining", "TEXT"),
+        ("first_name", "TEXT"), ("middle_name", "TEXT"), ("last_name", "TEXT"), 
+        ("employee_code", "TEXT"), ("department_id", "INTEGER"), ("designation_id", "INTEGER"), 
+        ("biometric_id", "INTEGER"), ("pan_number", "TEXT"), ("citizenship_number", "TEXT"), 
+        ("date_of_joining", "TEXT"), ("date_of_birth", "TEXT"), ("gender", "TEXT"), 
+        ("marital_status", "TEXT"), ("personal_email", "TEXT"), ("personal_phone", "TEXT"),
+        ("current_address", "TEXT"), ("permanent_address", "TEXT"),
         ("employment_status", "TEXT DEFAULT 'Active'"), ("employment_type", "TEXT"),
-        ("whatsapp_alert", "INTEGER DEFAULT 0"), ("mobile_punch", "INTEGER DEFAULT 1"),
-        ("full_name", "TEXT"), ("department", "TEXT") // Adding 'department' back to fix compatibility errors
+        ("whatsapp_alert", "INTEGER DEFAULT 0"), ("whatsapp_exception", "INTEGER DEFAULT 0"), 
+        ("whatsapp_punch", "INTEGER DEFAULT 0"), ("supervisor_mobile", "TEXT"),
+        ("mobile_punch", "INTEGER DEFAULT 1"), ("full_name", "TEXT"), ("department", "TEXT"),
+        ("reporting_manager_id", "INTEGER"), ("bank_name", "TEXT"), ("account_number", "TEXT"),
+        ("emergency_contact_name", "TEXT"), ("emergency_contact_phone", "TEXT"), ("emergency_contact_relation", "TEXT"),
+        ("area_id", "TEXT"), ("location_id", "TEXT"), ("photo", "TEXT"),
+        ("enable_self_service", "INTEGER DEFAULT 1"), ("enable_mobile_access", "INTEGER DEFAULT 1"),
+        ("local_name", "TEXT"), ("national_id", "TEXT"), ("contact_tel", "TEXT"), ("office_tel", "TEXT"),
+        ("motorcycle_license", "TEXT"), ("automobile_license", "TEXT"), ("religion", "TEXT"), 
+        ("city", "TEXT"), ("postcode", "TEXT"), ("passport_no", "TEXT"), ("nationality", "TEXT"),
+        ("verification_mode", "TEXT"), ("device_privilege", "TEXT"), ("device_password", "TEXT"),
+        ("card_no", "TEXT"), ("bio_photo", "TEXT"), ("enable_attendance", "INTEGER DEFAULT 1"),
+        ("enable_holiday", "INTEGER DEFAULT 1"), ("outdoor_management", "INTEGER DEFAULT 0"),
+        ("workflow_role", "TEXT"), ("app_role", "TEXT")
     ];
 
     for (col, col_type) in migrations {

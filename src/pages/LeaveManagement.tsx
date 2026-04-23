@@ -92,6 +92,9 @@ export const LeaveManagement: React.FC = () => {
 
   useEffect(() => {
     fetchData();
+    const handleDataSynced = () => fetchData();
+    window.addEventListener('data-synced', handleDataSynced);
+    return () => window.removeEventListener('data-synced', handleDataSynced);
   }, [fetchData]);
 
   const handleAddLeave = async () => {

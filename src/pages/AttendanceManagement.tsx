@@ -130,6 +130,9 @@ export const AttendanceManagement: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    const handleDataSynced = () => loadData();
+    window.addEventListener('data-synced', handleDataSynced);
+    return () => window.removeEventListener('data-synced', handleDataSynced);
   }, [loadData]);
 
   // Load daily logs when date or branch changes
@@ -174,8 +177,8 @@ export const AttendanceManagement: React.FC = () => {
         port: Number(device.port),
         deviceId: Number(device.id),
         brand: device.brand,
-        targetBranchId: parseInt(syncBranch),
-        targetGateId: parseInt(syncGate)
+        targetBranchId: device.branch_id || parseInt(syncBranch),
+        targetGateId: device.gate_id || parseInt(syncGate)
       });
       
       if (logs && logs.length > 0) {
@@ -407,10 +410,17 @@ export const AttendanceManagement: React.FC = () => {
               else alert('❌ No devices configured. Please add a device in Branch/Gate/Device Management.');
             }}
             disabled={syncing || devices.length === 0}
-            className="w-full"
+            className="w-full relative"
           >
             <Fingerprint className="w-4 h-4 mr-2" />
-            {syncing ? 'Syncing...' : 'Sync from Device'}
+            <div className="flex flex-col items-start leading-tight">
+              <span className="text-xs font-bold uppercase overflow-hidden whitespace-nowrap text-ellipsis max-w-[150px]">
+                {syncing ? 'Syncing...' : (devices.find(d => d.is_default)?.name || 'Sync from Device')}
+              </span>
+              {!syncing && devices.some(d => d.is_default) && (
+                <span className="text-[10px] opacity-70">Default Device</span>
+              )}
+            </div>
           </Button>
         </div>
       </div>

@@ -75,10 +75,10 @@ pub async fn add_device(
             device["brand"].as_str().unwrap_or("ZKTeco"),
             device["ip"].as_str().unwrap_or(""),
             device["port"].as_i64().unwrap_or(4370) as i32,
-            device["commKey"].as_i64().unwrap_or(0) as i32,
-            device["machineNumber"].as_i64().unwrap_or(1) as i32,
-            device["branchId"].as_i64(),
-            device["gateId"].as_i64(),
+            device["comm_key"].as_i64().unwrap_or(0) as i32,
+            device["machine_number"].as_i64().unwrap_or(1) as i32,
+            device["branch_id"].as_i64(),
+            device["gate_id"].as_i64(),
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to add device: {}", e)))?;
 
@@ -86,23 +86,27 @@ pub async fn add_device(
 }
 
 #[tauri::command]
-pub async fn save_device_config(
+pub async fn update_device(
     id: i64,
-    name: String,
-    brand: String,
-    ip: String,
-    port: i32,
-    comm_key: i32,
-    branch_id: i64,
-    gate_id: i64,
+    device: Value,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), AppError> {
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, branch_id=?6, gate_id=?7 WHERE id=?8",
-        params![name, brand, ip, port, comm_key, branch_id, gate_id, id],
+        "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, machine_number=?6, branch_id=?7, gate_id=?8 WHERE id=?9",
+        params![
+            device["name"].as_str().unwrap_or(""),
+            device["brand"].as_str().unwrap_or("ZKTeco"),
+            device["ip"].as_str().unwrap_or(""),
+            device["port"].as_i64().unwrap_or(4370) as i32,
+            device["comm_key"].as_i64().unwrap_or(0) as i32,
+            device["machine_number"].as_i64().unwrap_or(1) as i32,
+            device["branch_id"].as_i64(),
+            device["gate_id"].as_i64(),
+            id
+        ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to update device: {}", e)))?;
 
     Ok(())
@@ -273,13 +277,30 @@ pub async fn pull_all_logs(
 
 
 #[tauri::command]
-pub async fn list_gates(branch_id: i64, state: tauri::State<'_, AppState>) -> Result<Vec<Value>, AppError> {
+pub async fn list_gates(branch_id: Option<i64>, state: tauri::State<'_, AppState>) -> Result<Vec<Value>, AppError> {
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let mut stmt = conn.prepare("SELECT id, name FROM Gates WHERE branch_id = ?1")?;
-    let gates: Vec<Value> = stmt.query_map(params![branch_id], |row| {
-        Ok(json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)? }))
+    let (query, params_vec): (String, Vec<Box<dyn rusqlite::ToSql>>) = match branch_id {
+        Some(bid) => (
+            "SELECT id, name, branch_id FROM Gates WHERE branch_id = ?1".to_string(),
+            vec![Box::new(bid)]
+        ),
+        None => (
+            "SELECT id, name, branch_id FROM Gates".to_string(),
+            vec![]
+        )
+    };
+
+    let mut stmt = conn.prepare(&query)?;
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+    
+    let gates: Vec<Value> = stmt.query_map(&param_refs[..], |row| {
+        Ok(json!({ 
+            "id": row.get::<_, i64>(0)?, 
+            "name": row.get::<_, String>(1)?,
+            "branch_id": row.get::<_, i64>(2)?
+        }))
     })?.filter_map(|r| r.ok()).collect();
 
     Ok(gates)

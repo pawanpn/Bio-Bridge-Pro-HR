@@ -347,6 +347,8 @@ export const Dashboard: React.FC = () => {
         port: dev.port,
         deviceId: dev.id,
         brand: dev.brand,
+        targetBranchId: 1,
+        targetGateId: 1,
       });
       setSyncProgress(null);
       invoke<Stats>('get_dashboard_stats').then(s => { 

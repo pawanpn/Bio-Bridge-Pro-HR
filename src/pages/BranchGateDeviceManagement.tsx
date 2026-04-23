@@ -113,21 +113,19 @@ export const BranchGateDeviceManagement: React.FC = () => {
       );
       setBranches(enhancedBranches);
 
-      // Load gates for selected branch
-      if (selectedBranchId) {
-        const gateData = await invoke<any[]>('list_gates', { branchId: selectedBranchId });
-        const enhancedGates = await Promise.all(
-          gateData.map(async (g: any) => {
-            const allDevices = await invoke<any[]>('list_all_devices');
-            const gateDevices = allDevices.filter((d: any) => d.gate_id === g.id);
-            return {
-              ...g,
-              device_count: gateDevices.length,
-            };
-          })
-        );
-        setGates(enhancedGates);
-      }
+      // Load ALL gates for dropdowns and enhanced views
+      const gateData = await invoke<any[]>('list_gates', { branchId: null });
+      const allDevicesForGates = await invoke<any[]>('list_all_devices');
+      const enhancedGates = await Promise.all(
+        gateData.map(async (g: any) => {
+          const gateDevices = allDevicesForGates.filter((d: any) => d.gate_id === g.id);
+          return {
+            ...g,
+            device_count: gateDevices.length,
+          };
+        })
+      );
+      setGates(enhancedGates);
 
       // Load all devices
       const deviceData = await invoke<any[]>('list_all_devices');
@@ -223,6 +221,10 @@ export const BranchGateDeviceManagement: React.FC = () => {
         targetGateId: Number(device.gate_id) || 1,
       });
       setSyncMessages(prev => ({ ...prev, [device.id]: `✅ ${result}` }));
+      
+      // Notify other components (like EmployeeManagement) that new data is available
+      window.dispatchEvent(new CustomEvent('data-synced', { detail: { table: 'employees' } }));
+      
       setTimeout(() => {
         setSyncMessages(prev => {
           const updated = { ...prev };

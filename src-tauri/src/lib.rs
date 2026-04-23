@@ -65,7 +65,7 @@ pub fn run() {
             commands::list_all_devices,
             commands::test_device_connection,
             commands::add_device,
-            commands::save_device_config,
+            commands::update_device,
             commands::delete_device,
             commands::set_default_device,
             commands::sync_device_logs,
