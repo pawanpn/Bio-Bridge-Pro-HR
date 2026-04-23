@@ -1119,7 +1119,7 @@ export const EmployeeManagement: React.FC = () => {
                       <Input value={formData.card_no} onChange={(e) => setFormData({ ...formData, card_no: e.target.value })} placeholder="RFID Card ID" />
                     </div>
                     <div className="space-y-2">
-                       <Label className="text-xs font-bold uppercase text-muted-foreground">Device User ID (Hardware)</Label>
+                       <Label className="text-xs font-bold uppercase text-muted-foreground">Attendance Device ID</Label>
                        <Input 
                          type="number" 
                          value={formData.biometric_id} 
