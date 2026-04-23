@@ -145,7 +145,22 @@ pub async fn sync_device_logs(
     
     let (device_users, logs) = sync_device(&ip, port, 0, device_id, 1, dev_brand, None).await?;
     
-    println!("Backend Preview: Pulled {} users, {} logs", device_users.len(), logs.len());
+    // Fetch branch/gate info for this device
+    let (target_branch_id, target_gate_id) = {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+        conn.query_row(
+            "SELECT branch_id, gate_id FROM Devices WHERE id = ?1",
+            params![device_id],
+            |r| Ok((
+                r.get::<_, Option<i64>>(0).unwrap_or(Some(1)).unwrap_or(1),
+                r.get::<_, Option<i64>>(1).unwrap_or(Some(1)).unwrap_or(1)
+            ))
+        ).unwrap_or((1, 1))
+    };
+
+    println!("Backend Preview: Pulled {} users, {} logs (Branch: {}, Gate: {})", 
+             device_users.len(), logs.len(), target_branch_id, target_gate_id);
     for log in &logs {
         println!("  Log: Employee {} at {}", log.employee_id, log.timestamp);
     }
@@ -155,31 +170,35 @@ pub async fn sync_device_logs(
         let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
         let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-        // First, explicitly auto-register fetched users from device into Employees table
         for u in &device_users {
-            let _ = conn.execute(
+            if let Err(e) = conn.execute(
                 "INSERT OR IGNORE INTO Employees (
                     name, first_name, employee_code, biometric_id, 
                     department_id, designation_id, branch_id, status, employment_status
                  ) VALUES (?1, ?1, ?2, ?3, NULL, NULL, NULL, 'active', 'Permanent')",
-                params![u.name, u.employee_id.to_string(), u.employee_id],
-            );
+                params![&u.name, &u.employee_id.to_string(), u.employee_id],
+            ) {
+                eprintln!("Failed to auto-register device user {}: {}", u.employee_id, e);
+            }
         }
 
         for log in &logs {
             // Map biometric_id/deviceUserId to local Employee ID
+            // Match target biometric_id, or employee_code, or check if the row exists by name/ID
             let local_id: Option<i64> = conn.query_row(
-                "SELECT id FROM Employees WHERE biometric_id = ?1 OR employee_code = ?2 OR id = ?1",
+                "SELECT id FROM Employees WHERE biometric_id = ?1 OR employee_code = ?2",
                 params![log.employee_id, log.employee_id.to_string()],
                 |r| r.get(0)
             ).ok();
 
             if let Some(eid) = local_id {
-                let _ = conn.execute(
+                if let Err(e) = conn.execute(
                     "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, device_id, branch_id, gate_id, punch_method)
-                     VALUES (?1, ?2, ?3, 1, 1, ?4)",
-                    params![eid, log.timestamp, log.device_id, log.punch_method],
-                );
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![eid, log.timestamp, log.device_id, target_branch_id, target_gate_id, log.punch_method],
+                ) {
+                    eprintln!("Failed to insert log for employee {}: {}", eid, e);
+                }
             } else {
                 println!("Warning: No matching employee found for biometric ID {}", log.employee_id);
             }

@@ -745,24 +745,21 @@ pub async fn list_employees(
 
     let employees: Vec<serde_json::Value> = stmt
         .query_map(&param_refs[..], |row| {
+            let mut first = row.get::<_, Option<String>>(2)?.unwrap_or_default();
+            if first.is_empty() {
+                first = row.get::<_, Option<String>>(12)?.unwrap_or_default();
+            }
+            let middle = row.get::<_, Option<String>>(3)?.unwrap_or_default();
+            let last = row.get::<_, Option<String>>(4)?.unwrap_or_default();
+            let full_name = format!("{} {} {}", first, middle, last).trim().replace("  ", " ").to_string();
+
             Ok(serde_json::json!({
                 "id": row.get::<_, i64>(0)?,
                 "employee_code": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| format!("EMP-{:04}", row.get::<_, i64>(0).unwrap_or(0))),
-                "first_name": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                "middle_name": row.get::<_, Option<String>>(3)?,
-                "last_name": row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                "full_name": {
-                    let mut first = row.get::<_, Option<String>>(2)?.unwrap_or_default();
-                    if first.is_empty() {
-                        first = row.get::<_, Option<String>>(12)?.unwrap_or_default();
-                    }
-                    format!(
-                        "{} {} {}",
-                        first,
-                        row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                        row.get::<_, Option<String>>(4)?.unwrap_or_default()
-                    ).trim().replace("  ", " ").to_string()
-                },
+                "first_name": first.clone(),
+                "middle_name": middle,
+                "last_name": last,
+                "full_name": full_name,
                 "name": row.get::<_, Option<String>>(12)?.unwrap_or_default(),
                 "gender": row.get::<_, Option<String>>(5)?,
                 "date_of_joining": row.get::<_, Option<String>>(6)?,
@@ -1363,7 +1360,7 @@ pub async fn get_attendance_logs(
 
     let mut query = String::from(
         "SELECT al.id, al.employee_id, e.name,
-                al.timestamp, al.punch_type, al.punch_method, al.is_synced
+                al.timestamp, al.log_type, al.punch_method, al.is_synced
         FROM AttendanceLogs al
         LEFT JOIN Employees e ON al.employee_id = e.id
         WHERE 1=1",
@@ -1392,7 +1389,7 @@ pub async fn get_attendance_logs(
                 "employee_id": row.get::<_, i64>(1)?,
                 "employee_name": row.get::<_, Option<String>>(2)?.unwrap_or("Unknown Employee".to_string()),
                 "timestamp": row.get::<_, String>(3)?,
-                "punch_type": row.get::<_, Option<String>>(4)?,
+                "log_type": row.get::<_, Option<String>>(4)?,
                 "punch_method": row.get::<_, Option<String>>(5)?,
                 "is_synced": row.get::<_, bool>(6).unwrap_or(false),
             }))
@@ -2614,7 +2611,7 @@ pub async fn get_daily_reports(
     let mut query = String::from(
         "SELECT al.id, al.employee_id, e.name as employee_name,
                 b.id as branch_id, b.name as branch_name, g.id as gate_id, g.name as gate_name,
-                al.device_id, al.timestamp, al.punch_method, al.sync_status
+                al.device_id, al.timestamp, al.punch_method, al.is_synced
          FROM AttendanceLogs al
          LEFT JOIN Employees e ON al.employee_id = e.id
          LEFT JOIN Branches b ON al.branch_id = b.id
@@ -2647,7 +2644,7 @@ pub async fn get_daily_reports(
             "device_id": row.get::<_, Option<i64>>(7)?,
             "timestamp": row.get::<_, String>(8)?,
             "punch_method": row.get::<_, Option<String>>(9)?,
-            "is_synced": row.get::<_, Option<String>>(10)? == Some("SYNCED".to_string())
+            "is_synced": row.get::<_, i32>(10)? == 1
         }))
     }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
 
