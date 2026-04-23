@@ -319,6 +319,90 @@ impl DeviceDriver for ZKTecoDriver {
         let _ = child.kill().await;
         Ok(())
     }
+
+    async fn push_user_info(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32, user_id: i32, name: &str, role: i32, card_no: &str) -> Result<(), AppError> {
+        // Step 1: Verify Node.js
+        verify_node_available()?;
+
+        // Step 2: Get script path
+        let script_path = get_script_path();
+        if !script_path.exists() {
+            return Err(AppError::ConnectionError(format!(
+                "zk_fetch.cjs not found"
+            )));
+        }
+
+        // Step 3: Execute setUser command
+        let output = tokio::process::Command::new("node")
+            .arg(&script_path)
+            .arg("setUser")
+            .arg(ip)
+            .arg(port.to_string())
+            .arg("10000") // 10s timeout
+            .arg(user_id.to_string())
+            .arg(name)
+            .arg(role.to_string())
+            .arg(card_no)
+            .output()
+            .await
+            .map_err(|e| AppError::ConnectionError(format!("Failed to execute: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AppError::ConnectionError(format!(
+                "Failed to set user on device:\n{}", stderr
+            )));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parsed = extract_json_from_stdout(&stdout);
+        
+        if parsed.get("status").and_then(|s| s.as_str()) == Some("success") {
+            Ok(())
+        } else {
+            let msg = parsed.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown script error");
+            Err(AppError::ConnectionError(format!("Script reported error: {}", msg)))
+        }
+    }
+
+    async fn pull_user_biometric(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32, user_id: i32) -> Result<serde_json::Value, AppError> {
+        // Step 1: Verify Node.js
+        verify_node_available()?;
+
+        // Step 2: Get script path
+        let script_path = get_script_path();
+        if !script_path.exists() {
+            return Err(AppError::ConnectionError(format!("zk_fetch.cjs not found")));
+        }
+
+        // Step 3: Execute getFingerprints command
+        let output = tokio::process::Command::new("node")
+            .arg(&script_path)
+            .arg("getFingerprints")
+            .arg(ip)
+            .arg(port.to_string())
+            .arg("20000") // 20s timeout for large data
+            .arg(user_id.to_string())
+            .output()
+            .await
+            .map_err(|e| AppError::ConnectionError(format!("Failed to execute: {}", e)))?;
+
+        // Step 4: Parse response
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AppError::ConnectionError(format!("Failed to pull biometric:\n{}", stderr)));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parsed = extract_json_from_stdout(&stdout);
+        
+        if parsed.get("status").and_then(|s| s.as_str()) == Some("success") {
+            Ok(parsed["data"].clone())
+        } else {
+            let msg = parsed.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown script error");
+            Err(AppError::ConnectionError(format!("Script reported error: {}", msg)))
+        }
+    }
 }
 
 #[cfg(test)]

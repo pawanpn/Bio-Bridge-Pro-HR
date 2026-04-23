@@ -22,6 +22,8 @@ pub trait DeviceDriver: Send + Sync {
     async fn get_all_user_info(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32) -> Result<Vec<crate::models::UserInfo>, AppError>;
     async fn test_connectivity(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32) -> Result<(), AppError>;
     async fn listen_realtime(&self, ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError>;
+    async fn push_user_info(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32, user_id: i32, name: &str, role: i32, card_no: &str) -> Result<(), AppError>;
+    async fn pull_user_biometric(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32, user_id: i32) -> Result<serde_json::Value, AppError>;
     fn brand_name(&self) -> &'static str;
 }
 
@@ -109,4 +111,16 @@ pub async fn get_all_user_info(ip: &str, port: u16, comm_key: i32, machine_numbe
 pub async fn listen_device(ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, brand: DeviceBrand, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError> {
     let driver = get_driver(&brand)?;
     driver.listen_realtime(ip, port, comm_key, device_id, machine_number, app_handle, cancel).await
+}
+
+/// Public push user facade: sets user details on the device
+pub async fn push_user_info(ip: &str, port: u16, comm_key: i32, machine_number: i32, brand: DeviceBrand, user_id: i32, name: &str, role: i32, card_no: &str) -> Result<(), AppError> {
+    let driver = get_driver(&brand)?;
+    driver.push_user_info(ip, port, comm_key, machine_number, user_id, name, role, card_no).await
+}
+
+/// Public pull biometric facade: retrieves fingerprint/face templates from device
+pub async fn pull_user_biometric(ip: &str, port: u16, comm_key: i32, machine_number: i32, brand: DeviceBrand, user_id: i32) -> Result<serde_json::Value, AppError> {
+    let driver = get_driver(&brand)?;
+    driver.pull_user_biometric(ip, port, comm_key, machine_number, user_id).await
 }

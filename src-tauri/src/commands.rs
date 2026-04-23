@@ -1,5 +1,5 @@
 use crate::errors::AppError;
-use crate::hardware::{sync_device, test_device};
+use crate::hardware::{sync_device, test_device, push_user_info, pull_user_biometric};
 use crate::models::DeviceBrand;
 use crate::sync_service;
 use crate::AppState;
@@ -202,16 +202,6 @@ pub async fn sync_device_logs(
         let conn = db_guard
             .as_ref()
             .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-
-        // 1. HARD CLEANUP: Remove known dummy data to prevent ID collisions
-        let _ = conn.execute(
-            "DELETE FROM Employees WHERE name IN ('Ram Sharma', 'Sita Rai', 'Dummy Employee')",
-            [],
-        );
-        let _ = conn.execute(
-            "DELETE FROM AttendanceLogs WHERE employee_id NOT IN (SELECT id FROM Employees)",
-            [],
-        );
 
         // 2. FORCE SYNC EMPLOYEES: Ensure every user from device exists in local DB
         for u in &device_users {
@@ -726,4 +716,128 @@ pub async fn delete_gate(id: i64, state: tauri::State<'_, AppState>) -> Result<(
 
     conn.execute("DELETE FROM Gates WHERE id = ?1", params![id])?;
     Ok(())
+}
+#[tauri::command]
+pub async fn push_employee_to_device(
+    device_id: i64,
+    employee_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), AppError> {
+    let (ip, port, comm_key, machine_number, brand, bio_id, full_name, role, card_no) = {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        // 1. Fetch Device Info
+        let (ip, port, comm_key, machine_number, brand_str) = conn.query_row(
+            "SELECT ip_address, port, comm_key, machine_number, brand FROM Devices WHERE id = ?1",
+            params![device_id],
+            |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i32>(1)? as u16,
+                r.get::<_, i32>(2)?,
+                r.get::<_, i32>(3)?,
+                r.get::<_, String>(4)?
+            ))
+        ).map_err(|e| AppError::DatabaseError(format!("Device not found: {}", e)))?;
+
+        let brand = match brand_str.as_str() {
+            "ZKTeco" => DeviceBrand::ZKTeco,
+            "Hikvision" => DeviceBrand::Hikvision,
+            _ => DeviceBrand::Unknown,
+        };
+
+        // 2. Fetch Employee Info
+        let (biometric_id, first_name, last_name, card_no, privilege) = conn.query_row(
+            "SELECT biometric_id, first_name, last_name, card_no, device_privilege FROM Employees WHERE id = ?1",
+            params![employee_id],
+            |r| Ok((
+                r.get::<_, Option<i32>>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<String>>(3)?,
+                r.get::<_, Option<String>>(4)?
+            ))
+        ).map_err(|e| AppError::DatabaseError(format!("Employee not found: {}", e)))?;
+
+        let bio_id = biometric_id.ok_or_else(|| AppError::ValidationError("Employee does not have a Biometric ID assigned".into()))?;
+        let full_name = format!("{} {}", first_name, last_name).trim().to_string();
+        
+        let role = match privilege.as_deref() {
+            Some("Normal User") => 0,
+            Some("Registrar") => 1,
+            Some("Admin") => 2,
+            Some("Super Admin") => 3,
+            _ => 0
+        };
+
+        (ip, port, comm_key, machine_number, brand, bio_id, full_name, role, card_no.unwrap_or_default())
+    }; // MutexGuard is dropped here
+
+    // 3. Push to Device
+    push_user_info(
+        &ip, 
+        port, 
+        comm_key, 
+        machine_number, 
+        brand, 
+        bio_id, 
+        &full_name, 
+        role, 
+        &card_no
+    ).await?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn pull_employee_biometric(
+    device_id: i64,
+    employee_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let (ip, port, comm_key, machine_number, brand, bio_id) = {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        // 1. Fetch Device Info
+        let (ip, port, comm_key, machine_number, brand_str) = conn.query_row(
+            "SELECT ip_address, port, comm_key, machine_number, brand FROM Devices WHERE id = ?1",
+            params![device_id],
+            |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i32>(1)? as u16,
+                r.get::<_, i32>(2)?,
+                r.get::<_, i32>(3)?,
+                r.get::<_, String>(4)?
+            ))
+        ).map_err(|e| AppError::DatabaseError(format!("Device not found: {}", e)))?;
+
+        let brand = match brand_str.as_str() {
+            "ZKTeco" => DeviceBrand::ZKTeco,
+            "Hikvision" => DeviceBrand::Hikvision,
+            _ => DeviceBrand::Unknown,
+        };
+
+        // 2. Fetch Employee Biometric ID
+        let biometric_id: Option<i32> = conn.query_row(
+            "SELECT biometric_id FROM Employees WHERE id = ?1",
+            params![employee_id],
+            |r| r.get(0)
+        ).map_err(|e| AppError::DatabaseError(format!("Employee not found: {}", e)))?;
+
+        let bio_id = biometric_id.ok_or_else(|| AppError::ValidationError("Employee does not have a Biometric ID assigned".into()))?;
+        (ip, port, comm_key, machine_number, brand, bio_id)
+    };
+
+    // 3. Pull from Device
+    let bio_data = pull_user_biometric(
+        &ip, 
+        port, 
+        comm_key, 
+        machine_number, 
+        brand, 
+        bio_id
+    ).await?;
+
+    Ok(bio_data)
 }

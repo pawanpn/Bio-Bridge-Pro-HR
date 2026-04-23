@@ -6,7 +6,7 @@ import {
   Users, UserPlus, Search, Filter, Download, Upload,
   Edit2, Trash2, Eye, FileText, Calendar, MapPin, Phone, Mail,
   HardDrive, Loader2, AlertCircle, CheckCircle, Info,
-  Settings, User, Shield, Clock, FileStack, Smartphone, MessageSquare, Plus, X
+  Settings, User, Shield, Clock, FileStack, Smartphone, Fingerprint, MessageSquare, Plus, X
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -200,10 +200,12 @@ export const EmployeeManagement: React.FC = () => {
     setLoading(true);
     try {
       console.log('[EmployeeManagement] Loading data...');
-      const [empResult, branchData, deviceData] = await Promise.all([
+      const [empResult, branchData, deviceData, deptData, desigData] = await Promise.all([
         invoke<any>('list_employees'),
         invoke<any[]>('list_branches'),
         invoke<any[]>('list_all_devices'),
+        invoke<any[]>('list_departments'),
+        invoke<any[]>('list_designations'),
       ]);
       
       console.log('[EmployeeManagement] Raw branch data:', branchData);
@@ -223,6 +225,8 @@ export const EmployeeManagement: React.FC = () => {
       setEmployees(empData);
       setBranches(branches);
       setDevices(devices);
+      setDepartments(Array.isArray(deptData) ? deptData : []);
+      setDesignations(Array.isArray(desigData) ? desigData : []);
       if ((empResult as any)?.debug) {
         setDebugInfo((empResult as any).debug);
       }
@@ -372,6 +376,61 @@ export const EmployeeManagement: React.FC = () => {
       }, 1500);
     } catch (error: any) {
       setFormStatus('❌ Failed to save: ' + (error?.message || error));
+    }
+  };
+
+  const handleSyncToDevice = async () => {
+    if (!formDialog.editing || !formData.biometric_id) {
+      setFormStatus('❌ Biometric ID is required to sync to device');
+      return;
+    }
+
+    if (devices.length === 0) {
+      setFormStatus('❌ No devices available to sync');
+      return;
+    }
+
+    setLoading(true);
+    setFormStatus('🔄 Syncing user to device...');
+    try {
+      await invoke('push_employee_to_device', {
+        deviceId: parseInt(selectedDeviceId) || devices[0].id,
+        employeeId: formDialog.editing.id,
+      });
+      setFormStatus('✅ Employee name synced to device successfully!');
+    } catch (error: any) {
+      console.error('Sync error:', error);
+      setFormStatus('❌ Sync failed: ' + (error?.message || error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePullBiometric = async () => {
+    if (!formDialog.editing || !formData.biometric_id) {
+      setFormStatus('❌ Biometric ID is required to pull data');
+      return;
+    }
+
+    if (devices.length === 0) {
+      setFormStatus('❌ No devices available');
+      return;
+    }
+
+    setLoading(true);
+    setFormStatus('🔄 Pulling biometric from device...');
+    try {
+      const data = await invoke('pull_employee_biometric', {
+        deviceId: parseInt(selectedDeviceId) || devices[0].id,
+        employeeId: formDialog.editing.id,
+      });
+      console.log('Pulled biometric data:', data);
+      setFormStatus('✅ Biometric pulled successfully! (Verified ' + (Array.isArray(data) ? data.length : 0) + ' templates)');
+    } catch (error: any) {
+      console.error('Pull error:', error);
+      setFormStatus('❌ Pull failed: ' + (error?.message || error));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -1016,10 +1075,44 @@ export const EmployeeManagement: React.FC = () => {
                        />
                        <p className="text-[10px] text-muted-foreground">This ID must match the ID on your hardware device for log linking.</p>
                     </div>
-                    <div className="col-span-2 py-4">
-                      <Button variant="outline" className="w-full border-dashed">
-                        Enroll Device Biometrics
+                    <div className="col-span-2 space-y-4 py-4">
+                      <div className="grid grid-cols-2 gap-4 items-end">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-bold text-muted-foreground uppercase">Target Device for Sync</Label>
+                          <select 
+                            value={selectedDeviceId}
+                            onChange={(e) => setSelectedDeviceId(e.target.value)}
+                            className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                          >
+                             <option value="">Select Device...</option>
+                             {devices.map(d => (
+                               <option key={d.id} value={d.id}>{d.name} ({d.ip})</option>
+                             ))}
+                          </select>
+                        </div>
+                        <Button 
+                          variant="default" 
+                          onClick={handleSyncToDevice}
+                          disabled={!formData.biometric_id || devices.length === 0}
+                          className="h-10 bg-blue-600 hover:bg-blue-700 text-white font-bold gap-2"
+                        >
+                          <Smartphone className="w-4 h-4" />
+                          Push Name to Device
+                        </Button>
+                      </div>
+
+                      <Button 
+                        variant="outline" 
+                        onClick={handlePullBiometric}
+                        disabled={!formData.biometric_id || devices.length === 0}
+                        className="w-full border-dashed h-12 gap-2 text-muted-foreground hover:text-primary"
+                      >
+                        <Fingerprint className="w-5 h-5" />
+                         Pull Biometric (Fingerprint/Face) from Device
                       </Button>
+                      <p className="text-[10px] text-center text-muted-foreground italic">
+                        Note: User must already be added to the device with ID #{formData.biometric_id}
+                      </p>
                     </div>
                   </div>
                 </div>
