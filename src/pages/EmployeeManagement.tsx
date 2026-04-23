@@ -163,6 +163,7 @@ export const EmployeeManagement: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [viewMode, setViewMode] = useState<'active' | 'deleted'>('active');
   
   // Dialogs
   const [formDialog, setFormDialog] = useState({ open: false, editing: null as any });
@@ -194,14 +195,14 @@ export const EmployeeManagement: React.FC = () => {
     return () => {
       window.removeEventListener('data-synced', handleDataSynced);
     };
-  }, []);
+  }, [viewMode]);
 
   const loadData = async () => {
     setLoading(true);
     try {
       console.log('[EmployeeManagement] Loading data...');
       const [empResult, branchData, deviceData, deptData, desigData] = await Promise.all([
-        invoke<any>('list_employees'),
+        invoke<any>('list_employees', { statusFilter: viewMode }),
         invoke<any[]>('list_branches'),
         invoke<any[]>('list_all_devices'),
         invoke<any[]>('list_departments'),
@@ -437,11 +438,24 @@ export const EmployeeManagement: React.FC = () => {
   const handleDeleteEmployee = async () => {
     if (!deleteDialog.employee) return;
     try {
-      await invoke('crud::delete_employee', { employeeId: deleteDialog.employee.id });
+      await invoke('delete_employee', { employeeId: deleteDialog.employee.id });
       setDeleteDialog({ open: false, employee: null });
       loadData();
     } catch (error) {
       console.error('Failed to delete:', error);
+    }
+  };
+
+  const handleRestoreEmployee = async (id: number) => {
+    try {
+      setLoading(true);
+      await invoke('restore_employee', { employeeId: id });
+      loadData();
+    } catch (error: any) {
+      console.error('Restore error:', error);
+      alert('Failed to restore: ' + (error?.message || error));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -585,7 +599,24 @@ export const EmployeeManagement: React.FC = () => {
       {/* Filters */}
       <Card className="mb-6">
         <CardContent className="p-4">
-          <div className="flex gap-4">
+          <div className="flex gap-4 items-center">
+            <div className="flex gap-2 bg-muted/50 p-1 rounded-lg border border-border/50 mr-2">
+              <Button 
+                variant={viewMode === 'active' ? 'default' : 'outline'} 
+                onClick={() => setViewMode('active')}
+                className="rounded-md"
+              >
+                Active
+              </Button>
+              <Button 
+                variant={viewMode === 'deleted' ? 'destructive' : 'outline'} 
+                onClick={() => setViewMode('deleted')}
+                className="rounded-md gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                Deleted Portal
+              </Button>
+            </div>
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
@@ -615,7 +646,8 @@ export const EmployeeManagement: React.FC = () => {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Employee Code</TableHead>
+                <TableHead>Employee ID (Software)</TableHead>
+                <TableHead>Device ID (Hardware)</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Department</TableHead>
                 <TableHead>Branch</TableHead>
@@ -639,6 +671,7 @@ export const EmployeeManagement: React.FC = () => {
                 filteredEmployees.map(emp => (
                   <TableRow key={emp.id} className="cursor-pointer hover:bg-muted/50">
                     <TableCell className="font-mono text-sm">{emp.employee_code || `#${emp.id}`}</TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-xs">{emp.biometric_id || '—'}</TableCell>
                     <TableCell className="font-medium">
                       {emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || '—'}
                     </TableCell>
@@ -657,12 +690,26 @@ export const EmployeeManagement: React.FC = () => {
                         <Button variant="ghost" size="icon" onClick={() => setViewDialog({ open: true, employee: emp })}>
                           <Eye className="w-4 h-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleEditEmployee(emp)}>
-                          <Edit2 className="w-4 h-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => setDeleteDialog({ open: true, employee: emp })}>
-                          <Trash2 className="w-4 h-4 text-destructive" />
-                        </Button>
+                        {viewMode === 'active' ? (
+                          <>
+                            <Button variant="ghost" size="icon" onClick={() => handleEditEmployee(emp)}>
+                              <Edit2 className="w-4 h-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => setDeleteDialog({ open: true, employee: emp })}>
+                              <Trash2 className="w-4 h-4 text-destructive" />
+                            </Button>
+                          </>
+                        ) : (
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => handleRestoreEmployee(emp.id)}
+                            className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                            title="Restore"
+                          >
+                            <CheckCircle className="w-4 h-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -765,8 +812,9 @@ export const EmployeeManagement: React.FC = () => {
                         id="emp_id"
                         value={formData.employee_code}
                         onChange={(e) => setFormData({ ...formData, employee_code: e.target.value })}
-                        placeholder="EMP-001"
-                        className="bg-background"
+                        placeholder="BB-0001"
+                        disabled={!!formDialog.editing}
+                        className="bg-background disabled:opacity-75 disabled:bg-muted"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1065,7 +1113,7 @@ export const EmployeeManagement: React.FC = () => {
                       <Input value={formData.card_no} onChange={(e) => setFormData({ ...formData, card_no: e.target.value })} placeholder="RFID Card ID" />
                     </div>
                     <div className="space-y-2">
-                       <Label className="text-xs font-bold uppercase text-muted-foreground">Attendance ID (Manual)</Label>
+                       <Label className="text-xs font-bold uppercase text-muted-foreground">Device User ID (Hardware)</Label>
                        <Input 
                          type="number" 
                          value={formData.biometric_id} 
