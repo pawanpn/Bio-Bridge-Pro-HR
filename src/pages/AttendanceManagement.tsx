@@ -89,6 +89,7 @@ export const AttendanceManagement: React.FC = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState('');
+  const [sortConfig, setSortConfig] = useState<{key: string, direction: 'asc' | 'desc'} | null>(null);
   const [syncedLogs, setSyncedLogs] = useState<any[]>([]);
   const [showPreview, setShowPreview] = useState(false);
   const [syncBranch, setSyncBranch] = useState<string>("1");
@@ -286,9 +287,9 @@ export const AttendanceManagement: React.FC = () => {
   // Stats calculation
   const todayStats = {
     totalPunches: dailyLogs.length,
-    uniqueEmployees: new Set(dailyLogs.map(l => l.employee_id)).size,
-    syncedCount: dailyLogs.filter(l => l.is_synced).length,
-    pendingSync: dailyLogs.filter(l => !l.is_synced).length,
+    uniqueEmployees: new Set(dailyLogs.map(l => (l as any).id)).size,
+    syncedCount: dailyLogs.filter(l => (l as any).is_synced).length,
+    pendingSync: dailyLogs.filter(l => !(l as any).is_synced).length,
   };
 
   return (
@@ -358,79 +359,72 @@ export const AttendanceManagement: React.FC = () => {
           ))
         )}
       </div>
-
-      {/* Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6 bg-muted/20 p-4 rounded-lg border">
-        <div className="md:col-span-2">
-            <Label className="text-primary font-bold">1. Select Target Branch/Gate for Sync</Label>
-            <div className="flex gap-2 mt-1">
-                <select 
-                    value={syncBranch} 
-                    onChange={(e) => setSyncBranch(e.target.value)}
-                    className="flex-1 h-10 px-3 rounded-md border border-input bg-background text-sm"
-                >
-                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-                <select 
-                    value={syncGate} 
-                    onChange={(e) => setSyncGate(e.target.value)}
-                    className="flex-1 h-10 px-3 rounded-md border border-input bg-background text-sm"
-                >
-                    {gates.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                </select>
+      {/* Consolidated Filters & Sync Parameters */}
+      <Card className="border-none shadow-sm bg-slate-50 dark:bg-black/20 my-6">
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="flex-1 min-w-[200px] space-y-1.5">
+              <Label className="text-[10px] font-bold text-primary uppercase tracking-wider">Active Branch & Sync Target</Label>
+              <select
+                value={selectedBranch || ''}
+                onChange={(e) => {
+                   const bid = e.target.value ? Number(e.target.value) : null;
+                   setSelectedBranch(bid);
+                   if (bid) setSyncBranch(bid.toString());
+                }}
+                className="w-full h-11 px-4 rounded-xl border border-slate-200 bg-white dark:bg-slate-950 dark:border-slate-800 text-sm font-medium focus:ring-2 focus:ring-primary/20 transition-all"
+              >
+                <option value="">All Branches</option>
+                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
             </div>
-        </div>
 
-        <div className="md:col-span-1">
-          <Label>View Branch</Label>
-          <select
-            value={selectedBranch || ''}
-            onChange={(e) => setSelectedBranch(e.target.value ? Number(e.target.value) : null)}
-            className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1"
-          >
-            <option value="">All Branches</option>
-            {branches.map(b => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <Label>Date</Label>
-          <Input
-            type="date"
-            value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
-            className="mt-1"
-          />
-        </div>
-        <div className="flex items-end">
-          <Button onClick={loadDailyLogs} variant="outline" className="w-full">
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
-          </Button>
-        </div>
-        <div className="flex items-end">
-          <Button 
-            onClick={() => {
-              const defaultDevice = devices.find(d => d.is_default) || devices[0];
-              if (defaultDevice) handleSyncFromDevice(defaultDevice);
-              else alert('❌ No devices configured. Please add a device in Branch/Gate/Device Management.');
-            }}
-            disabled={syncing || devices.length === 0}
-            className="w-full relative"
-          >
-            <Fingerprint className="w-4 h-4 mr-2" />
-            <div className="flex flex-col items-start leading-tight">
-              <span className="text-xs font-bold uppercase overflow-hidden whitespace-nowrap text-ellipsis max-w-[150px]">
-                {syncing ? 'Syncing...' : (devices.find(d => d.is_default)?.name || 'Sync from Device')}
-              </span>
-              {!syncing && devices.some(d => d.is_default) && (
-                <span className="text-[10px] opacity-70">Default Device</span>
-              )}
+            <div className="flex-1 min-w-[180px] space-y-1.5">
+              <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Target Gate</Label>
+              <select
+                value={syncGate}
+                onChange={(e) => setSyncGate(e.target.value)}
+                className="w-full h-11 px-4 rounded-xl border border-slate-200 bg-white dark:bg-slate-950 dark:border-slate-800 text-sm font-medium focus:ring-2 focus:ring-primary/20 transition-all"
+              >
+                {gates.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
             </div>
-          </Button>
-        </div>
-      </div>
+
+            <div className="min-w-[150px] space-y-1.5">
+              <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Date</Label>
+              <Input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="h-11 rounded-xl font-mono text-sm border-slate-200 shadow-none"
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <Button 
+                onClick={loadDailyLogs} 
+                variant="outline" 
+                className="h-11 px-6 rounded-xl border-slate-200 hover:bg-white hover:shadow-md transition-all flex items-center gap-2"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+              
+              <Button 
+                className="h-11 px-8 rounded-xl bg-blue-900 border-none hover:bg-blue-800 text-white font-bold shadow-lg shadow-blue-900/20"
+                onClick={() => {
+                   const def = devices.find(d => d.is_default);
+                   if (def) handleSyncFromDevice(def);
+                   else alert("Please set a default device in Settings.");
+                }}
+              >
+                <Fingerprint className="w-4 h-4 mr-2" />
+                Sync Default
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -518,39 +512,65 @@ export const AttendanceManagement: React.FC = () => {
           <CardContent className="p-0">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Branch / Gate</TableHead>
-                  <TableHead>Timestamp</TableHead>
-                  <TableHead>Punch Method</TableHead>
-                  <TableHead>Sync Status</TableHead>
+                <TableRow className="bg-slate-50/50">
+                  <TableHead className="cursor-pointer hover:text-primary transition-colors" onClick={() => setSortConfig({key: 'name', direction: sortConfig?.key === 'name' && sortConfig.direction === 'asc' ? 'desc' : 'asc'})}>
+                    Member Name {sortConfig?.key === 'name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                  </TableHead>
+                  <TableHead className="cursor-pointer hover:text-primary transition-colors" onClick={() => setSortConfig({key: 'branch_name', direction: sortConfig?.key === 'branch_name' && sortConfig.direction === 'asc' ? 'desc' : 'asc'})}>
+                    Branch {sortConfig?.key === 'branch_name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                  </TableHead>
+                  <TableHead>Timestamps (In/Out History)</TableHead>
+                  <TableHead>Method</TableHead>
+                  <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8">Loading...</TableCell>
+                    <TableCell colSpan={5} className="text-center py-12">
+                       <RefreshCw className="h-8 w-8 animate-spin mx-auto text-primary opacity-20" />
+                    </TableCell>
                   </TableRow>
                 ) : dailyLogs.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={5} className="text-center py-12 text-muted-foreground italic">
                       No attendance records found for this date.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  dailyLogs.map(log => (
-                    <TableRow key={log.id}>
-                      <TableCell className="font-medium">{log.employee_name || `#${log.employee_id}`}</TableCell>
-                      <TableCell className="text-muted-foreground text-sm">
-                        {log.branch_name || '—'} / {log.gate_name || '—'}
+                  [...dailyLogs]
+                    .sort((a, b) => {
+                      if (!sortConfig) return 0;
+                      const aVal = a[sortConfig.key] || '';
+                      const bVal = b[sortConfig.key] || '';
+                      return sortConfig.direction === 'asc' 
+                        ? aVal.toString().localeCompare(bVal.toString())
+                        : bVal.toString().localeCompare(aVal.toString());
+                    })
+                    .map((log: any) => (
+                    <TableRow key={log.id} className="hover:bg-slate-50 transition-colors">
+                      <TableCell className="font-bold text-slate-700">
+                         {log.name || 'Unknown'} 
+                         <span className="ml-2 px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-[10px] font-mono">#{log.employee_code || log.id}</span>
                       </TableCell>
-                      <TableCell className="font-mono text-sm">{log.timestamp}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{log.punch_method || 'Unknown'}</Badge>
+                      <TableCell className="text-slate-500 text-sm">
+                        {log.branch_name || '—'}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={log.is_synced ? 'default' : 'secondary'}>
-                          {log.is_synced ? '✓ Synced' : '⏳ Pending'}
+                         <div className="flex flex-wrap gap-1">
+                            {log.all_punches?.split(' | ').map((p: string, i: number) => (
+                               <Badge key={i} variant="secondary" className="bg-blue-50 text-blue-700 border-blue-100 font-mono text-[10px]">
+                                  {p}
+                               </Badge>
+                            ))}
+                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="capitalize text-[10px]">{log.punch_method || 'Device'}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="default" className="bg-green-50 text-green-700 border-green-100 text-[10px]">
+                           ✓ Saved Log
                         </Badge>
                       </TableCell>
                     </TableRow>
