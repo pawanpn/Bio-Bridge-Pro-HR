@@ -741,7 +741,8 @@ pub async fn list_employees(
         "SELECT e.id, e.employee_code, e.first_name, e.middle_name, e.last_name,
                 e.gender, e.date_of_joining, e.employment_type, e.employment_status,
                 e.department_id, e.designation_id, e.branch_id, e.status, e.name,
-                d.name as dept_name, des.name as desig_name, b.name as branch_name
+                d.name as dept_name, des.name as desig_name, b.name as branch_name,
+                e.deleted_at, e.biometric_id
         FROM Employees e
         LEFT JOIN Departments d ON e.department_id = d.id
         LEFT JOIN Designations des ON e.designation_id = des.id
@@ -805,6 +806,8 @@ pub async fn list_employees(
                 "department": row.get::<_, Option<String>>(14)?,
                 "designation": row.get::<_, Option<String>>(15)?,
                 "branch_name": row.get::<_, Option<String>>(16)?,
+                "deleted_at": row.get::<_, Option<String>>(17)?,
+                "biometric_id": row.get::<_, Option<i32>>(18)?,
             }))
         })
         .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
