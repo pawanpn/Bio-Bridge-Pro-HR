@@ -149,6 +149,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: false, error: error.message };
       }
 
+      // Check if user is deleted after successful auth
+      const { data: profileCheck } = await supabase
+        .from('users')
+        .select('status')
+        .eq('auth_id', data.user.id)
+        .single();
+
+      if (profileCheck?.status === 'deleted') {
+        await supabase.auth.signOut();
+        return { success: false, error: 'User does not exist or contact administrator' };
+      }
+
       if (data.user) {
         console.log('✅ Supabase Auth successful');
         // loadUserProfile will be called automatically via onAuthStateChange

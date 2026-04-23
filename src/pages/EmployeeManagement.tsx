@@ -652,6 +652,7 @@ export const EmployeeManagement: React.FC = () => {
                 <TableHead>Department</TableHead>
                 <TableHead>Branch</TableHead>
                 <TableHead>Status</TableHead>
+                {viewMode === 'deleted' && <TableHead>Deleted Date</TableHead>}
                 <TableHead>Joining Date</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
@@ -682,6 +683,11 @@ export const EmployeeManagement: React.FC = () => {
                         {emp.employment_status || 'Active'}
                       </Badge>
                     </TableCell>
+                    {viewMode === 'deleted' && (
+                      <TableCell className="text-red-600 font-medium text-xs">
+                        {emp.deleted_at || '—'}
+                      </TableCell>
+                    )}
                     <TableCell className="text-muted-foreground text-sm">
                       {emp.date_of_joining || '—'}
                     </TableCell>

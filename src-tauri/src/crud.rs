@@ -1152,7 +1152,14 @@ pub async fn delete_employee(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "UPDATE Employees SET status = 'deleted', employment_status = 'Inactive', updated_at = datetime('now') WHERE id = ?1",
+        "UPDATE Employees 
+         SET status = 'deleted', 
+             employment_status = 'Inactive', 
+             enable_self_service = 0,
+             enable_mobile_access = 0,
+             deleted_at = datetime('now'),
+             updated_at = datetime('now') 
+         WHERE id = ?1",
         params![employee_id],
     )
     .map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
