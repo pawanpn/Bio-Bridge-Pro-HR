@@ -739,46 +739,21 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     let _ = conn.execute("INSERT OR IGNORE INTO Departments (id, name) VALUES (2, 'Sales')", []);
     let _ = conn.execute("INSERT OR IGNORE INTO Departments (id, name) VALUES (3, 'Maintenance')", []);
 
-    // Seed specific employees as requested
-    let branch_id = 1; // Default Head Office
-    let seed_employees = vec![
-        (2, "Ram Sharma", "Ram", "Sharma", "1", 45000.0, 101), // dept_id 1
-        (3, "Sita Rai", "Sita", "Rai", "2", 40000.0, 102),      // dept_id 2
-        (4, "Hari Bahadur", "Hari", "Bahadur", "3", 35000.0, 103), // dept_id 3
-    ];
+    // Seed real branches (if not exist)
+    conn.execute(
+        "INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (1, 1, 'Main Office', 'Kathmandu')",
+        [],
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')",
+        [],
+    )?;
 
-    for (id, name, first, last, dept, sal, bio_id) in seed_employees {
-        let _ = conn.execute(
-            "INSERT OR REPLACE INTO Employees (id, name, first_name, last_name, department_id, branch_id, status, employee_code, biometric_id, employment_status) 
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', ?7, ?8, 'Active')",
-            [
-                &id.to_string(), 
-                name, 
-                first, 
-                last, 
-                dept, 
-                &branch_id.to_string(), 
-                &format!("EMP-{:04}", id),
-                &bio_id.to_string()
-            ],
-        );
-
-        // Ensure Salary Structure
-        let _ = conn.execute(
-            "INSERT OR REPLACE INTO SalaryStructures (employee_id, basic_salary) VALUES (?1, ?2)",
-            [&id.to_string(), &sal.to_string()],
-        );
-
-        // Seed some attendance for today for Ram and Sita
-        if id < 4 {
-            let hour = if id == 2 { "09:15" } else { "08:45" };
-            let _ = conn.execute(
-                "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, device_id, branch_id, gate_id, punch_method)
-                 VALUES (?1, datetime('now', 'start of day', ?2), 1, 1, 1, 'Fingerprint')",
-                [&id.to_string(), &format!("+{} hours", hour.split(':').next().unwrap())],
-            );
-        }
-    }
+    /* 
+       DUMMY DATA SEEDING DISABLED
+       - Previously seeded Ram Sharma and Sita Rai here.
+       - Disabled to allow clean real device sync.
+    */
 
     // Also seed some dummy invoices
     let dummy_invoices = vec![

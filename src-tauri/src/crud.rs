@@ -704,7 +704,7 @@ pub async fn get_employee(
 #[tauri::command]
 pub async fn list_employees(
     branch_id: Option<String>,
-    filters: Option<serde_json::Value>,
+    _filters: Option<serde_json::Value>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -731,7 +731,7 @@ pub async fn list_employees(
         if !bid.is_empty() && bid != "all" {
             query.push_str(&format!(" AND (branch_id = ?{} OR CAST(branch_id AS TEXT) = ?{})", param_index, param_index));
             params.push(Box::new(bid.clone()));
-            param_index += 1;
+            // param_index += 1; (unused)
         }
     }
 

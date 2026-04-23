@@ -1,6 +1,6 @@
 use crate::AppState;
 use crate::errors::AppError;
-use crate::models::{AttendanceLog, DeviceBrand};
+use crate::models::DeviceBrand;
 use crate::hardware::{test_device, sync_device};
 use crate::sync_service;
 use rusqlite::params;
