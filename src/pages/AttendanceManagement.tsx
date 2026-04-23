@@ -128,10 +128,9 @@ export const AttendanceManagement: React.FC = () => {
   }, [loadData]);
 
   // Load daily logs when date or branch changes
+  // Load logs when tab, date, or branch changes
   useEffect(() => {
-    if (activeTab === 'daily') {
-      loadDailyLogs();
-    }
+    loadDailyLogs();
   }, [activeTab, selectedDate, selectedBranch]);
 
   const loadDailyLogs = async () => {
