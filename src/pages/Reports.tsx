@@ -209,15 +209,15 @@ export const Reports: React.FC = () => {
   };
 
   return (
-    <div className="p-6 max-w-[1600px] mx-auto space-y-8 animate-in fade-in duration-500">
+    <div className="p-4 pt-2 max-w-[1700px] mx-auto space-y-4 animate-in fade-in duration-500">
       {/* Header Area */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-        <div className="-mt-6">
-           <Badge variant="outline" className="mb-2 px-3 py-1 border-primary/20 text-primary bg-primary/5">
-              <Database className="h-3 w-3 mr-1.5" /> HR Reporting Engine
+        <div className="-mt-4">
+           <Badge variant="outline" className="mb-0.5 px-2 py-0 border-primary/20 text-primary bg-primary/5 text-[9px]">
+              <Database className="h-2.5 w-2.5 mr-1" /> HR Reporting Engine
            </Badge>
-           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">Workforce Insights</h1>
-           <p className="text-slate-500 dark:text-slate-400 mt-1 text-base md:text-lg">Generate precise analytics for payroll and operational visibility.</p>
+           <h1 className="text-xl md:text-2xl font-black tracking-tight text-slate-900 dark:text-white leading-tight">Workforce Insights</h1>
+           <p className="text-slate-500 dark:text-slate-400 text-[10px] md:text-xs">Precision analytics for payroll and operational visibility.</p>
         </div>
         <div className="flex flex-wrap gap-3">
           {hasGenerated && (
@@ -233,114 +233,111 @@ export const Reports: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Sidebar Configuration: Step 1 & 2 */}
-        <div className="lg:col-span-4 space-y-6">
-           <Card className="border-none shadow-xl bg-slate-50 dark:bg-slate-900/50">
-              <CardContent className="p-6 space-y-8">
+      <div className="space-y-6">
+        {/* Horizontal Configuration Bar */}
+        <Card className="border-none shadow-xl bg-slate-50 dark:bg-slate-900/50 sticky top-0 z-30">
+           <CardContent className="p-3">
+              <div className="flex flex-col lg:flex-row items-start gap-4">
                  {/* Step 1: Style Selection */}
-                 <section>
-                    <div className="flex items-center gap-3 mb-4">
-                       <div className="bg-primary text-white h-7 w-7 rounded-full flex items-center justify-center text-sm font-bold shadow-lg shadow-primary/20">1</div>
-                       <h3 className="font-bold text-slate-800 dark:text-slate-200 uppercase tracking-widest text-xs">Select Report Style</h3>
+                 <div className="flex-1 space-y-2">
+                    <div className="flex items-center gap-2">
+                       <span className="bg-primary text-white h-4 w-4 rounded-full flex items-center justify-center text-[9px] font-bold">1</span>
+                       <h3 className="font-bold text-slate-500 uppercase tracking-widest text-[9px]">Style</h3>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                        {tabs.map(tab => (
                           <button
                             key={tab.key}
                             onClick={() => { setActiveTab(tab.key); setHasGenerated(false); }}
-                            className={`flex items-center gap-3 p-3 rounded-xl border-2 transition-all text-left ${
+                            className={`flex items-center gap-2 p-2 rounded-lg border-2 transition-all text-left ${
                               activeTab === tab.key
-                                ? 'bg-white dark:bg-slate-800 border-primary shadow-lg scale-[1.01] ring-4 ring-primary/5'
+                                ? 'bg-white dark:bg-slate-800 border-primary shadow-sm ring-2 ring-primary/5'
                                 : 'bg-slate-100/50 dark:bg-slate-800/30 border-transparent hover:border-slate-300 dark:hover:border-slate-700'
                             }`}
                           >
-                             <div className={`p-2 rounded-lg flex-shrink-0 ${activeTab === tab.key ? 'bg-primary text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`}>
-                                {tab.icon}
+                             <div className={`p-1.5 rounded flex-shrink-0 ${activeTab === tab.key ? 'bg-primary text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`}>
+                                {React.cloneElement(tab.icon as React.ReactElement, { size: 14 })}
                              </div>
-                             <span className={`text-xs font-bold leading-tight ${activeTab === tab.key ? 'text-primary' : 'text-slate-600 dark:text-slate-400'}`}>{tab.label}</span>
+                             <span className={`text-[10px] font-bold leading-tight ${activeTab === tab.key ? 'text-primary' : 'text-slate-600 dark:text-slate-400'}`}>{tab.label}</span>
                           </button>
                        ))}
                     </div>
-                 </section>
+                 </div>
 
-                 {/* Step 2: Filters */}
-                 <section>
-                    <div className="flex items-center gap-3 mb-6">
-                       <div className="bg-primary text-white h-7 w-7 rounded-full flex items-center justify-center text-sm font-bold shadow-lg shadow-primary/20">2</div>
-                       <h3 className="font-bold text-slate-800 dark:text-slate-200 uppercase tracking-widest text-xs">Configure Parameters</h3>
+                 {/* Step 2: Parameters */}
+                 <div className="flex-[2] space-y-3">
+                    <div className="flex items-center gap-2">
+                       <span className="bg-primary text-white h-5 w-5 rounded-full flex items-center justify-center text-[10px] font-bold">2</span>
+                       <h3 className="font-bold text-slate-500 uppercase tracking-widest text-[10px]">Configure Parameters</h3>
                     </div>
-                    
-                    <div className="space-y-5">
-                       <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                             <Label className="text-[10px] uppercase font-bold text-slate-400">Branch</Label>
-                             <Select value={branch?.toString() || ''} onChange={e => setBranch(Number(e.target.value) || null)}>
-                                <option value="">All Branches</option>
-                                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                             </Select>
-                          </div>
-                          <div className="space-y-2">
-                             <Label className="text-[10px] uppercase font-bold text-slate-400">Department</Label>
-                             <Select value={department} onChange={e => setDepartment(e.target.value)}>
-                                {departments.map(d => <option key={d} value={d}>{d}</option>)}
-                             </Select>
-                          </div>
-                       </div>
+                    <div className="flex flex-wrap items-end gap-3">
+                        <div className="min-w-[120px]">
+                           <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">Branch</Label>
+                           <Select value={branch?.toString() || ''} onChange={e => setBranch(Number(e.target.value) || null)} className="h-9 text-xs">
+                              <option value="">All Branches</option>
+                              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                           </Select>
+                        </div>
+                        <div className="min-w-[120px]">
+                           <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">Department</Label>
+                           <Select value={department} onChange={e => setDepartment(e.target.value)} className="h-9 text-xs">
+                              {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                           </Select>
+                        </div>
 
-                       {activeTab === 'ledger' || activeTab === 'salary' ? (
-                          <div className="space-y-2">
-                             <Label className="text-[10px] uppercase font-bold text-slate-400">Month / Year Period</Label>
+                        {activeTab === 'ledger' || activeTab === 'salary' ? (
+                          <div className="min-w-[150px]">
+                             <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">Period</Label>
                              <div className="relative">
-                                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                                <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="pl-10 h-12 text-lg font-mono font-bold" />
+                                <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                                <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="pl-8 h-9 text-xs font-mono font-bold" />
                              </div>
                           </div>
-                       ) : (
-                          <div className="grid grid-cols-2 gap-4">
-                             <div className="space-y-2">
-                                <Label className="text-[10px] uppercase font-bold text-slate-400">Date From</Label>
-                                <Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="h-10 font-mono text-sm" />
+                        ) : (
+                          <>
+                             <div className="min-w-[130px]">
+                                <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">From</Label>
+                                <Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="h-9 font-mono text-xs" />
                              </div>
-                             <div className="space-y-2">
-                                <Label className="text-[10px] uppercase font-bold text-slate-400">Date To</Label>
-                                <Input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="h-10 font-mono text-sm" />
+                             <div className="min-w-[130px]">
+                                <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">To</Label>
+                                <Input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="h-9 font-mono text-xs" />
                              </div>
-                          </div>
-                       )}
+                          </>
+                        )}
 
-                       <div className="space-y-2">
-                          <Label className="text-[10px] uppercase font-bold text-slate-400">Employee Search (Optional)</Label>
-                          <div className="relative">
-                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                             <Input 
-                                placeholder="Start typing name or bio-id..." 
-                                value={search} 
-                                onChange={e => setSearch(e.target.value)}
-                                className="pl-10 h-12 italic" 
-                             />
-                          </div>
-                       </div>
+                        <div className="flex-1 min-w-[180px]">
+                           <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">Search Employee</Label>
+                           <div className="relative">
+                              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                              <Input 
+                                 placeholder="Name or ID..." 
+                                 value={search} 
+                                 onChange={e => setSearch(e.target.value)}
+                                 className="pl-8 h-9 text-xs italic" 
+                              />
+                           </div>
+                        </div>
+
+                        <Button 
+                           onClick={handleGenerate} 
+                           disabled={loading}
+                           className="h-9 bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-md shadow-primary/10 rounded-lg px-6 flex items-center justify-center gap-2"
+                        >
+                           {loading ? (
+                             <RefreshCw className="h-4 w-4 animate-spin" />
+                           ) : (
+                             <><Play className="h-4 w-4" /> GENERATE</>
+                           )}
+                        </Button>
                     </div>
-                 </section>
+                 </div>
+              </div>
+           </CardContent>
+        </Card>
 
-                 <Button 
-                    onClick={handleGenerate} 
-                    disabled={loading}
-                    className="w-full h-12 bg-primary hover:bg-primary/90 text-white font-bold text-base shadow-lg shadow-primary/20 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2"
-                 >
-                    {loading ? (
-                      <RefreshCw className="h-6 w-6 animate-spin" />
-                    ) : (
-                      <><Play className="h-6 w-6" /> GENERATE REVIEW</>
-                    )}
-                 </Button>
-              </CardContent>
-           </Card>
-        </div>
-
-        {/* Preview Area: Step 3 */}
-        <div className="lg:col-span-8 flex flex-col min-h-[600px]">
+        {/* Full Width Report Preview Area */}
+        <div className="w-full flex flex-col min-h-[600px]">
            <Card className="flex-1 border-2 border-slate-100 dark:border-slate-800 overflow-hidden shadow-sm">
               {!hasGenerated ? (
                  <div className="flex flex-col items-center justify-center h-full text-center p-12 space-y-6">
@@ -396,12 +393,12 @@ const DailyTable = ({ data }: { data: DailyAttendance[] }) => (
   <Table>
     <TableHeader className="bg-slate-100 dark:bg-slate-800">
       <TableRow>
-        <TableHead className="font-bold text-[10px] uppercase">Device ID</TableHead>
-        <TableHead className="font-bold text-[10px] uppercase">User</TableHead>
-        <TableHead className="font-bold text-[10px] uppercase">Date</TableHead>
-        <TableHead className="font-bold text-[10px] uppercase min-w-[200px]">Time (All Punches)</TableHead>
-        <TableHead className="font-bold text-[10px] uppercase">Method</TableHead>
-        <TableHead className="font-bold text-[10px] uppercase text-right">Branch</TableHead>
+        <TableHead className="font-bold text-[9px] uppercase w-[100px]">Device ID</TableHead>
+        <TableHead className="font-bold text-[9px] uppercase w-[200px]">User</TableHead>
+        <TableHead className="font-bold text-[9px] uppercase w-[120px]">Date</TableHead>
+        <TableHead className="font-bold text-[9px] uppercase min-w-[250px]">Time (All Punches)</TableHead>
+        <TableHead className="font-bold text-[9px] uppercase w-[100px]">Method</TableHead>
+        <TableHead className="font-bold text-[9px] uppercase text-right w-[150px]">Branch</TableHead>
       </TableRow>
     </TableHeader>
     <TableBody>

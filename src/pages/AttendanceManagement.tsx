@@ -150,8 +150,11 @@ export const AttendanceManagement: React.FC = () => {
     setLoading(true);
     try {
       const logs = await invoke<any[]>('get_daily_reports', {
+        fromDate: selectedDate,
+        toDate: selectedDate,
+        dept: 'All',
+        search: '',
         branchId: selectedBranch,
-        date: selectedDate,
       });
       setDailyLogs(logs || []);
       
@@ -229,9 +232,9 @@ export const AttendanceManagement: React.FC = () => {
     setManualStatus('');
     try {
       await invoke('add_manual_attendance', {
-        employee_id: Number(manualForm.employeeId),
-        timestamp: `${manualForm.date} ${manualForm.time}:00`, // Combine to match backend expectation
-        punch_method: manualForm.method,
+        employeeId: Number(manualForm.employeeId),
+        timestamp: `${manualForm.date} ${manualForm.time}:00`, 
+        punchMethod: manualForm.method,
       });
       setManualStatus('✅ Attendance recorded successfully!');
       setManualForm({
