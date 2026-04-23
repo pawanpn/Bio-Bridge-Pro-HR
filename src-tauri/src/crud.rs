@@ -422,8 +422,13 @@ pub async fn create_employee(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    // Validate inputs
-    let employee_code = sanitize_input(&request.employee_code);
+    // Generate unique employee code if not provided
+    let mut employee_code = sanitize_input(&request.employee_code);
+    if employee_code.is_empty() {
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM Employees", [], |r| r.get(0)).unwrap_or(0);
+        employee_code = format!("BB-{:04}", count + 1);
+    }
+    
     let first_name = sanitize_input(&request.first_name);
     let last_name = sanitize_input(&request.last_name);
 
@@ -720,6 +725,7 @@ pub async fn get_employee(
 #[tauri::command]
 pub async fn list_employees(
     branch_id: Option<String>,
+    status_filter: Option<String>,
     _filters: Option<serde_json::Value>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
@@ -732,26 +738,40 @@ pub async fn list_employees(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut query = String::from(
-        "SELECT id, employee_code, first_name, middle_name, last_name,
-                gender, date_of_joining, employment_type, employment_status,
-                department_id as department_name, designation_id as designation_name,
-                status as branch_name, name
-        FROM Employees
-        WHERE (status IS NULL OR status != 'deleted')",
+        "SELECT e.id, e.employee_code, e.first_name, e.middle_name, e.last_name,
+                e.gender, e.date_of_joining, e.employment_type, e.employment_status,
+                e.department_id, e.designation_id, e.branch_id, e.status, e.name,
+                d.name as dept_name, des.name as desig_name, b.name as branch_name
+        FROM Employees e
+        LEFT JOIN Departments d ON e.department_id = d.id
+        LEFT JOIN Designations des ON e.designation_id = des.id
+        LEFT JOIN Branches b ON e.branch_id = b.id
+        WHERE 1=1"
     );
 
     let mut param_index = 1;
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
+    // Status Filtering Logic
+    let status_str = status_filter.unwrap_or_else(|| "active".to_string());
+    if status_str == "deleted" {
+        query.push_str(" AND e.status = 'deleted'");
+    } else if status_str == "all" {
+        // No filter
+    } else {
+        // 'active' mode includes everything EXCEPT 'deleted'
+        query.push_str(" AND (e.status != 'deleted' OR e.status IS NULL)");
+    }
+
     if let Some(ref bid) = branch_id {
         if !bid.is_empty() && bid != "all" {
-            query.push_str(&format!(" AND (branch_id = ?{} OR CAST(branch_id AS TEXT) = ?{})", param_index, param_index));
+            query.push_str(&format!(" AND (e.branch_id = ?{} OR CAST(e.branch_id AS TEXT) = ?{})", param_index, param_index));
             params.push(Box::new(bid.clone()));
-            // param_index += 1; (unused)
+            param_index += 1;
         }
     }
 
-    query.push_str(" ORDER BY id DESC");
+    query.push_str(" ORDER BY e.id DESC");
 
     let mut stmt = conn
         .prepare(&query)
@@ -761,10 +781,7 @@ pub async fn list_employees(
 
     let employees: Vec<serde_json::Value> = stmt
         .query_map(&param_refs[..], |row| {
-            let mut first = row.get::<_, Option<String>>(2)?.unwrap_or_default();
-            if first.is_empty() {
-                first = row.get::<_, Option<String>>(12)?.unwrap_or_default();
-            }
+            let first = row.get::<_, Option<String>>(2)?.unwrap_or_else(|| row.get::<_, Option<String>>(13).unwrap_or_default().unwrap_or_default());
             let middle = row.get::<_, Option<String>>(3)?.unwrap_or_default();
             let last = row.get::<_, Option<String>>(4)?.unwrap_or_default();
             let full_name = format!("{} {} {}", first, middle, last).trim().replace("  ", " ").to_string();
@@ -772,19 +789,22 @@ pub async fn list_employees(
             Ok(serde_json::json!({
                 "id": row.get::<_, i64>(0)?,
                 "employee_code": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| format!("EMP-{:04}", row.get::<_, i64>(0).unwrap_or(0))),
-                "first_name": first.clone(),
+                "first_name": first,
                 "middle_name": middle,
                 "last_name": last,
                 "full_name": full_name,
-                "name": row.get::<_, Option<String>>(12)?.unwrap_or_default(),
+                "name": row.get::<_, Option<String>>(13)?.unwrap_or_default(),
                 "gender": row.get::<_, Option<String>>(5)?,
                 "date_of_joining": row.get::<_, Option<String>>(6)?,
                 "employment_type": row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "Full-time".to_string()),
                 "employment_status": row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "Active".to_string()),
-                "status": row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "Active".to_string()),
-                "department": row.get::<_, Option<String>>(9)?,
-                "designation": row.get::<_, Option<String>>(10)?,
-                "branch": row.get::<_, Option<String>>(11)?,
+                "status": row.get::<_, Option<String>>(12)?.unwrap_or_else(|| "active".to_string()),
+                "department_id": row.get::<_, Option<i64>>(9)?,
+                "designation_id": row.get::<_, Option<i64>>(10)?,
+                "branch_id": row.get::<_, Option<i64>>(11)?,
+                "department": row.get::<_, Option<String>>(14)?,
+                "designation": row.get::<_, Option<String>>(15)?,
+                "branch_name": row.get::<_, Option<String>>(16)?,
             }))
         })
         .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
@@ -1132,7 +1152,7 @@ pub async fn delete_employee(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "UPDATE Employees SET status = 'deleted', updated_at = datetime('now') WHERE id = ?1",
+        "UPDATE Employees SET status = 'deleted', employment_status = 'Inactive', updated_at = datetime('now') WHERE id = ?1",
         params![employee_id],
     )
     .map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
@@ -1148,6 +1168,26 @@ pub async fn delete_employee(
     Ok(serde_json::json!({
         "success": true,
         "message": "Employee deleted successfully"
+    }))
+}
+
+/// RESTORE: Restore a deleted employee
+#[tauri::command]
+pub async fn restore_employee(
+    employee_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "UPDATE Employees SET status = 'active', updated_at = datetime('now') WHERE id = ?1",
+        params![employee_id],
+    ).map_err(|e| AppError::DatabaseError(format!("Restore failed: {}", e)))?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Employee restored successfully"
     }))
 }
 

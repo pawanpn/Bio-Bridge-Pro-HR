@@ -99,6 +99,7 @@ pub fn run() {
             crud::list_employees,
             crud::update_employee,
             crud::delete_employee,
+            crud::restore_employee,
             crud::create_leave_request,
             crud::list_leave_requests,
             crud::update_leave_status,

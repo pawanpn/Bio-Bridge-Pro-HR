@@ -459,7 +459,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     );
     let _ = conn.execute(
-        "UPDATE Employees SET employee_code = 'EMP-' || printf('%04d', id) WHERE employee_code IS NULL",
+        "UPDATE Employees SET employee_code = 'BB-' || printf('%04d', id) WHERE employee_code IS NULL",
         [],
     );
     let _ = conn.execute(
@@ -765,10 +765,18 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     )?;
 
     /* 
-       DUMMY DATA SEEDING DISABLED
-       - Previously seeded Ram Sharma and Sita Rai here.
-       - Disabled to allow clean real device sync.
+       DUMMY DATA SEEDING (Restored per user request)
     */
+    conn.execute(
+        "INSERT OR IGNORE INTO Employees (id, name, first_name, last_name, employee_code, department_id, branch_id, status) 
+         VALUES (101, 'Suman Shrestha', 'Suman', 'Shrestha', 'EMP-101', 1, 1, 'active')",
+        []
+    )?;
+    conn.execute(
+        "INSERT OR IGNORE INTO Employees (id, name, first_name, last_name, employee_code, department_id, branch_id, status) 
+         VALUES (102, 'Dilip Kumar', 'Dilip', 'Kumar', 'EMP-102', 2, 1, 'active')",
+        []
+    )?;
 
     // Also seed some dummy invoices
     let dummy_invoices = vec![
