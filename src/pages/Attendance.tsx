@@ -1,16 +1,21 @@
-﻿import React, { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
+import React, { useState, useEffect } from "react";
+import { supabase } from "@/config/supabase";
+
+interface Log {
+  id: number;
+  employee_id: number;
+  timestamp: string;
+  type: string;
+}
 
 export default function Attendance() {
-  const [logs, setLogs] = useState([]);
-  const [stats, setStats] = useState({ online: 0, total: 0 });
+  const [logs, setLogs] = useState<Log[]>([]);
 
   useEffect(() => {
-    // Real-time Cloud Logic: मेसिनमा औँठा लगाउने बित्तिकै यहाँ डेटा आउँछ
     const channel = supabase.channel('biobridge_realtime')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, 
       (payload) => {
-        setLogs(prev => [payload.new, ...prev]);
+        setLogs(prev => [payload.new as Log, ...prev]);
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);
@@ -21,12 +26,6 @@ export default function Attendance() {
         <div>
           <h1 className="text-3xl font-extrabold text-slate-800">Attendance Console</h1>
           <p className="text-slate-500">Real-time biometric monitoring active</p>
-        </div>
-        <div className="flex gap-4">
-          <div className="bg-white p-4 rounded-xl shadow-sm border-l-4 border-green-500">
-            <p className="text-xs text-slate-400 uppercase font-bold">Devices Online</p>
-            <p className="text-2xl font-black text-slate-700">1 / 1</p>
-          </div>
         </div>
       </div>
 
@@ -42,13 +41,13 @@ export default function Attendance() {
           </thead>
           <tbody className="divide-y divide-slate-50">
             {logs.length === 0 ? (
-              <tr><td colSpan="4" className="p-10 text-center text-slate-400">Waiting for biometric data...</td></tr>
+              <tr><td colSpan={4} className="p-10 text-center text-slate-400">Waiting for biometric data...</td></tr>
             ) : (
               logs.map(log => (
                 <tr key={log.id} className="hover:bg-blue-50/30 transition">
                   <td className="p-5 font-medium text-slate-700">#{log.employee_id}</td>
                   <td className="p-5 text-slate-600">{new Date(log.timestamp).toLocaleString()}</td>
-                  <td className="p-5"><span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">{log.punch_type || 'Check-In'}</span></td>
+                  <td className="p-5"><span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">{log.type || 'Check-In'}</span></td>
                   <td className="p-5"><span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold">Verified</span></td>
                 </tr>
               ))

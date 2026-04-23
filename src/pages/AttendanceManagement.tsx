@@ -38,6 +38,7 @@ interface AttendanceLog {
 interface Employee {
   id: number;
   name: string;
+  full_name?: string;
   department: string;
   branch_id: number;
 }
@@ -73,6 +74,7 @@ type TabType = 'daily' | 'manual' | 'import' | 'history';
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export const AttendanceManagement: React.FC = () => {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('daily');
   const [branches, setBranches] = useState<Branch[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -111,14 +113,17 @@ export const AttendanceManagement: React.FC = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [branchData, empData, deviceData, gateData] = await Promise.all([
+      const [branchData, empResult, deviceData, gateData] = await Promise.all([
         invoke<any[]>('list_branches'),
-        invoke<any[]>('list_employees'),
+        invoke<any>('list_employees'),
         invoke<any[]>('list_all_devices'),
         invoke<any[]>('list_gates'),
       ]);
       setBranches(branchData);
+      
+      const empData = Array.isArray(empResult) ? empResult : (empResult as any)?.data || [];
       setEmployees(empData);
+      
       setDevices(deviceData);
       setGates(gateData);
     } catch (error) {
@@ -224,10 +229,9 @@ export const AttendanceManagement: React.FC = () => {
     setManualStatus('');
     try {
       await invoke('add_manual_attendance', {
-        employeeId: Number(manualForm.employeeId),
-        date: manualForm.date,
-        time: manualForm.time,
-        method: manualForm.method,
+        employee_id: Number(manualForm.employeeId),
+        timestamp: `${manualForm.date} ${manualForm.time}:00`, // Combine to match backend expectation
+        punch_method: manualForm.method,
       });
       setManualStatus('✅ Attendance recorded successfully!');
       setManualForm({
@@ -473,18 +477,22 @@ export const AttendanceManagement: React.FC = () => {
           active={activeTab === 'daily'}
           onClick={() => setActiveTab('daily')}
         />
-        <TabButton
-          icon={<UserPlus className="w-4 h-4" />}
-          label="Manual Entry"
-          active={activeTab === 'manual'}
-          onClick={() => setActiveTab('manual')}
-        />
-        <TabButton
-          icon={<Upload className="w-4 h-4" />}
-          label="CSV Import"
-          active={activeTab === 'import'}
-          onClick={() => setActiveTab('import')}
-        />
+        {user?.role?.toUpperCase() === 'SUPER_ADMIN' && (
+          <TabButton
+            icon={<UserPlus className="w-4 h-4" />}
+            label="Manual Entry"
+            active={activeTab === 'manual'}
+            onClick={() => setActiveTab('manual')}
+          />
+        )}
+        {user?.role?.toUpperCase() === 'SUPER_ADMIN' && (
+          <TabButton
+            icon={<Upload className="w-4 h-4" />}
+            label="CSV Import"
+            active={activeTab === 'import'}
+            onClick={() => setActiveTab('import')}
+          />
+        )}
         <TabButton
           icon={<Clock className="w-4 h-4" />}
           label="All Logs History"
@@ -602,7 +610,7 @@ export const AttendanceManagement: React.FC = () => {
       )}
 
       {/* Manual Entry Tab */}
-      {activeTab === 'manual' && (
+      {activeTab === 'manual' && user?.role?.toUpperCase() === 'SUPER_ADMIN' && (
         <Card>
           <CardHeader>
             <CardTitle>Manual Attendance Entry</CardTitle>
@@ -619,9 +627,11 @@ export const AttendanceManagement: React.FC = () => {
                   <option value="">Select Employee</option>
                   {employees
                     .filter(e => !selectedBranch || e.branch_id === selectedBranch)
-                    .map(e => (
-                      <option key={e.id} value={e.id}>{e.name} (#{e.id})</option>
-                    ))}
+                      .map(e => (
+                        <option key={e.id} value={e.id}>
+                          {e.full_name || e.name || `Employee #${e.id}`}
+                        </option>
+                      ))}
                 </select>
               </div>
               <div>
@@ -675,7 +685,7 @@ export const AttendanceManagement: React.FC = () => {
       )}
 
       {/* CSV Import Tab */}
-      {activeTab === 'import' && (
+      {activeTab === 'import' && user?.role?.toUpperCase() === 'SUPER_ADMIN' && (
         <Card>
           <CardHeader>
             <CardTitle>Import Attendance from CSV</CardTitle>

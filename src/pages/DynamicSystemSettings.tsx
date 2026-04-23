@@ -486,7 +486,7 @@ export const DynamicSystemSettings: React.FC = () => {
                 </Button>
                 <Button 
                   className="flex-1" 
-                  onClick={() => updateSetting(undefined, newSetting)}
+                  onClick={() => saveSettingToBackend(newSetting)}
                   disabled={!newSetting.setting_key || !newSetting.setting_value}
                 >
                   {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}

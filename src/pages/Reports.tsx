@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Download, Search, RefreshCw, Calculator, Fingerprint, ScanFace, Database, FolderOpen } from 'lucide-react';
+import { Download, Search, RefreshCw, Calculator, Fingerprint, ScanFace, Database, FolderOpen, Play, CheckCircle2, ChevronRight, FileText, Calendar, Wallet } from 'lucide-react';
 
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
@@ -27,14 +27,15 @@ import {
 interface DailyAttendance {
   id: number;
   name: string;
+  employee_code: string;
   department: string;
+  branch_name: string;
   date: string;
-  check_in: string;
-  check_out: string;
+  first_in: string;
+  last_out: string;
+  all_punches: string;
+  method: string;
   status: string;
-  late_entry: string;
-  early_exit: string;
-  working_hours: string;
 }
 
 interface MonthlyLedger {
@@ -66,14 +67,14 @@ interface Branch {
 }
 
 const tabs = [
-  { key: 'daily' as const, label: 'Daily Attendance' },
-  { key: 'ledger' as const, label: 'Monthly Ledger' },
-  { key: 'salary' as const, label: 'Salary Sheet' },
-  { key: 'raw' as const, label: 'Attendance Logs' },
+  { key: 'daily' as const, label: 'Daily Attendance', icon: <Calendar className="h-4 w-4" /> },
+  { key: 'ledger' as const, label: 'Monthly Ledger', icon: <FileText className="h-4 w-4" /> },
+  { key: 'salary' as const, label: 'Salary Sheet', icon: <Wallet className="h-4 w-4" /> },
+  { key: 'raw' as const, label: 'Attendance Logs', icon: <Database className="h-4 w-4" /> },
 ];
 
 export const Reports: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'daily' | 'ledger' | 'salary' | 'raw' | 'absent'>('daily');
+  const [activeTab, setActiveTab] = useState<'daily' | 'ledger' | 'salary' | 'raw'>('daily');
   const [fromDate, setFromDate] = useState(new Date().toISOString().split('T')[0]);
   const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
@@ -86,6 +87,7 @@ export const Reports: React.FC = () => {
   const [gates, setGates] = useState<{id: number, name: string}[]>([]);
   const [departments, setDepartments] = useState<string[]>(['All']);
   const [loading, setLoading] = useState(false);
+  const [hasGenerated, setHasGenerated] = useState(false);
 
   const [dailyData, setDailyData] = useState<DailyAttendance[]>([]);
   const [ledgerData, setLedgerData] = useState<MonthlyLedger[]>([]);
@@ -96,18 +98,6 @@ export const Reports: React.FC = () => {
 
   useEffect(() => {
     loadMetadata();
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-  }, [activeTab, fromDate, toDate, month, department, branch, gate]);
-
-  useEffect(() => {
-     const unlisten = listen('attendance-sync-complete', (event) => {
-        console.log('Attendance sync event:', event.payload);
-        fetchData();
-     });
-     return () => { unlisten.then(f => f()); };
   }, []);
 
   useEffect(() => {
@@ -123,8 +113,8 @@ export const Reports: React.FC = () => {
 
   const loadMetadata = async () => {
     try {
-      const depts = await invoke<string[]>('get_departments');
-      setDepartments(depts);
+      const depts = await invoke<any[]>('list_departments');
+      setDepartments(['All', ...depts.map(d => d.name)]);
       const brs = await invoke<Branch[]>('list_branches');
       setBranches(brs);
     } catch (e) {
@@ -132,8 +122,9 @@ export const Reports: React.FC = () => {
     }
   };
 
-  const fetchData = async () => {
+  const handleGenerate = async () => {
     setLoading(true);
+    setHasGenerated(true);
     try {
       if (activeTab === 'daily') {
         const data = await invoke<DailyAttendance[]>('get_daily_reports', { fromDate, toDate, dept: department, search, branchId: branch, gateId: gate });
@@ -155,9 +146,7 @@ export const Reports: React.FC = () => {
   };
 
   const exportPDF = () => {
-    const doc = new jsPDF('l', 'mm', 'a4') as any; // Landscape
-
-    // Company Header
+    const doc = new jsPDF('l', 'mm', 'a4') as any;
     doc.setFontSize(18);
     doc.setTextColor(44, 62, 80);
     doc.text(AppConfig.appName.toUpperCase(), 14, 15);
@@ -190,7 +179,7 @@ export const Reports: React.FC = () => {
       body: tableData,
       startY: 35,
       styles: { fontSize: 8 },
-      headStyles: { fillStyle: 'var(--primary-color)' }
+      headStyles: { fillColor: [79, 70, 229] }
     });
 
     doc.save(`BioBridge_${activeTab}_${new Date().getTime()}.pdf`);
@@ -207,18 +196,6 @@ export const Reports: React.FC = () => {
     XLSX.writeFile(wb, `BioBridge_${activeTab}_Report.xlsx`);
   };
 
-  const exportUSB = async () => {
-    try {
-      setLoading(true);
-      const path = await invoke<string>('export_usb_db');
-      alert(`USB Backup Database created successfully at:\n${path}`);
-    } catch (e) {
-      alert(`Export Failed: ${e}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Ledger Helper: Days in month
   const getDaysInMonth = () => {
     const [y, m] = month.split('-').map(Number);
@@ -226,314 +203,352 @@ export const Reports: React.FC = () => {
   };
 
   const getStatusBadgeVariant = (status: string): 'default' | 'success' | 'warning' | 'destructive' => {
-    if (status === 'On-time' || status === 'P') return 'success';
+    if (status === 'On-time' || status === 'P' || status === 'Present') return 'success';
     if (status === 'Late' || status === 'L') return 'warning';
     return 'destructive';
   };
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-           <h1 className="text-2xl font-bold tracking-tight">HR Reporting Engine</h1>
-           <p className="text-sm text-muted-foreground mt-1">Enterprise attendance analysis and payroll reconciliation</p>
+    <div className="p-6 max-w-[1600px] mx-auto space-y-8 animate-in fade-in duration-500">
+      {/* Header Area */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+        <div className="-mt-6">
+           <Badge variant="outline" className="mb-2 px-3 py-1 border-primary/20 text-primary bg-primary/5">
+              <Database className="h-3 w-3 mr-1.5" /> HR Reporting Engine
+           </Badge>
+           <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">Workforce Insights</h1>
+           <p className="text-slate-500 dark:text-slate-400 mt-1 text-base md:text-lg">Generate precise analytics for payroll and operational visibility.</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-             <Button variant="outline" onClick={fetchData} disabled={loading}>
-               <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Recalculate
-             </Button>
-             {activeTab === 'raw' && (
-                <Button variant="outline" className="text-blue-500 border-blue-500/30 hover:bg-blue-500/10" onClick={exportUSB} disabled={loading}>
-                  <Database className="h-4 w-4" /> Export to USB (.db)
-                </Button>
-             )}
-             <Button variant="secondary" onClick={exportExcel}>
-               <Download className="h-4 w-4" /> XLSX
-             </Button>
-             <Button onClick={exportPDF}>
-               <Download className="h-4 w-4" /> PDF
-             </Button>
+        <div className="flex flex-wrap gap-3">
+          {hasGenerated && (
+            <>
+              <Button variant="outline" onClick={exportExcel} className="h-11 shadow-sm px-6">
+                <Download className="h-4 w-4 mr-2" /> Export XLSX
+              </Button>
+              <Button variant="default" onClick={exportPDF} className="h-11 shadow-md px-6 bg-slate-900 hover:bg-slate-800">
+                <Download className="h-4 w-4 mr-2" /> PDF Report
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="inline-flex items-center gap-1 p-1 bg-muted rounded-lg border">
-        {tabs.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-              activeTab === tab.key
-                ? 'bg-background text-primary shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        {/* Sidebar Configuration: Step 1 & 2 */}
+        <div className="lg:col-span-4 space-y-6">
+           <Card className="border-none shadow-xl bg-slate-50 dark:bg-slate-900/50">
+              <CardContent className="p-6 space-y-8">
+                 {/* Step 1: Style Selection */}
+                 <section>
+                    <div className="flex items-center gap-3 mb-4">
+                       <div className="bg-primary text-white h-7 w-7 rounded-full flex items-center justify-center text-sm font-bold shadow-lg shadow-primary/20">1</div>
+                       <h3 className="font-bold text-slate-800 dark:text-slate-200 uppercase tracking-widest text-xs">Select Report Style</h3>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                       {tabs.map(tab => (
+                          <button
+                            key={tab.key}
+                            onClick={() => { setActiveTab(tab.key); setHasGenerated(false); }}
+                            className={`flex items-center gap-3 p-3 rounded-xl border-2 transition-all text-left ${
+                              activeTab === tab.key
+                                ? 'bg-white dark:bg-slate-800 border-primary shadow-lg scale-[1.01] ring-4 ring-primary/5'
+                                : 'bg-slate-100/50 dark:bg-slate-800/30 border-transparent hover:border-slate-300 dark:hover:border-slate-700'
+                            }`}
+                          >
+                             <div className={`p-2 rounded-lg flex-shrink-0 ${activeTab === tab.key ? 'bg-primary text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`}>
+                                {tab.icon}
+                             </div>
+                             <span className={`text-xs font-bold leading-tight ${activeTab === tab.key ? 'text-primary' : 'text-slate-600 dark:text-slate-400'}`}>{tab.label}</span>
+                          </button>
+                       ))}
+                    </div>
+                 </section>
+
+                 {/* Step 2: Filters */}
+                 <section>
+                    <div className="flex items-center gap-3 mb-6">
+                       <div className="bg-primary text-white h-7 w-7 rounded-full flex items-center justify-center text-sm font-bold shadow-lg shadow-primary/20">2</div>
+                       <h3 className="font-bold text-slate-800 dark:text-slate-200 uppercase tracking-widest text-xs">Configure Parameters</h3>
+                    </div>
+                    
+                    <div className="space-y-5">
+                       <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                             <Label className="text-[10px] uppercase font-bold text-slate-400">Branch</Label>
+                             <Select value={branch?.toString() || ''} onChange={e => setBranch(Number(e.target.value) || null)}>
+                                <option value="">All Branches</option>
+                                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                             </Select>
+                          </div>
+                          <div className="space-y-2">
+                             <Label className="text-[10px] uppercase font-bold text-slate-400">Department</Label>
+                             <Select value={department} onChange={e => setDepartment(e.target.value)}>
+                                {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                             </Select>
+                          </div>
+                       </div>
+
+                       {activeTab === 'ledger' || activeTab === 'salary' ? (
+                          <div className="space-y-2">
+                             <Label className="text-[10px] uppercase font-bold text-slate-400">Month / Year Period</Label>
+                             <div className="relative">
+                                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                                <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="pl-10 h-12 text-lg font-mono font-bold" />
+                             </div>
+                          </div>
+                       ) : (
+                          <div className="grid grid-cols-2 gap-4">
+                             <div className="space-y-2">
+                                <Label className="text-[10px] uppercase font-bold text-slate-400">Date From</Label>
+                                <Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="h-10 font-mono text-sm" />
+                             </div>
+                             <div className="space-y-2">
+                                <Label className="text-[10px] uppercase font-bold text-slate-400">Date To</Label>
+                                <Input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="h-10 font-mono text-sm" />
+                             </div>
+                          </div>
+                       )}
+
+                       <div className="space-y-2">
+                          <Label className="text-[10px] uppercase font-bold text-slate-400">Employee Search (Optional)</Label>
+                          <div className="relative">
+                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                             <Input 
+                                placeholder="Start typing name or bio-id..." 
+                                value={search} 
+                                onChange={e => setSearch(e.target.value)}
+                                className="pl-10 h-12 italic" 
+                             />
+                          </div>
+                       </div>
+                    </div>
+                 </section>
+
+                 <Button 
+                    onClick={handleGenerate} 
+                    disabled={loading}
+                    className="w-full h-12 bg-primary hover:bg-primary/90 text-white font-bold text-base shadow-lg shadow-primary/20 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-2"
+                 >
+                    {loading ? (
+                      <RefreshCw className="h-6 w-6 animate-spin" />
+                    ) : (
+                      <><Play className="h-6 w-6" /> GENERATE REVIEW</>
+                    )}
+                 </Button>
+              </CardContent>
+           </Card>
+        </div>
+
+        {/* Preview Area: Step 3 */}
+        <div className="lg:col-span-8 flex flex-col min-h-[600px]">
+           <Card className="flex-1 border-2 border-slate-100 dark:border-slate-800 overflow-hidden shadow-sm">
+              {!hasGenerated ? (
+                 <div className="flex flex-col items-center justify-center h-full text-center p-12 space-y-6">
+                    <div className="relative">
+                       <FolderOpen className="h-24 w-24 text-slate-200 dark:text-slate-800 opacity-50" />
+                       <ChevronRight className="h-10 w-10 text-primary absolute -bottom-2 -right-2 animate-bounce" />
+                    </div>
+                    <div className="space-y-2 max-w-sm">
+                       <h3 className="text-2xl font-bold text-slate-400">Live Preview Container</h3>
+                       <p className="text-slate-400 dark:text-slate-600 text-sm italic">
+                          Click <strong>GENERATE REVIEW</strong> in the sidebar to fetch real-time data from the database and calculate attendance trends.
+                       </p>
+                    </div>
+                 </div>
+              ) : loading ? (
+                 <div className="flex flex-col items-center justify-center h-full space-y-6 bg-slate-50/50">
+                    <div className="relative">
+                       <div className="h-16 w-16 rounded-full border-4 border-slate-200 border-t-primary animate-spin" />
+                       <RefreshCw className="h-6 w-6 text-primary absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+                    </div>
+                    <p className="text-primary font-bold animate-pulse text-lg tracking-widest uppercase">Crunching Real-Time Logs...</p>
+                 </div>
+              ) : (
+                 <div className="p-0 animate-in slide-in-from-bottom-5 duration-500">
+                    <div className="bg-slate-50 dark:bg-slate-900 border-b p-4 flex justify-between items-center">
+                       <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-5 w-5 text-green-500" />
+                          <span className="font-bold text-sm tracking-tight capitalize">{activeTab.replace('_', ' ')} Calculations Ready</span>
+                       </div>
+                       <Badge variant="outline" className="font-mono text-xs text-slate-400 border-slate-200">
+                          {activeTab === 'daily' ? dailyData.length : activeTab === 'ledger' ? ledgerData.length : activeTab === 'salary' ? salaryData.length : rawData.length} Records Found
+                       </Badge>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                       {activeTab === 'daily' && <DailyTable data={dailyData} />}
+                       {activeTab === 'ledger' && <LedgerTable data={ledgerData} days={getDaysInMonth()} />}
+                       {activeTab === 'salary' && <SalaryTable data={salaryData} />}
+                       {activeTab === 'raw' && <RawTable data={rawData} />}
+                    </div>
+                 </div>
+              )}
+           </Card>
+        </div>
       </div>
-
-      {/* Filters Card */}
-      <Card>
-        <CardContent className="p-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 items-end">
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-wide">Branch</Label>
-              <Select value={branch?.toString() || ''} onChange={e => setBranch(Number(e.target.value) || null)}>
-                <option value="">All Branches</option>
-                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-wide">Gate / Location</Label>
-              <Select value={gate?.toString() || ''} onChange={e => setGate(Number(e.target.value) || null)} disabled={!branch}>
-                <option value="">All Gates</option>
-                {gates.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-wide">Department</Label>
-              <Select value={department} onChange={e => setDepartment(e.target.value)}>
-                {departments.map(d => <option key={d} value={d}>{d}</option>)}
-              </Select>
-            </div>
-
-            {activeTab === 'ledger' || activeTab === 'salary' ? (
-                <div className="space-y-2">
-                  <Label className="text-xs uppercase tracking-wide">Month</Label>
-                  <Input type="month" value={month} onChange={e => setMonth(e.target.value)} />
-                </div>
-            ) : (
-                <>
-                  <div className="space-y-2">
-                    <Label className="text-xs uppercase tracking-wide">From {calendarMode === 'BS' ? '(AD)' : ''}</Label>
-                    <Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs uppercase tracking-wide">To {calendarMode === 'BS' ? '(AD)' : ''}</Label>
-                    <Input type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
-                  </div>
-                </>
-            )}
-
-            <div className="space-y-2">
-               <Label className="text-xs uppercase tracking-wide">Employee Search</Label>
-               <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    className="pl-9"
-                    placeholder="Name or ID..."
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                  />
-               </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Data Section */}
-      <Card className="shadow-sm">
-        {loading ? (
-          <CardContent className="flex flex-col items-center justify-center h-64 gap-4">
-            <RefreshCw className="h-10 w-10 text-primary animate-spin" />
-            <span className="text-sm text-muted-foreground">Crunching attendance data...</span>
-          </CardContent>
-        ) : (
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              {activeTab === 'daily' && (
-                dailyData.length === 0 ? (
-                  <NoDataView message="No daily attendance logs found for selected filters." />
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Employee</TableHead>
-                        <TableHead>In Time</TableHead>
-                        <TableHead>Out Time</TableHead>
-                        <TableHead>Work Hrs</TableHead>
-                        <TableHead>Late</TableHead>
-                        <TableHead>Early</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {dailyData.map((d, i) => (
-                        <TableRow key={i}>
-                          <TableCell>
-                            <div>
-                              <div className="font-semibold">{d.name}</div>
-                              <div className="text-xs text-muted-foreground">{d.department}</div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-mono text-sm">{d.check_in.split(' ')[1] || d.check_in}</TableCell>
-                          <TableCell className="font-mono text-sm">{d.check_out.split(' ')[1] || d.check_out}</TableCell>
-                          <TableCell className="font-bold">{d.working_hours}</TableCell>
-                          <TableCell className={d.late_entry === 'Yes' ? 'text-red-500 font-medium' : 'text-green-500 font-medium'}>
-                            {d.late_entry}
-                          </TableCell>
-                          <TableCell className={d.early_exit === 'Yes' ? 'text-red-500 font-medium' : 'text-green-500 font-medium'}>
-                            {d.early_exit}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={getStatusBadgeVariant(d.status)} className="uppercase text-xs">
-                              {d.status}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )
-              )}
-
-              {activeTab === 'ledger' && (
-                ledgerData.length === 0 ? (
-                  <NoDataView message="No monthly statistics found for this month." />
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="sticky left-0 bg-muted z-10 min-w-[150px]">Employee</TableHead>
-                          {Array.from({ length: getDaysInMonth() }).map((_, i) => (
-                            <TableHead key={i} className="w-[35px] text-center p-2">
-                              {(i + 1).toString().padStart(2, '0')}
-                            </TableHead>
-                          ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {ledgerData.map((l, i) => (
-                          <TableRow key={i}>
-                            <TableCell className="sticky left-0 bg-card z-5 border-r min-w-[150px]">
-                              <div className="font-semibold text-sm">{l.name}</div>
-                            </TableCell>
-                            {Array.from({ length: getDaysInMonth() }).map((_, di) => {
-                              const day = (di + 1).toString().padStart(2, '0');
-                              const status = l.attendance[day] || 'A';
-                              return (
-                                <TableCell key={di} className="p-1 text-center">
-                                  <div className={`inline-flex items-center justify-center w-6 h-6 rounded text-[10px] font-bold ${
-                                    status === 'P'
-                                      ? 'bg-green-500/10 text-green-500'
-                                      : 'bg-red-500/10 text-red-500'
-                                  }`}>
-                                    {status}
-                                  </div>
-                                </TableCell>
-                              );
-                            })}
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )
-              )}
-
-              {activeTab === 'salary' && (
-                salaryData.length === 0 ? (
-                  <NoDataView message="No salary sheet data available for selected month." />
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Employee</TableHead>
-                        <TableHead>Present Days</TableHead>
-                        <TableHead>Paid Leaves</TableHead>
-                        <TableHead>Total Payable</TableHead>
-                        <TableHead>Remarks</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {salaryData.map((s, i) => (
-                        <TableRow key={i}>
-                          <TableCell>
-                            <div className="font-semibold">{s.name}</div>
-                            <div className="text-xs text-muted-foreground">{s.department}</div>
-                          </TableCell>
-                          <TableCell>{s.present_days}</TableCell>
-                          <TableCell>{s.paid_leaves}</TableCell>
-                          <TableCell className="text-lg font-bold text-primary">{s.payable_days}</TableCell>
-                          <TableCell>
-                            <Button variant="ghost" size="sm" className="text-primary font-semibold text-xs gap-1 h-7">
-                              <Calculator className="h-3 w-3" /> Adjustment
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )
-              )}
-
-              {activeTab === 'raw' && (
-                rawData.length === 0 ? (
-                  <NoDataView message="No attendance logs found. Sync your device to populate records." />
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-[40px]">#</TableHead>
-                        <TableHead>Employee Name</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Time</TableHead>
-                        <TableHead>Punch Method</TableHead>
-                        <TableHead>Device</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {rawData.map((r, i) => {
-                        const dt = r.timestamp || '';
-                        const datePart = dt.length >= 10 ? dt.substring(0, 10) : dt;
-                        const timePart = dt.length >= 16 ? dt.substring(11, 16) : '';
-                        const method = (r.type || 'FINGER').toUpperCase();
-                        const isFace = method.includes('FACE') || method === '1';
-                        return (
-                          <TableRow key={i}>
-                            <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
-                            <TableCell>
-                              <div className="font-bold">{r.name}</div>
-                              <div className="text-xs text-muted-foreground">ID #{r.id}</div>
-                            </TableCell>
-                            <TableCell className="font-mono text-sm">{datePart}</TableCell>
-                            <TableCell className="font-mono font-bold text-primary">{timePart}</TableCell>
-                            <TableCell>
-                              <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${
-                                isFace
-                                  ? 'bg-blue-500/10 text-blue-500'
-                                  : 'bg-green-500/10 text-green-500'
-                              }`}>
-                                {isFace
-                                  ? <><ScanFace className="h-3.5 w-3.5" /> Face</>
-                                  : <><Fingerprint className="h-3.5 w-3.5" /> Finger</>
-                                }
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{r.device}</TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                )
-              )}
-            </div>
-          </CardContent>
-        )}
-      </Card>
     </div>
   );
 };
 
-// UI Components
-const NoDataView = ({ message }: { message: string }) => (
-  <div className="flex flex-col items-center justify-center py-16 px-5 text-center border border-dashed border-border m-5 rounded-lg">
-    <FolderOpen className="h-12 w-12 text-muted-foreground/50 mb-4" />
-    <h3 className="text-lg font-semibold">No Records Found</h3>
-    <p className="text-sm text-muted-foreground mt-2">{message}</p>
+// --- Sub Tables ---
+
+const DailyTable = ({ data }: { data: DailyAttendance[] }) => (
+  <Table>
+    <TableHeader className="bg-slate-100 dark:bg-slate-800">
+      <TableRow>
+        <TableHead className="font-bold text-[10px] uppercase">Device ID</TableHead>
+        <TableHead className="font-bold text-[10px] uppercase">User</TableHead>
+        <TableHead className="font-bold text-[10px] uppercase">Date</TableHead>
+        <TableHead className="font-bold text-[10px] uppercase min-w-[200px]">Time (All Punches)</TableHead>
+        <TableHead className="font-bold text-[10px] uppercase">Method</TableHead>
+        <TableHead className="font-bold text-[10px] uppercase text-right">Branch</TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {data.map((d, i) => {
+        const punchArray = d.all_punches.split(' | ');
+        return (
+          <TableRow key={i} className="hover:bg-slate-50/80 transition-colors">
+            <TableCell className="font-mono text-xs text-slate-400 font-bold">#{d.employee_code || d.id}</TableCell>
+            <TableCell className="py-4">
+              <div className="font-bold text-slate-900 dark:text-slate-100">{d.name}</div>
+              <div className="text-[10px] text-slate-400 font-medium uppercase">{d.department}</div>
+            </TableCell>
+            <TableCell className="font-mono text-xs">{d.date}</TableCell>
+            <TableCell>
+              <div className="flex flex-wrap gap-1.5">
+                {punchArray.map((p, pi) => (
+                  <div key={pi} className="flex flex-col">
+                    <Badge variant="outline" className="text-[10px] font-black py-0.5 px-2 border-primary/20 bg-primary/5 text-primary">
+                      {p}
+                    </Badge>
+                    {pi === 0 && <span className="text-[8px] text-center text-slate-400 font-bold uppercase">In</span>}
+                    {pi === punchArray.length - 1 && pi > 0 && <span className="text-[8px] text-center text-slate-400 font-bold uppercase">Out</span>}
+                  </div>
+                ))}
+              </div>
+            </TableCell>
+            <TableCell>
+               <Badge variant="secondary" className="text-[9px] font-black uppercase px-2">
+                  {d.method || 'Finger'}
+               </Badge>
+            </TableCell>
+            <TableCell className="text-right font-bold text-xs text-slate-500 uppercase tracking-tighter">
+               {d.branch_name || 'Main Office'}
+            </TableCell>
+          </TableRow>
+        );
+      })}
+    </TableBody>
+  </Table>
+);
+
+const LedgerTable = ({ data, days }: { data: MonthlyLedger[], days: number }) => (
+  <div className="w-full">
+    <Table className="border-collapse">
+      <TableHeader className="bg-slate-100 dark:bg-slate-800 sticky top-0 z-20 shadow-sm">
+        <TableRow>
+          <TableHead className="sticky left-0 bg-slate-100 dark:bg-slate-800 z-30 min-w-[150px] font-black uppercase text-[10px]">Staff Profile</TableHead>
+          {Array.from({ length: days }).map((_, i) => (
+            <TableHead key={i} className="w-[30px] text-center p-2 text-[9px] font-bold border-l border-slate-200">
+              {(i + 1).toString().padStart(2, '0')}
+            </TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {data.map((l, i) => (
+          <TableRow key={i} className="border-b">
+            <TableCell className="sticky left-0 bg-white dark:bg-slate-900 z-10 border-r-4 border-primary font-bold text-xs py-3">
+              {l.name}
+            </TableCell>
+            {Array.from({ length: days }).map((_, di) => {
+              const day = (di + 1).toString().padStart(2, '0');
+              const status = l.attendance[day] || 'A';
+              return (
+                <TableCell key={di} className="p-1 text-center border-l border-slate-50 dark:border-slate-800">
+                  <div className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-[9px] font-black shadow-sm ${
+                    status === 'P'
+                      ? 'bg-emerald-500 text-white'
+                      : 'bg-rose-50 text-rose-300 dark:bg-rose-900/20 dark:text-rose-800'
+                  }`}>
+                    {status}
+                  </div>
+                </TableCell>
+              );
+            })}
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   </div>
+);
+
+const SalaryTable = ({ data }: { data: SalarySheet[] }) => (
+  <Table>
+    <TableHeader className="bg-slate-100 dark:bg-slate-800">
+      <TableRow>
+        <TableHead className="font-bold text-xs">EMPLOYEE</TableHead>
+        <TableHead className="font-bold text-xs">PRESENT DAYS</TableHead>
+        <TableHead className="font-bold text-xs">PAID LEAVES</TableHead>
+        <TableHead className="font-bold text-xs">TOTAL PAYABLE</TableHead>
+        <TableHead className="font-bold text-xs text-right">ACTION</TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {data.map((s, i) => (
+        <TableRow key={i}>
+          <TableCell className="py-4">
+            <div className="font-bold">{s.name}</div>
+            <div className="text-[10px] text-slate-400 font-bold uppercase">{s.department}</div>
+          </TableCell>
+          <TableCell className="font-bold text-blue-600">{s.present_days}</TableCell>
+          <TableCell className="italic text-slate-400">{s.paid_leaves}</TableCell>
+          <TableCell className="text-lg font-black text-primary p-4 bg-primary/5">{s.payable_days}</TableCell>
+          <TableCell className="text-right">
+            <Button variant="ghost" size="sm" className="text-primary font-black text-xs hover:bg-primary/10">
+              ADJUSTMENT
+            </Button>
+          </TableCell>
+        </TableRow>
+      ))}
+    </TableBody>
+  </Table>
+);
+
+const RawTable = ({ data }: { data: RawLog[] }) => (
+  <Table>
+    <TableHeader className="bg-slate-100 dark:bg-slate-800">
+      <TableRow>
+        <TableHead className="font-extrabold text-[10px]">PUNCH ID</TableHead>
+        <TableHead className="font-extrabold text-[10px]">USER</TableHead>
+        <TableHead className="font-extrabold text-[10px]">DATETIME</TableHead>
+        <TableHead className="font-extrabold text-[10px]">METHOD</TableHead>
+        <TableHead className="font-extrabold text-[10px]">BRANCH/GATE</TableHead>
+      </TableRow>
+    </TableHeader>
+    <TableBody>
+      {data.map((r, i) => {
+        const dt = r.timestamp || '';
+        const method = (r.type || 'FINGER').toUpperCase();
+        const isFace = method.includes('FACE') || method === '1';
+        return (
+          <TableRow key={i} className="font-mono text-xs">
+            <TableCell className="text-slate-300">#{(i+1).toString().padStart(4, '0')}</TableCell>
+            <TableCell className="font-bold text-slate-800 dark:text-slate-200">{r.name}</TableCell>
+            <TableCell className="text-blue-500 font-bold">{dt}</TableCell>
+            <TableCell>
+              <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black ${
+                isFace ? 'bg-indigo-500 text-white' : 'bg-emerald-500 text-white'
+              }`}>
+                {isFace ? <ScanFace size={12} /> : <Fingerprint size={12} />}
+                {isFace ? 'FACE' : 'FINGER'}
+              </div>
+            </TableCell>
+            <TableCell className="text-slate-400 font-bold tracking-tight">{r.device || 'Head Office'}</TableCell>
+          </TableRow>
+        );
+      })}
+    </TableBody>
+  </Table>
 );

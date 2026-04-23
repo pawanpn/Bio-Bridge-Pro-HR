@@ -102,7 +102,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           username: supabaseAuthUser.email?.split('@')[0] || 'user',
           email: supabaseAuthUser.email || '',
           full_name: supabaseAuthUser.user_metadata?.full_name,
-          role: 'EMPLOYEE', // Default role
+          role: 'SUPER_ADMIN', // Set as SUPER_ADMIN for development/setup phase
         };
 
         setUser(userData);
