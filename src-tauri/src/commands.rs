@@ -443,3 +443,93 @@ pub async fn scan_network(_base_ip: String) -> Result<(), AppError> {
     Ok(())
 }
 
+#[tauri::command]
+pub async fn add_branch(
+    name: String,
+    location: Option<String>,
+    state: tauri::State<'_, AppState>
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    // Default org_id = 1 for now
+    conn.execute(
+        "INSERT INTO Branches (org_id, name, location) VALUES (1, ?1, ?2)",
+        params![name, location],
+    )?;
+    
+    Ok(serde_json::json!({"success": true}))
+}
+
+#[tauri::command]
+pub async fn update_branch(
+    id: i64,
+    name: String,
+    location: Option<String>,
+    state: tauri::State<'_, AppState>
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    conn.execute(
+        "UPDATE Branches SET name = ?1, location = ?2 WHERE id = ?3",
+        params![name, location, id],
+    )?;
+    
+    Ok(serde_json::json!({"success": true}))
+}
+
+#[tauri::command]
+pub async fn delete_branch(id: i64, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    // Prevent delete if Gates or Employees or Devices exist
+    conn.execute("DELETE FROM Branches WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn add_gate(
+    branch_id: i64,
+    name: String,
+    state: tauri::State<'_, AppState>
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    conn.execute(
+        "INSERT INTO Gates (branch_id, name) VALUES (?1, ?2)",
+        params![branch_id, name],
+    )?;
+    
+    Ok(serde_json::json!({"success": true}))
+}
+
+#[tauri::command]
+pub async fn update_gate(
+    id: i64,
+    branch_id: i64,
+    name: String,
+    state: tauri::State<'_, AppState>
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    conn.execute(
+        "UPDATE Gates SET branch_id = ?1, name = ?2 WHERE id = ?3",
+        params![branch_id, name, id],
+    )?;
+    
+    Ok(serde_json::json!({"success": true}))
+}
+
+#[tauri::command]
+pub async fn delete_gate(id: i64, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    
+    conn.execute("DELETE FROM Gates WHERE id = ?1", params![id])?;
+    Ok(())
+}
+

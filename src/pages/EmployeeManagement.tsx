@@ -728,6 +728,20 @@ export const EmployeeManagement: React.FC = () => {
                       />
                     </div>
                     <div className="space-y-2">
+                      <Label htmlFor="branch" className="text-sm font-semibold">Branch *</Label>
+                      <select
+                        id="branch"
+                        value={formData.branch_id}
+                        onChange={(e) => setFormData({ ...formData, branch_id: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                      >
+                        <option value="">Select Branch</option>
+                        {branches.map(b => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
                       <Label htmlFor="department" className="text-sm font-semibold">Department *</Label>
                       <select
                         id="department"
