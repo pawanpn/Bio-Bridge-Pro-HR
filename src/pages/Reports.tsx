@@ -82,6 +82,8 @@ export const Reports: React.FC = () => {
   const [branch, setBranch] = useState<number | null>(null);
   const [gate, setGate] = useState<number | null>(null);
   const [search, setSearch] = useState('');
+  const [employees, setEmployees] = useState<{id: number, name: string, employee_code: string}[]>([]);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [gates, setGates] = useState<{id: number, name: string}[]>([]);
@@ -117,6 +119,8 @@ export const Reports: React.FC = () => {
       setDepartments(['All', ...depts.map(d => d.name)]);
       const brs = await invoke<Branch[]>('list_branches');
       setBranches(brs);
+      const emps = await invoke<any[]>('list_employees_for_select');
+      setEmployees(emps);
     } catch (e) {
       console.error(e);
     }
@@ -126,8 +130,9 @@ export const Reports: React.FC = () => {
     setLoading(true);
     setHasGenerated(true);
     try {
+      const empId = selectedEmployeeId ? Number(selectedEmployeeId) : null;
       if (activeTab === 'daily') {
-        const data = await invoke<DailyAttendance[]>('get_daily_reports', { fromDate, toDate, dept: department, search, branchId: branch, gateId: gate });
+        const data = await invoke<DailyAttendance[]>('get_daily_reports', { fromDate, toDate, dept: department, search, employeeId: empId, branchId: branch, gateId: gate });
         setDailyData(data);
       } else if (activeTab === 'ledger') {
         const data = await invoke<MonthlyLedger[]>('get_monthly_ledger', { yearMonth: month, branchId: branch, gateId: gate, dept: department });
@@ -136,7 +141,7 @@ export const Reports: React.FC = () => {
         const data = await invoke<SalarySheet[]>('get_salary_sheet', { yearMonth: month, branchId: branch, gateId: gate });
         setSalaryData(data);
       } else if (activeTab === 'raw') {
-        const data = await invoke<RawLog[]>('get_raw_logs', { fromDate, toDate, search, branchId: branch, gateId: gate });
+        const data = await invoke<RawLog[]>('get_raw_logs', { fromDate, toDate, search, employeeId: empId, branchId: branch, gateId: gate });
         setRawData(data);
       }
     } catch (e) {
@@ -306,14 +311,35 @@ export const Reports: React.FC = () => {
                           </>
                         )}
 
+                        <div className="flex-1 min-w-[150px]">
+                           <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">Quick Select</Label>
+                           <Select 
+                              value={selectedEmployeeId} 
+                              onChange={e => {
+                                 const val = e.target.value;
+                                 setSelectedEmployeeId(val);
+                                 if (val) setSearch(''); // Auto clear search field when dropdown is selected
+                              }}
+                              className="h-9 text-xs"
+                           >
+                              <option value="">All Employees</option>
+                              {employees.map(emp => (
+                                 <option key={emp.id} value={emp.id}>{emp.name}</option>
+                              ))}
+                           </Select>
+                        </div>
+
                         <div className="flex-1 min-w-[180px]">
-                           <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">Search Employee</Label>
+                           <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">Manual Search</Label>
                            <div className="relative">
                               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                               <Input 
-                                 placeholder="Name or ID..." 
+                                 placeholder="Name or Bio-ID..." 
                                  value={search} 
-                                 onChange={e => setSearch(e.target.value)}
+                                 onChange={e => {
+                                    setSearch(e.target.value);
+                                    if (selectedEmployeeId) setSelectedEmployeeId('');
+                                 }}
                                  className="pl-8 h-9 text-xs italic" 
                               />
                            </div>
