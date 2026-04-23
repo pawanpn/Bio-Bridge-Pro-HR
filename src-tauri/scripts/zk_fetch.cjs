@@ -34,6 +34,31 @@ async function main() {
             
             // Keep process alive
             process.stdin.resume();
+        } else if (command === 'setUser') {
+            const userId = process.argv[6] || '0';
+            const name = process.argv[7] || '';
+            const role = parseInt(process.argv[8]) || 0;
+            const cardNo = process.argv[9] || '';
+            
+            // setUser(uid, userid, name, password, role, cardno)
+            // uid is usually same as userId or record index, userid is the login id
+            await zkInstance.setUser(userId, userId, name, '', role, cardNo);
+            
+            process.stdout.write(JSON.stringify({
+                status: 'success',
+                message: `User ${userId} (${name}) set successfully`
+            }));
+            await zkInstance.disconnect();
+        } else if (command === 'getFingerprints') {
+            const userId = process.argv[6] || '0';
+            const fps = await zkInstance.getFingerprints();
+            const userFps = fps.filter(f => f.userId === userId);
+            
+            process.stdout.write(JSON.stringify({
+                status: 'success',
+                data: userFps
+            }));
+            await zkInstance.disconnect();
         }
 
     } catch (e) {

@@ -85,6 +85,8 @@ pub fn run() {
             commands::add_gate,
             commands::update_gate,
             commands::delete_gate,
+            commands::push_employee_to_device,
+            commands::pull_employee_biometric,
             // From crud.rs (ERP Modules)
             crud::create_item,
             crud::list_items,

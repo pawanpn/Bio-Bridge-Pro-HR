@@ -112,4 +112,11 @@ impl DeviceDriver for HikvisionDriver {
         }
         Ok(())
     }
+    async fn push_user_info(&self, _ip: &str, _port: u16, _comm_key: i32, _machine_number: i32, _user_id: i32, _name: &str, _role: i32, _card_no: &str) -> Result<(), AppError> {
+        Err(AppError::Unknown("Push user info not implemented for Hikvision driver yet".into()))
+    }
+
+    async fn pull_user_biometric(&self, _ip: &str, _port: u16, _comm_key: i32, _machine_number: i32, _user_id: i32) -> Result<serde_json::Value, AppError> {
+        Err(AppError::Unknown("Pull biometric not implemented for Hikvision driver yet".into()))
+    }
 }
