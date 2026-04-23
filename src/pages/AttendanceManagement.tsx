@@ -186,6 +186,8 @@ export const AttendanceManagement: React.FC = () => {
         setSyncStatus(`ℹ️ No new logs found on ${device.name}.`);
       }
       loadDailyLogs();
+      // Notify other components (like EmployeeManagement) that new data is available
+      window.dispatchEvent(new CustomEvent('data-synced', { detail: { table: 'employees' } }));
     } catch (error) {
       console.error('Sync failed:', error);
       setSyncStatus(`❌ Sync failed: ${error}`);
