@@ -352,7 +352,7 @@ fn store_records_locally(
     table_name: &str,
     records: &[serde_json::Value],
 ) -> Result<usize, crate::errors::AppError> {
-    use crate::errors::AppError;
+    // Removed redundant import
 
     let mut stored = 0;
 
@@ -383,7 +383,7 @@ fn store_records_locally(
                 },
                 _ => {
                     // Generic fallback for other tables if they have a 'data' column
-                    let json_str = record.to_string();
+                    // Removed unused json_str
                     let _ = conn.execute(
                         &format!("INSERT OR REPLACE INTO {} (id, updated_at) VALUES (?1, datetime('now'))", table_name),
                         rusqlite::params![id],
