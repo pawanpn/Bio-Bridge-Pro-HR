@@ -635,41 +635,13 @@ export const EmployeeManagement: React.FC = () => {
                   <><UserPlus className="w-5 h-5 text-primary" /> Add New Employee</>
                 )}
               </DialogTitle>
-              <div className="flex items-center gap-4 pr-10">
-                {formDialog.editing && (
-                  <div className="flex items-center gap-1 mr-4 border-r pr-4 bg-muted/20 rounded-l-lg">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={handlePrevEmployee}
-                      disabled={filteredEmployees.findIndex(e => e.id === formDialog.editing.id) <= 0}
-                      className="h-8 px-2"
-                    >
-                      <span className="text-xs font-bold text-muted-foreground hover:text-primary transition-colors">← Prev Employee</span>
-                    </Button>
-                    <div className="text-[10px] text-muted-foreground font-mono px-2 bg-background/50 py-0.5 rounded border border-slate-100">
-                       {filteredEmployees.findIndex(e => e.id === formDialog.editing.id) + 1} / {filteredEmployees.length}
-                    </div>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={handleNextEmployee}
-                      disabled={filteredEmployees.findIndex(e => e.id === formDialog.editing.id) >= filteredEmployees.length - 1}
-                      className="h-8 px-2"
-                    >
-                      <span className="text-xs font-bold text-muted-foreground hover:text-primary transition-colors">Next Employee →</span>
-                    </Button>
-                  </div>
-                )}
-                
-                <div className="flex gap-2">
-                  <Button variant="ghost" onClick={() => setFormDialog({ open: false, editing: null })}>
-                    Discard
-                  </Button>
-                  <Button onClick={handleSaveEmployee} className="bg-primary hover:bg-primary/95 text-white min-w-[80px] shadow-sm">
-                    Save
-                  </Button>
-                </div>
+              <div className="flex gap-2 pr-12">
+                <Button variant="ghost" onClick={() => setFormDialog({ open: false, editing: null })}>
+                  Discard
+                </Button>
+                <Button onClick={handleSaveEmployee} className="bg-primary hover:bg-primary/95 text-white min-w-[80px] shadow-sm">
+                  Save
+                </Button>
               </div>
             </div>
           </DialogHeader>
