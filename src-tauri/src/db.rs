@@ -165,9 +165,9 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("motorcycle_license", "TEXT"), ("automobile_license", "TEXT"), ("religion", "TEXT"), 
         ("city", "TEXT"), ("postcode", "TEXT"), ("passport_no", "TEXT"), ("nationality", "TEXT"),
         ("verification_mode", "TEXT"), ("device_privilege", "TEXT"), ("device_password", "TEXT"),
-        ("card_no", "TEXT"), ("bio_photo", "TEXT"), ("enable_attendance", "INTEGER DEFAULT 1"),
         ("enable_holiday", "INTEGER DEFAULT 1"), ("outdoor_management", "INTEGER DEFAULT 0"),
-        ("workflow_role", "TEXT"), ("app_role", "TEXT")
+        ("workflow_role", "TEXT"), ("app_role", "TEXT"),
+        ("deleted_at", "TEXT")
     ];
 
     for (col, col_type) in migrations {

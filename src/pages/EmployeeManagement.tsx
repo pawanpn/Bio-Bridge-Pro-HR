@@ -646,8 +646,8 @@ export const EmployeeManagement: React.FC = () => {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Employee ID (Software)</TableHead>
-                <TableHead>Device ID (Hardware)</TableHead>
+                <TableHead>Employee ID</TableHead>
+                <TableHead>Attendance Device ID</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Department</TableHead>
                 <TableHead>Branch</TableHead>
