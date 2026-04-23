@@ -787,9 +787,15 @@ pub async fn list_employees(
             let last = row.get::<_, Option<String>>(4)?.unwrap_or_default();
             let full_name = format!("{} {} {}", first, middle, last).trim().replace("  ", " ").to_string();
 
+            let id = row.get::<_, i64>(0)?;
+            let mut emp_code = row.get::<_, Option<String>>(1)?.unwrap_or_default();
+            if emp_code.is_empty() || emp_code.chars().all(char::is_numeric) {
+                emp_code = format!("BB-{:04}", id);
+            }
+
             Ok(serde_json::json!({
-                "id": row.get::<_, i64>(0)?,
-                "employee_code": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| format!("EMP-{:04}", row.get::<_, i64>(0).unwrap_or(0))),
+                "id": id,
+                "employee_code": emp_code,
                 "first_name": first,
                 "middle_name": middle,
                 "last_name": last,
