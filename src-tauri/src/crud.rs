@@ -719,7 +719,7 @@ pub async fn list_employees(
         "SELECT id, employee_code, first_name, middle_name, last_name,
                 gender, date_of_joining, employment_type, employment_status,
                 department_id as department_name, designation_id as designation_name,
-                status as branch_name
+                status as branch_name, name
         FROM Employees
         WHERE (status IS NULL OR status != 'deleted')",
     );
@@ -751,12 +751,19 @@ pub async fn list_employees(
                 "first_name": row.get::<_, Option<String>>(2)?.unwrap_or_default(),
                 "middle_name": row.get::<_, Option<String>>(3)?,
                 "last_name": row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                "full_name": format!(
-                    "{} {} {}",
-                    row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                    row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                    row.get::<_, Option<String>>(4)?.unwrap_or_default()
-                ).trim().replace("  ", " ").to_string(),
+                "full_name": {
+                    let mut first = row.get::<_, Option<String>>(2)?.unwrap_or_default();
+                    if first.is_empty() {
+                        first = row.get::<_, Option<String>>(12)?.unwrap_or_default();
+                    }
+                    format!(
+                        "{} {} {}",
+                        first,
+                        row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                        row.get::<_, Option<String>>(4)?.unwrap_or_default()
+                    ).trim().replace("  ", " ").to_string()
+                },
+                "name": row.get::<_, Option<String>>(12)?.unwrap_or_default(),
                 "gender": row.get::<_, Option<String>>(5)?,
                 "date_of_joining": row.get::<_, Option<String>>(6)?,
                 "employment_type": row.get::<_, Option<String>>(7)?.unwrap_or_else(|| "Full-time".to_string()),

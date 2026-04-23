@@ -156,7 +156,7 @@ pub async fn sync_device_logs(
         let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
         // First, explicitly auto-register fetched users from device into Employees table
-        for u in device_users {
+        for u in &device_users {
             let _ = conn.execute(
                 "INSERT OR IGNORE INTO Employees (
                     name, first_name, employee_code, biometric_id, 

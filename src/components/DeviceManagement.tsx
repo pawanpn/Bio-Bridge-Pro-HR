@@ -115,7 +115,8 @@ export const DeviceManagement: React.FC = () => {
         deviceId: device.id,
         brand: device.brand,
       });
-      setSyncMessages(prev => ({ ...prev, [device.id]: `✅ ${result}` }));
+      const logs = result as any[];
+      setSyncMessages(prev => ({ ...prev, [device.id]: `✅ Successfully synced ${logs.length} logs!` }));
       setTimeout(() => {
         setSyncMessages(prev => {
           const updated = { ...prev };
