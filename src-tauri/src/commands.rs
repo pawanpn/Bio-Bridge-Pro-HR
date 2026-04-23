@@ -133,6 +133,8 @@ pub async fn sync_device_logs(
     port: u16,
     device_id: i32,
     brand: String,
+    target_branch_id: i64,
+    target_gate_id: i64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let dev_brand = match brand.as_str() {
@@ -141,26 +143,11 @@ pub async fn sync_device_logs(
         _ => DeviceBrand::Unknown,
     };
 
-    println!("Backend Preview: Syncing logs from {} ({})", ip, brand);
+    println!("Backend Preview: Syncing logs from {} ({}) to Branch {}", ip, brand, target_branch_id);
     
     let (device_users, logs) = sync_device(&ip, port, 0, device_id, 1, dev_brand, None).await?;
     
-    // Fetch branch/gate info for this device
-    let (target_branch_id, target_gate_id) = {
-        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
-        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-        conn.query_row(
-            "SELECT branch_id, gate_id FROM Devices WHERE id = ?1",
-            params![device_id],
-            |r| Ok((
-                r.get::<_, Option<i64>>(0).unwrap_or(Some(1)).unwrap_or(1),
-                r.get::<_, Option<i64>>(1).unwrap_or(Some(1)).unwrap_or(1)
-            ))
-        ).unwrap_or((1, 1))
-    };
-
-    println!("Backend Preview: Pulled {} users, {} logs (Branch: {}, Gate: {})", 
-             device_users.len(), logs.len(), target_branch_id, target_gate_id);
+    println!("Backend Preview: Pulled {} users, {} logs", device_users.len(), logs.len());
     for log in &logs {
         println!("  Log: Employee {} at {}", log.employee_id, log.timestamp);
     }
@@ -190,11 +177,11 @@ pub async fn sync_device_logs(
                     params![&u.name, eid]
                 );
             } else {
-                // Create new employee
+                // Create new employee and assign to branch
                 let _ = conn.execute(
-                    "INSERT INTO Employees (name, employee_code, biometric_id, status, employment_status) 
-                     VALUES (?1, ?2, ?3, 'active', 'Permanent')",
-                    params![&u.name, &u.employee_id.to_string(), u.employee_id],
+                    "INSERT INTO Employees (name, employee_code, biometric_id, branch_id, status, employment_status) 
+                     VALUES (?1, ?2, ?3, ?4, 'active', 'Permanent')",
+                    params![&u.name, &u.employee_id.to_string(), u.employee_id, target_branch_id],
                 );
                 
                 // Queue for Supabase Sync
@@ -273,9 +260,11 @@ pub async fn pull_all_logs(
     port: u16,
     device_id: i32,
     brand: String,
+    target_branch_id: i64,
+    target_gate_id: i64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
-    sync_device_logs(ip, port, device_id, brand, state).await
+    sync_device_logs(ip, port, device_id, brand, target_branch_id, target_gate_id, state).await
 }
 
 

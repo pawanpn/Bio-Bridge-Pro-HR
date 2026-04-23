@@ -89,6 +89,9 @@ export const AttendanceManagement: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState('');
   const [syncedLogs, setSyncedLogs] = useState<any[]>([]);
   const [showPreview, setShowPreview] = useState(false);
+  const [syncBranch, setSyncBranch] = useState<string>("1");
+  const [syncGate, setSyncGate] = useState<string>("1");
+  const [gates, setGates] = useState<any[]>([]);
   const [allHistoryLogs, setAllHistoryLogs] = useState<AttendanceLog[]>([]);
 
   // Manual entry
@@ -108,14 +111,16 @@ export const AttendanceManagement: React.FC = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [branchData, empData, deviceData] = await Promise.all([
+      const [branchData, empData, deviceData, gateData] = await Promise.all([
         invoke<any[]>('list_branches'),
         invoke<any[]>('list_employees'),
         invoke<any[]>('list_all_devices'),
+        invoke<any[]>('list_gates'),
       ]);
       setBranches(branchData);
       setEmployees(empData);
       setDevices(deviceData);
+      setGates(gateData);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -169,6 +174,8 @@ export const AttendanceManagement: React.FC = () => {
         port: Number(device.port),
         deviceId: Number(device.id),
         brand: device.brand,
+        targetBranchId: parseInt(syncBranch),
+        targetGateId: parseInt(syncGate)
       });
       
       if (logs && logs.length > 0) {
@@ -341,9 +348,29 @@ export const AttendanceManagement: React.FC = () => {
       </div>
 
       {/* Filters */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <div>
-          <Label>Branch</Label>
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6 bg-muted/20 p-4 rounded-lg border">
+        <div className="md:col-span-2">
+            <Label className="text-primary font-bold">1. Select Target Branch/Gate for Sync</Label>
+            <div className="flex gap-2 mt-1">
+                <select 
+                    value={syncBranch} 
+                    onChange={(e) => setSyncBranch(e.target.value)}
+                    className="flex-1 h-10 px-3 rounded-md border border-input bg-background text-sm"
+                >
+                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+                <select 
+                    value={syncGate} 
+                    onChange={(e) => setSyncGate(e.target.value)}
+                    className="flex-1 h-10 px-3 rounded-md border border-input bg-background text-sm"
+                >
+                    {gates.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
+            </div>
+        </div>
+
+        <div className="md:col-span-1">
+          <Label>View Branch</Label>
           <select
             value={selectedBranch || ''}
             onChange={(e) => setSelectedBranch(e.target.value ? Number(e.target.value) : null)}
