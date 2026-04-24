@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
 import {
   Calendar, Upload, UserPlus,
-  Clock, CheckCircle, AlertCircle, RefreshCw, Fingerprint
+  Clock, CheckCircle, AlertCircle, RefreshCw, Fingerprint, Database
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -89,6 +89,7 @@ export const AttendanceManagement: React.FC = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState('');
+  const [localDefaultId, setLocalDefaultId] = useState<number | null>(null);
   const [sortConfig, setSortConfig] = useState<{key: string, direction: 'asc' | 'desc'} | null>(null);
   const [syncedLogs, setSyncedLogs] = useState<any[]>([]);
   const [showPreview, setShowPreview] = useState(false);
@@ -114,11 +115,12 @@ export const AttendanceManagement: React.FC = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [branchData, empResult, deviceData, gateData] = await Promise.all([
+      const [branchData, empResult, deviceData, gateData, localId] = await Promise.all([
         invoke<any[]>('list_branches'),
         invoke<any>('list_employees'),
-        invoke<any[]>('list_all_devices'),
+        invoke<any[]>('list_all_devices', { branchId: selectedBranch }),
         invoke<any[]>('list_gates'),
+        invoke<number | null>('get_local_sync_target'),
       ]);
       setBranches(branchData);
       
@@ -127,12 +129,23 @@ export const AttendanceManagement: React.FC = () => {
       
       setDevices(deviceData);
       setGates(gateData);
+      setLocalDefaultId(localId);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [selectedBranch]);
+
+  const handleSetLocalDefault = async (deviceId: number) => {
+    try {
+      await invoke('set_local_sync_target', { deviceId });
+      setLocalDefaultId(deviceId);
+      setSyncStatus(`Device #${deviceId} set as local sync target`);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -234,7 +247,7 @@ export const AttendanceManagement: React.FC = () => {
     try {
       await invoke('add_manual_attendance', {
         employeeId: Number(manualForm.employeeId),
-        timestamp: `${manualForm.date} ${manualForm.time}:00`, 
+        timestamp: `${manualForm.date} ${manualForm.time}:00`,
         punchMethod: manualForm.method,
       });
       setManualStatus('✅ Attendance recorded successfully!');
@@ -345,14 +358,25 @@ export const AttendanceManagement: React.FC = () => {
                   <span className="text-[10px] text-muted-foreground font-mono bg-muted/50 px-1.5 py-0.5 rounded">
                     {device.ip}:{device.port}
                   </span>
-                  <Button 
-                    size="sm" 
-                    className="h-7 px-4 text-xs font-bold" 
-                    onClick={() => handleSyncFromDevice(device)}
-                    disabled={syncing}
-                  >
-                    {syncing ? '...' : 'PULL LOGS'}
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button 
+                      size="sm" 
+                      variant={localDefaultId === device.id ? "default" : "outline"}
+                      className={`h-7 px-3 text-[10px] font-bold ${localDefaultId === device.id ? 'bg-primary' : 'text-slate-400'}`}
+                      onClick={() => handleSetLocalDefault(device.id)}
+                    >
+                      {localDefaultId === device.id ? <CheckCircle className="w-3 h-3 mr-1" /> : <Database className="w-3 h-3 mr-1" />}
+                      {localDefaultId === device.id ? 'ACTIVE' : 'SET SYNC'}
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      className="h-7 px-4 text-xs font-bold" 
+                      onClick={() => handleSyncFromDevice(device)}
+                      disabled={syncing}
+                    >
+                      {syncing ? '...' : 'PULL LOGS'}
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -413,9 +437,9 @@ export const AttendanceManagement: React.FC = () => {
               <Button 
                 className="h-11 px-8 rounded-xl bg-blue-900 border-none hover:bg-blue-800 text-white font-bold shadow-lg shadow-blue-900/20"
                 onClick={() => {
-                   const def = devices.find(d => d.is_default);
-                   if (def) handleSyncFromDevice(def);
-                   else alert("Please set a default device in Settings.");
+                   const target = devices.find(d => d.id === localDefaultId);
+                   if (target) handleSyncFromDevice(target);
+                   else alert("Please select an 'ACTIVE' sync target device for this PC first.");
                 }}
               >
                 <Fingerprint className="w-4 h-4 mr-2" />
@@ -558,11 +582,19 @@ export const AttendanceManagement: React.FC = () => {
                       </TableCell>
                       <TableCell>
                          <div className="flex flex-wrap gap-1">
-                            {log.all_punches?.split(' | ').map((p: string, i: number) => (
-                               <Badge key={i} variant="secondary" className="bg-blue-50 text-blue-700 border-blue-100 font-mono text-[10px]">
-                                  {p}
-                               </Badge>
-                            ))}
+                            {log.all_punches?.split(' | ').map((p_str: string, i: number) => {
+                              const [p, method] = p_str.split('::');
+                              return (
+                                 <Badge 
+                                    key={i} 
+                                    variant="secondary" 
+                                    className="bg-blue-50 text-blue-700 border-blue-100 font-mono text-[10px] cursor-help"
+                                    title={`Source: ${method || 'Device'}`}
+                                 >
+                                    {p}
+                                 </Badge>
+                              );
+                            })}
                          </div>
                       </TableCell>
                       <TableCell>

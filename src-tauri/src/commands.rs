@@ -7,7 +7,10 @@ use rusqlite::params;
 use serde_json::{json, Value};
 
 #[tauri::command]
-pub async fn list_all_devices(state: tauri::State<'_, AppState>) -> Result<Vec<Value>, AppError> {
+pub async fn list_all_devices(
+    branch_id: Option<i64>,
+    state: tauri::State<'_, AppState>
+) -> Result<Vec<Value>, AppError> {
     let db_guard = state
         .db
         .lock()
@@ -16,16 +19,25 @@ pub async fn list_all_devices(state: tauri::State<'_, AppState>) -> Result<Vec<V
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let mut stmt = conn.prepare(
+    let mut query = String::from(
         "SELECT d.id, d.name, d.brand, d.ip_address, d.port, d.comm_key, d.machine_number, d.is_default, d.status,
                 b.name as branch_name, g.name as gate_name, d.branch_id, d.gate_id
          FROM Devices d
          LEFT JOIN Branches b ON d.branch_id = b.id
          LEFT JOIN Gates g ON d.gate_id = g.id"
-    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+    );
+
+    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    if let Some(bid) = branch_id {
+        query.push_str(" WHERE d.branch_id = ?1");
+        params_vec.push(Box::new(bid));
+    }
+
+    let mut stmt = conn.prepare(&query)
+        .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let devices: Vec<Value> = stmt
-        .query_map([], |row| {
+        .query_map(rusqlite::params_from_iter(params_vec), |row| {
             Ok(json!({
                 "id": row.get::<_, i64>(0)?,
                 "name": row.get::<_, String>(1)?,
@@ -47,6 +59,36 @@ pub async fn list_all_devices(state: tauri::State<'_, AppState>) -> Result<Vec<V
         .collect();
 
     Ok(devices)
+}
+
+#[tauri::command]
+pub async fn set_local_sync_target(device_id: Option<i64>, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "INSERT OR REPLACE INTO ConfigSettings (key, value) VALUES ('default_device_id', ?1)",
+        params![device_id.map(|id| id.to_string())],
+    ).map_err(|e| AppError::DatabaseError(format!("Failed to save setting: {}", e)))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_local_sync_target(state: tauri::State<'_, AppState>) -> Result<Option<i64>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let res: Result<String, _> = conn.query_row(
+        "SELECT value FROM ConfigSettings WHERE key = 'default_device_id'",
+        [],
+        |r| r.get(0)
+    );
+
+    match res {
+        Ok(val) => Ok(val.parse::<i64>().ok()),
+        Err(_) => Ok(None)
+    }
 }
 
 #[tauri::command]
@@ -421,7 +463,7 @@ pub async fn add_manual_attendance(
 
     conn.execute(
         "INSERT INTO AttendanceLogs (employee_id, timestamp, punch_method, branch_id, gate_id, device_id)
-         VALUES (?1, ?2, ?3, 1, 1, 1)",
+         VALUES (?1, ?2, ?3, 1, 1, 999)",
         params![employee_id, timestamp, punch_method],
     )
     .map_err(|e| AppError::DatabaseError(format!("Failed to add manual log: {}", e)))?;
@@ -457,7 +499,7 @@ pub async fn import_csv_attendance(
                 Ok(id) => {
                     let res = conn.execute(
                         "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, punch_method, branch_id, gate_id, device_id)
-                         VALUES (?1, ?2, ?3, 1, 1, 1)",
+                         VALUES (?1, ?2, ?3, 1, 1, 999)",
                         params![id, timestamp, method],
                     );
                     match res {
