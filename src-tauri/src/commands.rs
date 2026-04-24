@@ -136,7 +136,11 @@ pub async fn delete_device(id: i64, state: tauri::State<'_, AppState>) -> Result
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
+    // Cascade: AttendanceLogs -> Devices
+    conn.execute("PRAGMA foreign_keys = OFF", [])?;
+    conn.execute("DELETE FROM AttendanceLogs WHERE device_id = ?1", params![id])?;
     conn.execute("DELETE FROM Devices WHERE id = ?1", params![id])?;
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
     Ok(())
 }
 

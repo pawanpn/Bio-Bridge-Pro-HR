@@ -23,6 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { BranchMigrationWizard } from '../components/BranchMigrationWizard';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -84,9 +85,17 @@ export const BranchGateDeviceManagement: React.FC = () => {
   // Dialogs
   const [branchDialog, setBranchDialog] = useState({ open: false, editing: null as Branch | null });
   const [gateDialog, setGateDialog] = useState({ open: false, editing: null as Gate | null, preselectBranch: null as number | null });
-  const [deviceDialog, setDeviceDialog] = useState({ open: false, editing: null as Device | null, preselectBranch: null as number | null });
+  const [deviceDialog, setDeviceDialog] = useState({ 
+    open: false, 
+    editing: null as Device | null, 
+    preselectBranch: null as number | null,
+    preselectGate: null as number | null 
+  });
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; type: string; id: number; name: string }>({
     open: false, type: '', id: 0, name: ''
+  });
+  const [migrationWizard, setMigrationWizard] = useState<{ open: boolean; branch: { id: number; name: string } | null }>({
+    open: false, branch: null
   });
 
   // Sync state
@@ -163,8 +172,10 @@ export const BranchGateDeviceManagement: React.FC = () => {
   };
 
   // Gate handlers
-  const handleAddGate = (branchId?: number) => {
-    setGateDialog({ open: true, editing: null, preselectBranch: branchId || selectedBranchId });
+  const handleAddGate = (branchId?: number | any) => {
+    // Safety: ignore if it's a React/DOM event
+    const validId = (typeof branchId === 'number' && branchId > 0) ? branchId : null;
+    setGateDialog({ open: true, editing: null, preselectBranch: validId || selectedBranchId });
   };
 
   const handleEditGate = (gate: Gate) => {
@@ -184,12 +195,26 @@ export const BranchGateDeviceManagement: React.FC = () => {
   };
 
   // Device handlers
-  const handleAddDevice = (branchId?: number) => {
-    setDeviceDialog({ open: true, editing: null, preselectBranch: branchId || null });
+  const handleAddDevice = (branchId?: number | any, gateId?: number | any) => {
+    // Safety: ignore if it's a React/DOM event
+    const bId = (typeof branchId === 'number' && branchId > 0) ? branchId : null;
+    const gId = (typeof gateId === 'number' && gateId > 0) ? gateId : null;
+    
+    setDeviceDialog({ 
+      open: true, 
+      editing: null, 
+      preselectBranch: bId || selectedBranchId,
+      preselectGate: gId || selectedGateId
+    });
   };
 
   const handleEditDevice = (device: Device) => {
-    setDeviceDialog({ open: true, editing: device, preselectBranch: null });
+    setDeviceDialog({ 
+      open: true, 
+      editing: device, 
+      preselectBranch: null, 
+      preselectGate: null 
+    });
   };
 
   const handleDeleteDevice = async () => {
@@ -402,7 +427,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
           devices={devices}
           onAdd={handleAddBranch}
           onEdit={handleEditBranch}
-          onDelete={(id, name) => setDeleteDialog({ open: true, type: 'branch', id, name })}
+          onDelete={(id, name) => setMigrationWizard({ open: true, branch: { id, name } })}
           onSelect={(id) => {
             setSelectedBranchId(id);
             setActiveTab('gates');
@@ -416,7 +441,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
           gates={selectedBranchId ? gates.filter(g => g.branch_id === selectedBranchId) : gates}
           branches={branches}
           branchName={selectedBranchId ? (branches.find(b => b.id === selectedBranchId)?.name || '') : 'All Branches'}
-          onAdd={handleAddGate}
+          onAdd={() => handleAddGate()}
           onEdit={handleEditGate}
           onDelete={(id, name) => setDeleteDialog({ open: true, type: 'gate', id, name })}
           onSelect={(id) => {
@@ -436,7 +461,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
           })}
           branches={branches}
           gates={gates}
-          onAdd={handleAddDevice}
+          onAdd={() => handleAddDevice()}
           onEdit={handleEditDevice}
           onDelete={(id, name) => setDeleteDialog({ open: true, type: 'device', id, name })}
           onSetDefault={handleSetDefaultDevice}
@@ -459,9 +484,16 @@ export const BranchGateDeviceManagement: React.FC = () => {
         onSave={async (data) => {
           try {
             if (branchDialog.editing) {
-              await invoke('update_branch', { id: branchDialog.editing.id, ...data });
+              await invoke('update_branch', { 
+                id: branchDialog.editing.id, 
+                name: data.name, 
+                location: data.location 
+              });
             } else {
-              await invoke('add_branch', data);
+              await invoke('add_branch', { 
+                name: data.name, 
+                location: data.location 
+              });
             }
             setBranchDialog({ open: false, editing: null });
             loadData();
@@ -487,14 +519,22 @@ export const BranchGateDeviceManagement: React.FC = () => {
         onSave={async (data) => {
           try {
             if (gateDialog.editing) {
-              await invoke('update_gate', { id: gateDialog.editing.id, ...data });
+              await invoke('update_gate', { 
+                id: gateDialog.editing.id, 
+                branchId: data.branchId, 
+                name: data.name 
+              });
             } else {
-              await invoke('add_gate', data);
+              await invoke('add_gate', { 
+                branchId: data.branchId, 
+                name: data.name 
+              });
             }
             setGateDialog({ open: false, editing: null, preselectBranch: null });
             loadData();
           } catch (error) {
             console.error('Failed to save gate:', error);
+            alert('Failed to save gate: ' + error);
           }
         }}
       />
@@ -503,9 +543,10 @@ export const BranchGateDeviceManagement: React.FC = () => {
         open={deviceDialog.open}
         editing={deviceDialog.editing}
         preselectBranch={deviceDialog.preselectBranch}
+        preselectGate={deviceDialog.preselectGate}
         branches={branches}
         gates={gates}
-        onClose={() => setDeviceDialog({ open: false, editing: null, preselectBranch: null })}
+        onClose={() => setDeviceDialog({ open: false, editing: null, preselectBranch: null, preselectGate: null })}
         onSave={async (data) => {
           try {
             if (deviceDialog.editing) {
@@ -513,7 +554,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
             } else {
               await invoke('add_device', { device: data });
             }
-            setDeviceDialog({ open: false, editing: null, preselectBranch: null });
+            setDeviceDialog({ open: false, editing: null, preselectBranch: null, preselectGate: null });
             loadData();
           } catch (error) {
             console.error('Failed to save device:', error);
@@ -527,10 +568,17 @@ export const BranchGateDeviceManagement: React.FC = () => {
         name={deleteDialog.name}
         onCancel={() => setDeleteDialog({ open: false, type: '', id: 0, name: '' })}
         onConfirm={
-          deleteDialog.type === 'branch' ? handleDeleteBranch :
           deleteDialog.type === 'gate' ? handleDeleteGate :
           handleDeleteDevice
         }
+      />
+
+      <BranchMigrationWizard
+        open={migrationWizard.open}
+        branch={migrationWizard.branch}
+        branches={branches}
+        onClose={() => setMigrationWizard({ open: false, branch: null })}
+        onDeleted={() => { setMigrationWizard({ open: false, branch: null }); loadData(); }}
       />
     </div>
   );
@@ -574,7 +622,7 @@ const BranchesTab: React.FC<{
   <div>
     <div className="flex justify-between items-center mb-4">
       <h2 className="text-xl font-semibold">Branches</h2>
-      <Button onClick={onAdd}>
+      <Button onClick={() => onAdd()}>
         <Plus className="w-4 h-4 mr-2" />
         Add Branch
       </Button>
@@ -1096,7 +1144,12 @@ const GateDialog: React.FC<{
   onSave: (data: { branchId: number; name: string }) => void;
 }> = ({ open, editing, preselectBranch, branchId, branches, onClose, onSave }) => {
   const [name, setName] = useState('');
-  const [selectedBranch, setSelectedBranch] = useState<number>(preselectBranch || branchId || branches[0]?.id || 0);
+  const [selectedBranch, setSelectedBranch] = useState<number>(() => {
+    if (editing) return editing.branch_id;
+    if (preselectBranch) return preselectBranch;
+    if (branchId && branchId !== 0) return branchId;
+    return branches[0]?.id || 0;
+  });
 
   useEffect(() => {
     if (editing) {
@@ -1104,7 +1157,7 @@ const GateDialog: React.FC<{
       setSelectedBranch(editing.branch_id);
     } else {
       setName('');
-      setSelectedBranch(preselectBranch || branchId || branches[0]?.id || 0);
+      setSelectedBranch(preselectBranch || (branchId !== 0 ? branchId : 0) || branches[0]?.id || 0);
     }
   }, [editing, preselectBranch, branchId, branches]);
 
@@ -1163,11 +1216,12 @@ const DeviceDialog: React.FC<{
   open: boolean;
   editing: Device | null;
   preselectBranch: number | null;
+  preselectGate: number | null;
   branches: Branch[];
   gates: Gate[];
   onClose: () => void;
   onSave: (data: any) => void;
-}> = ({ open, editing, preselectBranch, branches, gates, onClose, onSave }) => {
+}> = ({ open, editing, preselectBranch, preselectGate, branches, gates, onClose, onSave }) => {
   const [form, setForm] = useState({
     name: '',
     brand: 'ZKTeco',
@@ -1208,8 +1262,9 @@ const DeviceDialog: React.FC<{
       });
     } else {
       // New device or preselect branch
-      const targetBranchId = preselectBranch || editing?.branch_id || branches[0]?.id || 0;
-      const branchGates = gates.filter(g => g.branch_id === targetBranchId);
+      const targetBranchId = preselectBranch || (editing ? editing.branch_id : (branches[0]?.id || 0));
+      const targetGateId = preselectGate || 0;
+      
       setForm({
         name: '',
         brand: 'ZKTeco',
@@ -1218,7 +1273,7 @@ const DeviceDialog: React.FC<{
         comm_key: 0,
         machine_number: 1,
         branch_id: targetBranchId,
-        gate_id: branchGates[0]?.id || 0,
+        gate_id: targetGateId,
         subnet_mask: '255.255.255.0',
         gateway: '192.168.1.1',
         dns: '8.8.8.8',
@@ -1228,7 +1283,7 @@ const DeviceDialog: React.FC<{
         https_enabled: false,
       });
     }
-  }, [editing, preselectBranch, branches, gates]);
+  }, [editing, preselectBranch, preselectGate, branches, gates]);
 
   // Get gates for selected branch
   const selectedBranchGates = gates.filter(g => g.branch_id === form.branch_id);

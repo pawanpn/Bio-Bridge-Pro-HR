@@ -132,6 +132,8 @@ pub fn run() {
             crud::get_asset_stats,
             crud::get_dashboard_stats,
             crud::list_branches,
+            crud::get_branch_summary,
+            crud::migrate_branch_data,
             crud::list_departments,
             crud::create_department,
             crud::delete_department,

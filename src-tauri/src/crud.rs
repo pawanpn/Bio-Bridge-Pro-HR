@@ -2641,8 +2641,114 @@ pub async fn list_branches(state: tauri::State<'_, AppState>) -> Result<Vec<serd
     Ok(branches)
 }
 
+// ============================================================================
+// BRANCH MIGRATION & SAFETY COMMANDS
+// ============================================================================
 
+#[tauri::command]
+pub async fn get_branch_summary(id: i64, state: tauri::State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
+    let employee_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Employees WHERE branch_id = ?1 AND (status IS NULL OR status != 'deleted')",
+        rusqlite::params![id], |r| r.get(0)
+    ).unwrap_or(0);
+
+    let device_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Devices WHERE branch_id = ?1",
+        rusqlite::params![id], |r| r.get(0)
+    ).unwrap_or(0);
+
+    let gate_count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM Gates WHERE branch_id = ?1",
+        rusqlite::params![id], |r| r.get(0)
+    ).unwrap_or(0);
+
+    // List employees for display
+    let mut emp_stmt = conn.prepare(
+        "SELECT id, COALESCE(name, TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')), 'Unknown') as full_name, employee_code, department_id FROM Employees WHERE branch_id = ?1 AND (status IS NULL OR status != 'deleted') ORDER BY full_name"
+    ).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let employees: Vec<serde_json::Value> = emp_stmt.query_map(rusqlite::params![id], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "employee_code": row.get::<_, Option<String>>(2)?,
+        }))
+    }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
+
+    // List devices
+    let mut dev_stmt = conn.prepare(
+        "SELECT id, name, brand, ip_address FROM Devices WHERE branch_id = ?1 ORDER BY name"
+    ).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let devices: Vec<serde_json::Value> = dev_stmt.query_map(rusqlite::params![id], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "brand": row.get::<_, String>(2)?,
+            "ip": row.get::<_, String>(3)?,
+        }))
+    }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
+
+    Ok(serde_json::json!({
+        "employee_count": employee_count,
+        "device_count": device_count,
+        "gate_count": gate_count,
+        "employees": employees,
+        "devices": devices,
+        "is_empty": employee_count == 0 && device_count == 0
+    }))
+}
+
+#[tauri::command]
+pub async fn migrate_branch_data(
+    from_branch_id: i64,
+    to_branch_id: Option<i64>,
+    migrate_employees: bool,
+    migrate_devices: bool,
+    state: tauri::State<'_, AppState>
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut employees_moved = 0i64;
+    let mut devices_moved = 0i64;
+
+    if migrate_employees {
+        if let Some(to_id) = to_branch_id {
+            employees_moved = conn.execute(
+                "UPDATE Employees SET branch_id = ?1 WHERE branch_id = ?2 AND (status IS NULL OR status != 'deleted')",
+                rusqlite::params![to_id, from_branch_id]
+            ).map_err(|e| AppError::DatabaseError(e.to_string()))? as i64;
+        } else {
+            // Unassign employees from branch
+            employees_moved = conn.execute(
+                "UPDATE Employees SET branch_id = NULL WHERE branch_id = ?1 AND (status IS NULL OR status != 'deleted')",
+                rusqlite::params![from_branch_id]
+            ).map_err(|e| AppError::DatabaseError(e.to_string()))? as i64;
+        }
+    }
+
+    if migrate_devices {
+        if let Some(to_id) = to_branch_id {
+            devices_moved = conn.execute(
+                "UPDATE Devices SET branch_id = ?1, gate_id = NULL WHERE branch_id = ?2",
+                rusqlite::params![to_id, from_branch_id]
+            ).map_err(|e| AppError::DatabaseError(e.to_string()))? as i64;
+        } else {
+            devices_moved = conn.execute(
+                "UPDATE Devices SET branch_id = NULL, gate_id = NULL WHERE branch_id = ?1",
+                rusqlite::params![from_branch_id]
+            ).map_err(|e| AppError::DatabaseError(e.to_string()))? as i64;
+        }
+    }
+
+    Ok(serde_json::json!({
+        "success": true,
+        "employees_moved": employees_moved,
+        "devices_moved": devices_moved
+    }))
+}
 
 #[tauri::command]
 pub async fn list_departments(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
