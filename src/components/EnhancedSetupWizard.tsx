@@ -21,6 +21,7 @@ import {
   Loader2,
   AlertCircle
 } from 'lucide-react';
+import { setCalendarModePreference } from '@/lib/dateUtils';
 
 interface SetupData {
   // Step 1: Company Info
@@ -676,7 +677,7 @@ export const EnhancedSetupWizard: React.FC = () => {
       localStorage.setItem('supabaseUrl', setupData.supabaseUrl);
       localStorage.setItem('supabaseAnonKey', setupData.supabaseAnonKey);
       localStorage.setItem('companyName', setupData.companyName);
-      localStorage.setItem('calendarMode', setupData.defaultCalendar);
+      setCalendarModePreference(setupData.defaultCalendar);
 
       alert('Setup completed successfully! You can now login with your admin credentials.');
       navigate('/login');

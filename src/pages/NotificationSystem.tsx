@@ -12,6 +12,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
+import { formatDualDate } from '@/lib/dateUtils';
+import { BsDatePicker } from '@/components/BsDatePicker';
 import {
   Table,
   TableBody,
@@ -205,7 +207,7 @@ export const NotificationSystem: React.FC = () => {
     if (diffMins < 60) return `${diffMins}m ago`;
     if (diffHours < 24) return `${diffHours}h ago`;
     if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
+    return formatDualDate(dateStr);
   };
 
   // Get notification icon
@@ -319,7 +321,7 @@ export const NotificationSystem: React.FC = () => {
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
                         <span>From: <strong>{notif.senderName}</strong></span>
                         {notif.expiresAt && (
-                          <span>Expires: {new Date(notif.expiresAt).toLocaleDateString()}</span>
+                          <span>Expires: {formatDualDate(notif.expiresAt)}</span>
                         )}
                       </div>
                     </div>
@@ -457,11 +459,10 @@ export const NotificationSystem: React.FC = () => {
               {/* Expiry Date */}
               <div>
                 <Label>Expires At (Optional)</Label>
-                <Input
-                  type="date"
+                <BsDatePicker
                   value={composeForm.expiresAt}
-                  onChange={(e) => setComposeForm({ ...composeForm, expiresAt: e.target.value })}
-                  className="mt-1"
+                  onChange={(date) => setComposeForm({ ...composeForm, expiresAt: date })}
+                  className="mt-1 w-full"
                 />
               </div>
 

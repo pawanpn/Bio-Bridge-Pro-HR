@@ -3146,7 +3146,7 @@ pub async fn list_organizations(state: tauri::State<'_, AppState>) -> Result<Vec
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
     let mut stmt = conn
-        .prepare("SELECT id, name, address, contact_info, auth_key, license_expiry FROM Organizations ORDER BY name")
+        .prepare("SELECT id, name, address, contact_info, auth_key, license_expiry, provider_name, provider_contact, payment_term_days, payment_status, provider_approved, notes FROM Organizations ORDER BY name")
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     let organizations = stmt
         .query_map([], |row| {
@@ -3157,6 +3157,12 @@ pub async fn list_organizations(state: tauri::State<'_, AppState>) -> Result<Vec
                 "contact_info": row.get::<_, Option<String>>(3)?,
                 "auth_key": row.get::<_, Option<String>>(4)?,
                 "license_expiry": row.get::<_, Option<String>>(5)?,
+                "provider_name": row.get::<_, Option<String>>(6)?,
+                "provider_contact": row.get::<_, Option<String>>(7)?,
+                "payment_term_days": row.get::<_, Option<i64>>(8)?,
+                "payment_status": row.get::<_, Option<String>>(9)?,
+                "provider_approved": row.get::<_, Option<i64>>(10)?.unwrap_or(0) != 0,
+                "notes": row.get::<_, Option<String>>(11)?,
             }))
         })
         .map_err(|e| AppError::DatabaseError(e.to_string()))?
@@ -3170,14 +3176,34 @@ pub async fn add_organization(
     name: String,
     address: Option<String>,
     contact_info: Option<String>,
+    auth_key: Option<String>,
+    license_expiry: Option<String>,
+    provider_name: Option<String>,
+    provider_contact: Option<String>,
+    payment_term_days: Option<i64>,
+    payment_status: Option<String>,
+    provider_approved: Option<bool>,
+    notes: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "INSERT INTO Organizations (name, address, contact_info) VALUES (?1, ?2, ?3)",
-        params![name, address, contact_info],
+        "INSERT INTO Organizations (name, address, contact_info, auth_key, license_expiry, provider_name, provider_contact, payment_term_days, payment_status, provider_approved, notes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        params![
+            name,
+            address,
+            contact_info,
+            auth_key,
+            license_expiry,
+            provider_name,
+            provider_contact,
+            payment_term_days,
+            payment_status,
+            provider_approved.unwrap_or(false) as i32,
+            notes
+        ],
     )?;
 
     Ok(serde_json::json!({
@@ -3192,14 +3218,35 @@ pub async fn update_organization(
     name: String,
     address: Option<String>,
     contact_info: Option<String>,
+    auth_key: Option<String>,
+    license_expiry: Option<String>,
+    provider_name: Option<String>,
+    provider_contact: Option<String>,
+    payment_term_days: Option<i64>,
+    payment_status: Option<String>,
+    provider_approved: Option<bool>,
+    notes: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "UPDATE Organizations SET name = ?1, address = ?2, contact_info = ?3 WHERE id = ?4",
-        params![name, address, contact_info, id],
+        "UPDATE Organizations SET name = ?1, address = ?2, contact_info = ?3, auth_key = ?4, license_expiry = ?5, provider_name = ?6, provider_contact = ?7, payment_term_days = ?8, payment_status = ?9, provider_approved = ?10, notes = ?11 WHERE id = ?12",
+        params![
+            name,
+            address,
+            contact_info,
+            auth_key,
+            license_expiry,
+            provider_name,
+            provider_contact,
+            payment_term_days,
+            payment_status,
+            provider_approved.unwrap_or(false) as i32,
+            notes,
+            id
+        ],
     )?;
 
     Ok(serde_json::json!({"success": true}))

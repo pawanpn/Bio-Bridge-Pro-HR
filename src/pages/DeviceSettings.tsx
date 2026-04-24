@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Wifi, WifiOff, FileText, Plus } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { getAccessibleBranchIds, isSuperAdmin } from '@/config/accessPolicy';
+import { formatDualDateTime } from '@/lib/dateUtils';
 
 interface Device {
   id: number;
@@ -780,7 +781,7 @@ export const DeviceSettings: React.FC = () => {
                     previewLogs.map((log, i) => (
                       <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
                         <td style={{ ...tdStyle, padding: '10px 16px', fontWeight: 600 }}>{log.employee_id}</td>
-                        <td style={{ ...tdStyle, padding: '10px 16px', fontSize: 13 }}>{new Date(log.timestamp).toLocaleString()}</td>
+                        <td style={{ ...tdStyle, padding: '10px 16px', fontSize: 13 }}>{formatDualDateTime(log.timestamp)}</td>
                         <td style={{ ...tdStyle, padding: '10px 16px' }}>
                           <span style={{ fontSize: 11, backgroundColor: 'var(--bg-color)', padding: '2px 8px', borderRadius: 12, border: '1px solid var(--border-color)' }}>
                             {log.punch_method}

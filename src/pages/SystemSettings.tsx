@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
+import { setCalendarModePreference } from '@/lib/dateUtils';
 import { AppConfig } from '../config/appConfig';
 import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, UserPlus, UserCircle, Database } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -361,7 +362,7 @@ const GeneralSettings: React.FC = () => {
 
   const handleCalChange = (mode: string) => {
     setCalMode(mode);
-    localStorage.setItem('calendarMode', mode);
+    setCalendarModePreference(mode as 'BS' | 'AD');
   };
 
   return (

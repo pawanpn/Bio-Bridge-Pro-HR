@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { BsDatePicker } from '@/components/BsDatePicker';
 import {
   Table,
   TableBody,
@@ -319,8 +320,15 @@ export const EmployeeManagement: React.FC = () => {
         ? deriveBranchesFromEmployees(Array.isArray(empResult.value) ? empResult.value : empResult.value?.data || [])
         : [];
 
-      setBranches(branches.length > 0 ? branches : fallbackBranches);
-      setDevices(devices);
+      const visibleBranches = hasBranchScope
+        ? (branches.length > 0 ? branches : fallbackBranches)
+        : (branches.length > 0 ? branches.filter((branch: any) => accessibleBranchIds.includes(String(branch.id))) : fallbackBranches.filter((branch: any) => accessibleBranchIds.includes(String(branch.id))));
+      const visibleDevices = hasBranchScope
+        ? devices
+        : devices.filter((device: any) => accessibleBranchIds.includes(String(device.branch_id)));
+
+      setBranches(visibleBranches);
+      setDevices(visibleDevices);
       setDepartments(departments);
       setDesignations(designations);
     } catch (error) {
@@ -1143,12 +1151,10 @@ export const EmployeeManagement: React.FC = () => {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="doj" className="text-sm font-semibold">Date of Joining</Label>
-                      <Input
-                        id="doj"
-                        type="date"
+                      <BsDatePicker
                         value={formData.date_of_joining}
-                        onChange={(e) => setFormData({ ...formData, date_of_joining: e.target.value })}
-                        className="bg-background"
+                        onChange={(date) => setFormData({ ...formData, date_of_joining: date })}
+                        className="bg-background w-full"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1260,7 +1266,7 @@ export const EmployeeManagement: React.FC = () => {
                   <div className="grid grid-cols-3 gap-6">
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase text-muted-foreground">Birth Date</Label>
-                      <Input type="date" value={formData.date_of_birth} onChange={(e) => setFormData({ ...formData, date_of_birth: e.target.value })} />
+                      <BsDatePicker value={formData.date_of_birth} onChange={(date) => setFormData({ ...formData, date_of_birth: date })} className="w-full" />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase text-muted-foreground">Local Name</Label>
@@ -1596,11 +1602,11 @@ export const EmployeeManagement: React.FC = () => {
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase text-muted-foreground">Valid Up To</Label>
-                      <Input
-                        type="date"
+                      <BsDatePicker
                         value={documentForm.valid_until}
-                        onChange={(e) => setDocumentForm(prev => ({ ...prev, valid_until: e.target.value }))}
+                        onChange={(date) => setDocumentForm(prev => ({ ...prev, valid_until: date }))}
                         disabled={!formDialog.editing?.id || documentUploading}
+                        className="w-full"
                       />
                     </div>
                     <div className="space-y-2">

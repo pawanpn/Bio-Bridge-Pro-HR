@@ -9,6 +9,13 @@ import * as XLSX from 'xlsx';
 import { AppConfig } from '../config/appConfig';
 import { useAuth } from '@/context/AuthContext';
 import { getAccessibleBranchIds, isSuperAdmin } from '@/config/accessPolicy';
+import {
+  formatDateByMode,
+  formatDateTimeByMode,
+  formatMonthByMode,
+  getCalendarModePreference,
+} from '@/lib/dateUtils';
+import { BsDatePicker } from '@/components/BsDatePicker';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -71,6 +78,8 @@ interface RawLog {
 interface Branch {
   id: number;
   name: string;
+  org_id?: number | null;
+  organization_id?: number | null;
 }
 
 interface EmployeeOption {
@@ -78,6 +87,13 @@ interface EmployeeOption {
   name: string;
   employee_code: string;
   branch_id?: number | null;
+}
+
+interface OrganizationInfo {
+  id: number;
+  name: string;
+  address?: string | null;
+  contact_info?: string | null;
 }
 
 const tabs = [
@@ -91,6 +107,7 @@ export const Reports: React.FC = () => {
   const { user } = useAuth();
   const accessibleBranchIds = getAccessibleBranchIds(user);
   const superAdmin = isSuperAdmin(user?.role);
+  const [calendarMode, setCalendarMode] = useState<'BS' | 'AD'>(() => getCalendarModePreference());
   const [activeTab, setActiveTab] = useState<'daily' | 'ledger' | 'salary' | 'raw'>('daily');
   const [fromDate, setFromDate] = useState(new Date().toISOString().split('T')[0]);
   const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
@@ -105,6 +122,7 @@ export const Reports: React.FC = () => {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [gates, setGates] = useState<{id: number, name: string}[]>([]);
   const [departments, setDepartments] = useState<string[]>(['All']);
+  const [organizations, setOrganizations] = useState<OrganizationInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasGenerated, setHasGenerated] = useState(false);
 
@@ -113,8 +131,6 @@ export const Reports: React.FC = () => {
   const [salaryData, setSalaryData] = useState<SalarySheet[]>([]);
   const [rawData, setRawData] = useState<RawLog[]>([]);
 
-  const calendarMode = localStorage.getItem('calendarMode') || 'AD';
-
   const hasBranchScope = superAdmin || accessibleBranchIds.length === 0;
   const scopedBranches = hasBranchScope
     ? branches
@@ -122,9 +138,23 @@ export const Reports: React.FC = () => {
   const scopedEmployees = hasBranchScope
     ? employees
     : employees.filter(emp => !emp.branch_id || accessibleBranchIds.includes(String(emp.branch_id)));
+  const selectedBranchRecord = branch ? scopedBranches.find(b => b.id === branch) : null;
+  const reportOrganization = selectedBranchRecord
+    ? organizations.find(org => org.id === Number(selectedBranchRecord.org_id || selectedBranchRecord.organization_id || 0)) || organizations[0] || null
+    : organizations[0] || null;
 
   useEffect(() => {
     loadMetadata();
+  }, []);
+
+  useEffect(() => {
+    const syncMode = () => setCalendarMode(getCalendarModePreference());
+    window.addEventListener('calendar-mode-changed', syncMode as EventListener);
+    window.addEventListener('storage', syncMode);
+    return () => {
+      window.removeEventListener('calendar-mode-changed', syncMode as EventListener);
+      window.removeEventListener('storage', syncMode);
+    };
   }, []);
 
   useEffect(() => {
@@ -146,6 +176,8 @@ export const Reports: React.FC = () => {
 
   const loadMetadata = async () => {
     try {
+      const orgs = await invoke<OrganizationInfo[]>('list_organizations');
+      setOrganizations(Array.isArray(orgs) ? orgs : []);
       const depts = await invoke<any[]>('list_departments');
       setDepartments(['All', ...depts.map(d => d.name)]);
       const brs = await invoke<Branch[]>('list_branches');
@@ -184,20 +216,40 @@ export const Reports: React.FC = () => {
 
   const exportPDF = () => {
     const doc = new jsPDF('l', 'mm', 'a4') as any;
+    const headerBottom = reportOrganization
+      ? 38
+      : 22;
+    const titleY = headerBottom + 8;
+    const metaY = headerBottom - 2;
     doc.setFontSize(18);
     doc.setTextColor(44, 62, 80);
     doc.text(AppConfig.appName.toUpperCase(), 14, 15);
     doc.setFontSize(10);
     doc.setTextColor(100);
     doc.text("Organization Attendance & HR Report", 14, 20);
-    doc.line(14, 22, 280, 22);
+    if (reportOrganization?.name) {
+      doc.setTextColor(55);
+      doc.text(reportOrganization.name, 14, 24);
+      if (reportOrganization.address) {
+        doc.text(reportOrganization.address, 14, 28);
+      }
+      if (reportOrganization.contact_info) {
+        doc.text(reportOrganization.contact_info, 14, reportOrganization.address ? 32 : 28);
+      }
+    }
+    doc.line(14, headerBottom, 280, headerBottom);
 
     const title = activeTab.toUpperCase() + " REPORT";
     doc.setFontSize(12);
     doc.setTextColor(0);
-    doc.text(title, 14, 30);
+    doc.text(title, 14, titleY);
     doc.setFontSize(9);
-    doc.text(`Generated: ${new Date().toLocaleString()}`, 230, 20);
+    doc.text(`Generated: ${new Date().toLocaleString()}`, 230, metaY < 20 ? 20 : metaY);
+    if (activeTab === 'daily' || activeTab === 'raw') {
+      doc.text(`Range: ${formatDateByMode(fromDate, calendarMode)} -> ${formatDateByMode(toDate, calendarMode)}`, 14, titleY + 5);
+    } else {
+      doc.text(`Period: ${formatMonthByMode(month, calendarMode)}`, 14, titleY + 5);
+    }
 
     const tableHeaders =
         activeTab === 'daily' ? [['Name', 'Dept', 'Date', 'In', 'Out', 'Late', 'Early', 'Hours', 'Status']] :
@@ -206,15 +258,15 @@ export const Reports: React.FC = () => {
         [['Name', 'Timestamp', 'Device']];
 
     const tableData =
-        activeTab === 'daily' ? dailyData.map(d => [d.name, d.department, d.date, d.check_in, d.check_out, d.late_entry, d.early_exit, d.working_hours, d.status]) :
+        activeTab === 'daily' ? dailyData.map(d => [d.name, d.department, formatDateByMode(d.date, calendarMode), d.check_in, d.check_out, d.late_entry, d.early_exit, d.working_hours, d.status]) :
         activeTab === 'ledger' ? ledgerData.map(l => [l.name, ...Array.from({length: 31}, (_, i) => l.attendance[(i+1).toString().padStart(2, '0')] || 'A')]) :
         activeTab === 'salary' ? salaryData.map(s => [s.name, s.department, s.present_days, s.paid_leaves, s.payable_days]) :
-        rawData.map(r => [r.name, r.timestamp, r.device]);
+        rawData.map(r => [r.name, formatDateTimeByMode(r.timestamp, calendarMode), r.device]);
 
     doc.autoTable({
       head: tableHeaders,
       body: tableData,
-      startY: 35,
+      startY: titleY + 10,
       styles: { fontSize: 8 },
       headStyles: { fillColor: [79, 70, 229] }
     });
@@ -224,13 +276,19 @@ export const Reports: React.FC = () => {
   const exportExcel = () => {
     const cleanedDailyData = dailyData.map(d => ({
       ...d,
+      date: formatDateByMode(d.date, calendarMode),
       all_punches: d.all_punches?.split(' | ').map(p => p.split('::')[0]).join(' | ')
+    }));
+
+    const cleanedRawData = rawData.map(r => ({
+      ...r,
+      timestamp: formatDateTimeByMode(r.timestamp, calendarMode),
     }));
 
     const ws = XLSX.utils.json_to_sheet(
         activeTab === 'daily' ? cleanedDailyData :
         activeTab === 'ledger' ? ledgerData.map(l => ({ Employee: l.name, ...l.attendance })) :
-        activeTab === 'salary' ? salaryData : rawData
+        activeTab === 'salary' ? salaryData : cleanedRawData
     );
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Attendance");
@@ -329,20 +387,19 @@ export const Reports: React.FC = () => {
                         {activeTab === 'ledger' || activeTab === 'salary' ? (
                           <div className="min-w-[150px]">
                              <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">Period</Label>
-                             <div className="relative">
-                                <Calendar className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                                <Input type="month" value={month} onChange={e => setMonth(e.target.value)} className="pl-8 h-9 text-xs font-mono font-bold" />
-                             </div>
+                             <BsDatePicker value={month} onChange={setMonth} kind="month" className="w-full" />
                           </div>
                         ) : (
                           <>
-                             <div className="min-w-[130px]">
+                            <div className="min-w-[130px]">
                                 <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">From</Label>
-                                <Input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} className="h-9 font-mono text-xs" />
+                                <BsDatePicker value={fromDate} onChange={setFromDate} className="w-full" />
+                                <div className="mt-1 text-[9px] text-slate-400 font-medium">{formatDateByMode(fromDate, calendarMode)}</div>
                              </div>
                              <div className="min-w-[130px]">
                                 <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">To</Label>
-                                <Input type="date" value={toDate} onChange={e => setToDate(e.target.value)} className="h-9 font-mono text-xs" />
+                                <BsDatePicker value={toDate} onChange={setToDate} className="w-full" />
+                                <div className="mt-1 text-[9px] text-slate-400 font-medium">{formatDateByMode(toDate, calendarMode)}</div>
                              </div>
                           </>
                         )}
@@ -435,10 +492,10 @@ export const Reports: React.FC = () => {
                     </div>
 
                     <div className="overflow-x-auto">
-                       {activeTab === 'daily' && <DailyTable data={dailyData} />}
+                       {activeTab === 'daily' && <DailyTable data={dailyData} mode={calendarMode} />}
                        {activeTab === 'ledger' && <LedgerTable data={ledgerData} days={getDaysInMonth()} />}
                        {activeTab === 'salary' && <SalaryTable data={salaryData} />}
-                       {activeTab === 'raw' && <RawTable data={rawData} />}
+                       {activeTab === 'raw' && <RawTable data={rawData} mode={calendarMode} />}
                     </div>
                  </div>
               )}
@@ -451,7 +508,7 @@ export const Reports: React.FC = () => {
 
 // --- Sub Tables ---
 
-const DailyTable = ({ data }: { data: DailyAttendance[] }) => (
+const DailyTable = ({ data, mode }: { data: DailyAttendance[]; mode: 'BS' | 'AD' }) => (
   <Table>
     <TableHeader className="bg-slate-100 dark:bg-slate-800">
       <TableRow>
@@ -473,7 +530,7 @@ const DailyTable = ({ data }: { data: DailyAttendance[] }) => (
               <div className="font-bold text-slate-900 dark:text-slate-100">{d.name}</div>
               <div className="text-[10px] text-slate-400 font-medium uppercase">{d.department}</div>
             </TableCell>
-            <TableCell className="font-mono text-xs">{d.date}</TableCell>
+            <TableCell className="font-mono text-xs leading-tight">{formatDateByMode(d.date, mode)}</TableCell>
             <TableCell>
               <div className="flex flex-wrap gap-1.5">
                 {punchArray.map((p_str, pi) => {
@@ -582,7 +639,7 @@ const SalaryTable = ({ data }: { data: SalarySheet[] }) => (
   </Table>
 );
 
-const RawTable = ({ data }: { data: RawLog[] }) => (
+const RawTable = ({ data, mode }: { data: RawLog[]; mode: 'BS' | 'AD' }) => (
   <Table>
     <TableHeader className="bg-slate-100 dark:bg-slate-800">
       <TableRow>
@@ -602,7 +659,7 @@ const RawTable = ({ data }: { data: RawLog[] }) => (
           <TableRow key={i} className="font-mono text-xs">
             <TableCell className="text-slate-300">#{(i+1).toString().padStart(4, '0')}</TableCell>
             <TableCell className="font-bold text-slate-800 dark:text-slate-200">{r.name}</TableCell>
-            <TableCell className="text-blue-500 font-bold">{dt}</TableCell>
+            <TableCell className="text-blue-500 font-bold leading-tight">{formatDateTimeByMode(dt, mode)}</TableCell>
             <TableCell>
               <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black ${
                 isFace ? 'bg-indigo-500 text-white' : 'bg-emerald-500 text-white'

@@ -653,7 +653,7 @@ pub async fn assign_name_to_id(
              SET device_user_id = ?1,
                  name = CASE WHEN name IS NULL OR TRIM(name) = '' OR name LIKE 'User %' OR name LIKE 'Unknown ID %' THEN ?2 ELSE name END,
                  sync_status = 'active',
-                 branch_id = COALESCE(branch_id, ?3),
+                 branch_id = ?3,
                  updated_at = datetime('now')
              WHERE id = ?4",
             params![device_user_id, final_name, branch, target_id],
@@ -674,7 +674,7 @@ pub async fn assign_name_to_id(
             "UPDATE Employees
              SET name = ?1,
                  sync_status = 'active',
-                 branch_id = COALESCE(branch_id, ?2),
+                 branch_id = ?2,
                  updated_at = datetime('now')
              WHERE id = ?3",
             params![final_name, branch, placeholder_id],
@@ -783,9 +783,10 @@ pub async fn list_employees_for_select(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut stmt = conn.prepare(
-        "SELECT id, employee_code, name, department, first_name, last_name
-         FROM Employees
-         WHERE status != 'deleted'",
+        "SELECT e.id, e.employee_code, e.name, e.department, e.first_name, e.last_name, e.branch_id, b.name as branch_name
+         FROM Employees e
+         LEFT JOIN Branches b ON e.branch_id = b.id
+         WHERE e.status != 'deleted'",
     )?;
     let employees: Vec<Value> = stmt
         .query_map([], |row| {
@@ -800,7 +801,9 @@ pub async fn list_employees_for_select(
                 "id": row.get::<_, i64>(0)?,
                 "employee_code": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 "name": display_name,
-                "department": row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "N/A".to_string())
+                "department": row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "N/A".to_string()),
+                "branch_id": row.get::<_, Option<i64>>(6)?,
+                "branch_name": row.get::<_, Option<String>>(7)?,
             }))
         })?
         .filter_map(|r| r.ok())

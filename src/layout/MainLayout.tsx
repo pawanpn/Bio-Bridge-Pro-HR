@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { ConnectivityBadge } from '../components/ConnectivityBadge';
@@ -11,9 +11,9 @@ import { canAccessModule, getAccessibleBranchIds, isSuperAdmin, normalizeRole } 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { setCalendarModePreference } from '@/lib/dateUtils';
 import {
   Calendar,
-  Search,
   LayoutDashboard,
   Monitor,
   FileText,
@@ -36,7 +36,11 @@ import {
   X,
   ChevronRight,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  ChevronDown,
+  UserCircle,
+  LogIn,
+  Search as SearchIcon
 } from 'lucide-react';
 
 export const MainLayout: React.FC = () => {
@@ -61,6 +65,11 @@ export const MainLayout: React.FC = () => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [breadcrumbHistory, setBreadcrumbHistory] = useState<Array<{label: string, path: string}>>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const searchBoxRef = useRef<HTMLDivElement | null>(null);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Initialize sync service
   useEffect(() => {
@@ -145,14 +154,25 @@ export const MainLayout: React.FC = () => {
     }
   }, [user, isSuperAdminUser, accessibleBranchIds]);
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (searchBoxRef.current && !searchBoxRef.current.contains(target)) {
+        setIsSearchOpen(false);
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(target)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const toggleCalendar = () => {
     const nextMode = calendarMode === 'BS' ? 'AD' : 'BS';
     setCalendarMode(nextMode);
-    try {
-      localStorage.setItem('calendarMode', nextMode);
-    } catch {
-      // Ignore persistence errors.
-    }
+    setCalendarModePreference(nextMode);
   };
 
   const handleLogout = async () => {
@@ -215,6 +235,57 @@ export const MainLayout: React.FC = () => {
   const visibleBranches = isSuperAdminUser
     ? branches
     : branches.filter(branch => accessibleBranchIds.includes(String(branch.id)));
+
+  const navigationItems = useMemo(() => {
+    const items = [
+      { label: 'Dashboard', path: '/dashboard', keywords: ['overview', 'home'] },
+      { label: 'Employees', path: '/employees', keywords: ['staff', 'users', 'workforce', 'hr'] },
+      { label: 'Attendance', path: '/attendance', keywords: ['punch', 'logs', 'check in', 'check out'] },
+      { label: 'Leave Management', path: '/leave-management', keywords: ['leave', 'vacation', 'absence'] },
+      { label: 'Payroll', path: '/payroll', keywords: ['salary', 'wages', 'payment'] },
+      { label: 'Finance & Accounts', path: '/finance', keywords: ['accounts', 'invoice', 'billing'] },
+      { label: 'Reports', path: '/reports', keywords: ['analytics', 'export'] },
+      { label: 'Inventory', path: '/inventory', keywords: ['items', 'stock', 'warehouse'] },
+      { label: 'Projects', path: '/projects', keywords: ['tasks', 'planning'] },
+      { label: 'CRM', path: '/crm', keywords: ['leads', 'sales', 'customers'] },
+      { label: 'Assets', path: '/assets', keywords: ['equipment', 'fixed assets'] },
+      { label: 'Organization', path: '/organization', keywords: ['branches', 'gates', 'devices', 'organization structure'] },
+      { label: 'Device Settings', path: '/device-settings', keywords: ['device', 'scanner', 'hardware'] },
+      { label: 'Notifications', path: '/notifications', keywords: ['alerts', 'messages'] },
+      { label: 'System Settings', path: '/system-settings', keywords: ['settings', 'profile', 'security'] },
+      { label: 'System Tools', path: '/system-tools', keywords: ['tools', 'maintenance', 'rebuild'] },
+      { label: 'Roles & Permissions', path: '/permissions', keywords: ['roles', 'access', 'security'] },
+    ];
+
+    const branchItems = visibleBranches.map((branch) => ({
+      label: branch.name,
+      path: `/organization?branch=${branch.id}`,
+      keywords: ['branch', 'location', 'gate', 'device'],
+      meta: 'Branch',
+    }));
+
+    return [
+      ...items.map(item => ({ ...item, meta: 'Module' })),
+      ...branchItems,
+    ];
+  }, [visibleBranches]);
+
+  const searchResults = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return [] as Array<{ label: string; path: string; meta: string }>;
+    return navigationItems
+      .filter((item) => {
+        const haystack = `${item.label} ${item.path} ${(item.keywords || []).join(' ')} ${item.meta}`.toLowerCase();
+        return haystack.includes(query);
+      })
+      .slice(0, 8);
+  }, [navigationItems, searchQuery]);
+
+  const navigateToSearchResult = useCallback((label: string, path: string) => {
+    setSearchQuery('');
+    setIsSearchOpen(false);
+    go(label, path);
+  }, [go]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
@@ -480,12 +551,47 @@ export const MainLayout: React.FC = () => {
             </nav>
           </div>
 
-          <div className="relative flex-1 max-w-xs lg:max-w-sm">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <div ref={searchBoxRef} className="relative flex-1 max-w-xs lg:max-w-sm">
+            <SearchIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search..."
+              placeholder="Search modules, branches, settings..."
               className="pl-10 bg-muted/50 text-sm"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setIsSearchOpen(true);
+              }}
+              onFocus={() => setIsSearchOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchResults[0]) {
+                  e.preventDefault();
+                  navigateToSearchResult(searchResults[0].label, searchResults[0].path);
+                }
+              }}
             />
+            {isSearchOpen && searchQuery.trim() && (
+              <div className="absolute left-0 right-0 top-full mt-2 z-50 rounded-xl border bg-card shadow-xl overflow-hidden">
+                {searchResults.length > 0 ? (
+                  <div className="max-h-80 overflow-y-auto">
+                    {searchResults.map((item) => (
+                      <button
+                        key={`${item.meta}-${item.path}`}
+                        type="button"
+                        onClick={() => navigateToSearchResult(item.label, item.path)}
+                        className="w-full text-left px-4 py-3 hover:bg-muted/60 border-b last:border-b-0 transition-colors"
+                      >
+                        <div className="text-sm font-semibold">{item.label}</div>
+                        <div className="text-xs text-muted-foreground">{item.meta} · {item.path}</div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="px-4 py-6 text-sm text-muted-foreground">
+                    No matches for "{searchQuery}".
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2 lg:gap-4 flex-shrink-0">
@@ -515,11 +621,76 @@ export const MainLayout: React.FC = () => {
               <span className="hidden sm:inline font-medium">{calendarMode} Mode</span>
             </Button>
 
-            <Avatar className="h-7 w-7 lg:h-8 lg:w-8 bg-primary text-primary-foreground">
-              <AvatarFallback className="text-xs">
-                <UserIcon size={16} />
-              </AvatarFallback>
-            </Avatar>
+            <div ref={userMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setIsUserMenuOpen(prev => !prev)}
+                className="flex items-center gap-2 rounded-full border border-border bg-background px-2 py-1.5 hover:bg-muted/60 transition-colors"
+              >
+                <Avatar className="h-7 w-7 lg:h-8 lg:w-8 bg-primary text-primary-foreground">
+                  <AvatarFallback className="text-xs">
+                    <UserIcon size={16} />
+                  </AvatarFallback>
+                </Avatar>
+                <div className="hidden xl:flex flex-col items-start leading-tight">
+                  <span className="text-xs font-semibold max-w-36 truncate">{user?.full_name || user?.username}</span>
+                  <span className="text-[10px] text-muted-foreground">{user?.role}</span>
+                </div>
+                <ChevronDown size={14} className="text-muted-foreground" />
+              </button>
+
+              {isUserMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 w-56 rounded-xl border bg-card shadow-xl z-50 overflow-hidden">
+                  <div className="px-4 py-3 border-b">
+                    <div className="text-sm font-semibold truncate">{user?.full_name || user?.username}</div>
+                    <div className="text-xs text-muted-foreground truncate">{user?.email}</div>
+                  </div>
+                  <div className="py-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        go('Settings', '/system-settings');
+                      }}
+                      className="w-full px-4 py-2.5 text-left text-sm hover:bg-muted/60 flex items-center gap-2"
+                    >
+                      <UserCircle size={16} />
+                      My Settings
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        go('Organization', '/organization');
+                      }}
+                      className="w-full px-4 py-2.5 text-left text-sm hover:bg-muted/60 flex items-center gap-2"
+                    >
+                      <GitBranch size={16} />
+                      Organization
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        go('System Tools', '/system-tools');
+                      }}
+                      className="w-full px-4 py-2.5 text-left text-sm hover:bg-muted/60 flex items-center gap-2"
+                    >
+                      <Database size={16} />
+                      System Tools
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="w-full px-4 py-2.5 text-left text-sm hover:bg-muted/60 flex items-center gap-2 text-destructive"
+                    >
+                      <LogIn size={16} className="rotate-180" />
+                      Sign Out
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 

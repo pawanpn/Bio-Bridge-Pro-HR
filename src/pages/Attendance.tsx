@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "@/config/supabase";
+import { formatDualDateTime } from "@/lib/dateUtils";
 
 interface Log {
   id: number;
@@ -46,7 +47,7 @@ export default function Attendance() {
               logs.map(log => (
                 <tr key={log.id} className="hover:bg-blue-50/30 transition">
                   <td className="p-5 font-medium text-slate-700">#{log.employee_id}</td>
-                  <td className="p-5 text-slate-600">{new Date(log.timestamp).toLocaleString()}</td>
+                  <td className="p-5 text-slate-600">{formatDualDateTime(log.timestamp)}</td>
                   <td className="p-5"><span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold">{log.type || 'Check-In'}</span></td>
                   <td className="p-5"><span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold">Verified</span></td>
                 </tr>

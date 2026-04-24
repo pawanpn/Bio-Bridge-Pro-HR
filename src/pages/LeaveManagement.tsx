@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
+import { BsDatePicker } from '@/components/BsDatePicker';
 import {
   Table,
   TableHeader,
@@ -36,6 +37,7 @@ import {
 } from '@/components/ui/dialog';
 import { useAuth } from '@/context/AuthContext';
 import { usePermission } from '@/hooks/usePermission';
+import { formatDualDate, formatDualDateTime } from '@/lib/dateUtils';
 
 interface LeaveRequest {
   id: number;
@@ -88,24 +90,10 @@ const leaveTypeIcons: Record<string, string> = {
 const normalizeStatus = (value: string) => value.trim().toLowerCase();
 
 const formatDate = (dateStr: string) => {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  return formatDualDate(dateStr);
 };
 
-const formatDateTime = (value?: string | null) => {
-  if (!value) return '—';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-};
+const formatDateTime = (value?: string | null) => formatDualDateTime(value);
 
 const getInitial = (value?: string | null) => value?.trim()?.charAt(0) || '?';
 
@@ -701,21 +689,11 @@ export const LeaveManagement: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="startDate">Start Date *</Label>
-                <Input
-                  id="startDate"
-                  type="date"
-                  value={formData.startDate}
-                  onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
-                />
+                <BsDatePicker value={formData.startDate} onChange={(date) => setFormData({ ...formData, startDate: date })} className="w-full" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="endDate">End Date *</Label>
-                <Input
-                  id="endDate"
-                  type="date"
-                  value={formData.endDate}
-                  onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
-                />
+                <BsDatePicker value={formData.endDate} onChange={(date) => setFormData({ ...formData, endDate: date })} className="w-full" />
               </div>
             </div>
             <div className="space-y-2">
@@ -789,21 +767,11 @@ export const LeaveManagement: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="space-y-2">
                         <Label htmlFor="editStartDate">Start Date</Label>
-                        <Input
-                          id="editStartDate"
-                          type="date"
-                          value={editFormData.startDate}
-                          onChange={(e) => setEditFormData((prev) => ({ ...prev, startDate: e.target.value }))}
-                        />
+                        <BsDatePicker value={editFormData.startDate} onChange={(date) => setEditFormData((prev) => ({ ...prev, startDate: date }))} className="w-full" />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="editEndDate">End Date</Label>
-                        <Input
-                          id="editEndDate"
-                          type="date"
-                          value={editFormData.endDate}
-                          onChange={(e) => setEditFormData((prev) => ({ ...prev, endDate: e.target.value }))}
-                        />
+                        <BsDatePicker value={editFormData.endDate} onChange={(date) => setEditFormData((prev) => ({ ...prev, endDate: date }))} className="w-full" />
                       </div>
                     </div>
                     <div className="space-y-2">

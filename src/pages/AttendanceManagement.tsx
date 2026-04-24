@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { BsDatePicker } from '@/components/BsDatePicker';
 import {
   Dialog,
   DialogContent,
@@ -124,7 +125,7 @@ export const AttendanceManagement: React.FC = () => {
   const [syncGate, setSyncGate] = useState<string>("1");
   const [gates, setGates] = useState<any[]>([]);
   const [unknownIds, setUnknownIds] = useState<UnknownEmployee[]>([]);
-  const [unknownForms, setUnknownForms] = useState<Record<number, { name: string; employeeId: string }>>({});
+  const [unknownForms, setUnknownForms] = useState<Record<number, { name: string; employeeId: string; branchId: string }>>({});
   const [unknownSearch, setUnknownSearch] = useState('');
   const [mergeConfirmItem, setMergeConfirmItem] = useState<UnknownEmployee | null>(null);
   const [mergeConfirmForm, setMergeConfirmForm] = useState<{ name: string; employeeId: string } | null>(null);
@@ -295,9 +296,10 @@ export const AttendanceManagement: React.FC = () => {
   };
 
   const handleAssignUnknown = async (item: UnknownEmployee) => {
-    const form = unknownForms[item.id] || { name: '', employeeId: '' };
+    const form = unknownForms[item.id] || { name: '', employeeId: '', branchId: String(item.branch_id || selectedBranch || '') };
     const targetEmployeeId = form.employeeId ? Number(form.employeeId) : null;
     const nextName = (form.name || item.name || '').trim();
+    const targetBranchId = form.branchId ? Number(form.branchId) : (item.branch_id || selectedBranch || 1);
 
     if (!item.device_user_id) {
       setSyncStatus('❌ Missing device user ID');
@@ -314,7 +316,7 @@ export const AttendanceManagement: React.FC = () => {
         deviceUserId: item.device_user_id,
         name: nextName || item.name || `Employee ${item.device_user_id}`,
         employeeId: targetEmployeeId,
-        branchId: item.branch_id || selectedBranch || 1,
+        branchId: targetBranchId,
       });
       setUnknownForms(prev => {
         const next = { ...prev };
@@ -333,7 +335,7 @@ export const AttendanceManagement: React.FC = () => {
   };
 
   const requestUnknownAssignment = (item: UnknownEmployee) => {
-    const form = unknownForms[item.id] || { name: '', employeeId: '' };
+    const form = unknownForms[item.id] || { name: '', employeeId: '', branchId: String(item.branch_id || selectedBranch || '') };
     if (form.employeeId) {
       setMergeConfirmItem(item);
       setMergeConfirmForm(form);
@@ -581,11 +583,10 @@ export const AttendanceManagement: React.FC = () => {
 
             <div className="min-w-[150px] space-y-1.5">
               <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Date</Label>
-              <Input
-                type="date"
+              <BsDatePicker
                 value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="h-11 rounded-xl font-mono text-sm border-slate-200 shadow-none"
+                onChange={setSelectedDate}
+                className="w-full"
               />
             </div>
 
@@ -757,15 +758,11 @@ export const AttendanceManagement: React.FC = () => {
                 <>
                   <div>
                     <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">From</label>
-                    <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                      className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white font-mono"
-                    />
+                    <BsDatePicker value={dateFrom} onChange={setDateFrom} className="w-full" />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">To</label>
-                    <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                      className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white font-mono"
-                    />
+                    <BsDatePicker value={dateTo} onChange={setDateTo} className="w-full" />
                   </div>
                   <Button size="sm" className="h-9 text-xs" onClick={() => {
                     if (dailyViewMode === 'logs') {
@@ -1111,27 +1108,47 @@ export const AttendanceManagement: React.FC = () => {
                               className="mt-1 bg-white"
                             />
                           </div>
-                          <div className="flex-1 min-w-[220px]">
-                            <Label className="text-xs font-semibold text-amber-900">Merge Into Existing</Label>
-                            <select
-                              value={currentForm.employeeId}
-                              onChange={(e) => setUnknownForms(prev => ({
-                                ...prev,
-                                [item.id]: { ...currentForm, employeeId: e.target.value }
-                              }))}
-                              className="mt-1 w-full h-10 px-3 rounded-md border border-input bg-white text-sm"
-                            >
-                              <option value="">Create / keep placeholder</option>
-                              {employees.map(emp => (
+                        <div className="flex-1 min-w-[220px]">
+                          <Label className="text-xs font-semibold text-amber-900">Merge Into Existing</Label>
+                          <select
+                            value={currentForm.employeeId}
+                            onChange={(e) => setUnknownForms(prev => ({
+                              ...prev,
+                              [item.id]: { ...currentForm, employeeId: e.target.value }
+                            }))}
+                            className="mt-1 w-full h-10 px-3 rounded-md border border-input bg-white text-sm"
+                          >
+                            <option value="">Create / keep placeholder</option>
+                            {employees
+                              .filter(emp => !currentForm.branchId || String(emp.branch_id || '') === currentForm.branchId)
+                              .map(emp => (
                                 <option key={emp.id} value={emp.id}>
                                   {emp.name || emp.full_name || emp.employee_code || `#${emp.id}`}
                                 </option>
                               ))}
-                            </select>
-                          </div>
-                          <div className="shrink-0">
-                            <Button
-                              onClick={() => requestUnknownAssignment(item)}
+                          </select>
+                        </div>
+                        <div className="flex-1 min-w-[180px]">
+                          <Label className="text-xs font-semibold text-amber-900">Branch</Label>
+                          <select
+                            value={currentForm.branchId}
+                            onChange={(e) => setUnknownForms(prev => ({
+                              ...prev,
+                              [item.id]: { ...currentForm, branchId: e.target.value }
+                            }))}
+                            className="mt-1 w-full h-10 px-3 rounded-md border border-input bg-white text-sm"
+                          >
+                            <option value="">Use selected branch</option>
+                            {scopedBranches.map(branch => (
+                              <option key={branch.id} value={branch.id}>
+                                {branch.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="shrink-0">
+                          <Button
+                            onClick={() => requestUnknownAssignment(item)}
                               className="w-full lg:w-auto bg-amber-600 hover:bg-amber-700 text-white"
                             >
                               Assign
@@ -1256,11 +1273,10 @@ export const AttendanceManagement: React.FC = () => {
               </div>
               <div>
                 <Label>Date</Label>
-                <Input
-                  type="date"
+                <BsDatePicker
                   value={manualForm.date}
-                  onChange={(e) => setManualForm({ ...manualForm, date: e.target.value })}
-                  className="mt-1"
+                  onChange={(date) => setManualForm({ ...manualForm, date })}
+                  className="mt-1 w-full"
                 />
               </div>
               <div>

@@ -127,7 +127,7 @@ export async function seedAllDemoData(): Promise<string> {
     results.push(' Seeding Branches...');
     for (const branch of DEMO_BRANCHES) {
       try {
-        await invoke('add_branch', branch);
+        await invoke('add_branch', { ...branch, organization_id: null });
         results.push(`  ✅ Branch: ${branch.name}`);
       } catch (e) {
         results.push(`  ⚠️ Branch ${branch.name} may already exist`);
@@ -138,7 +138,7 @@ export async function seedAllDemoData(): Promise<string> {
     results.push('\n🚪 Seeding Gates...');
     for (const gate of DEMO_GATES) {
       try {
-        await invoke('add_gate', gate);
+        await invoke('add_gate', { branch_id: gate.branchId, name: gate.name });
         results.push(`  ✅ Gate: ${gate.name}`);
       } catch (e) {
         results.push(`  ⚠️ Gate ${gate.name} may already exist`);
