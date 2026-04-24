@@ -21,6 +21,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   changePassword: (newPassword: string) => Promise<void>;
+  resetPassword: (emailOrId: string) => Promise<{ success: boolean; error?: string }>;
   loading: boolean;
 }
 
@@ -134,13 +135,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const login = async (email: string, password: string) => {
+  const login = async (emailOrId: string, password: string) => {
     try {
-      console.log('🔐 Attempting login for:', email);
+      console.log('🔐 Attempting login for:', emailOrId);
       
+      let loginEmail = emailOrId.trim();
+
+      // If it's an admin bypass shortcut or doesn't look like an email, lookup by username/employee_code
+      if (!loginEmail.includes('@')) {
+        if (loginEmail.toLowerCase() === 'admin') {
+          loginEmail = 'admin@biobridge.com';
+        } else {
+          // Look up email by employee ID/username
+          const { data: userRecord, error: lookupError } = await supabase
+            .from('users')
+            .select('email')
+            .eq('username', loginEmail)
+            .maybeSingle();
+
+          if (!userRecord?.email) {
+             console.log('Lookup fallback failed for employee ID');
+             return { success: false, error: 'Invalid Employee ID or Email' };
+          }
+          loginEmail = userRecord.email;
+        }
+      }
+
       // Sign in with Supabase Auth
       const { data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: loginEmail,
         password
       });
 
@@ -207,6 +230,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const resetPassword = async (emailOrId: string) => {
+    try {
+      let resetEmail = emailOrId.trim();
+
+      if (!resetEmail.includes('@')) {
+        const { data: userRecord } = await supabase
+          .from('users')
+          .select('email')
+          .eq('username', resetEmail)
+          .maybeSingle();
+
+        if (!userRecord?.email) {
+           return { success: false, error: 'User does not exist with this ID' };
+        }
+        resetEmail = userRecord.email;
+      }
+
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+        redirectTo: window.location.origin + '/reset-password',
+      });
+
+      if (error) throw error;
+      return { success: true };
+    } catch (error: any) {
+      console.error('Reset password error:', error);
+      return { success: false, error: error.message };
+    }
+  };
+
   const logout = async () => {
     try {
       await supabase.auth.signOut();
@@ -226,6 +278,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       login, 
       logout, 
       changePassword,
+      resetPassword,
       loading
     }}>
       {children}
