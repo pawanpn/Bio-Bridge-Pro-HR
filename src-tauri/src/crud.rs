@@ -1255,6 +1255,7 @@ fn is_leave_admin_role(role: Option<&str>) -> bool {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateLeaveRequest {
     pub employee_id: i64,
     pub leave_type: String,
@@ -1262,6 +1263,33 @@ pub struct CreateLeaveRequest {
     pub end_date: String,
     pub reason: Option<String>,
     pub applied_by: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListLeaveRequestsRequest {
+    pub employee_id: Option<i64>,
+    pub status: Option<String>,
+    pub current_user_role: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteLeaveRequest {
+    pub leave_request_id: i64,
+    pub actor_role: Option<String>,
+    pub actor_employee_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateLeaveRequestDetails {
+    pub leave_request_id: i64,
+    pub leave_type: String,
+    pub start_date: String,
+    pub end_date: String,
+    pub reason: Option<String>,
+    pub actor_role: Option<String>,
 }
 
 /// CREATE: Submit leave request
@@ -1323,34 +1351,29 @@ pub async fn create_leave_request(
 
 #[tauri::command]
 pub async fn add_leave_request(
-    employee_id: i64,
-    leave_type: String,
-    start_date: String,
-    end_date: String,
-    reason: Option<String>,
-    applied_by: Option<String>,
+    request: CreateLeaveRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     create_leave_request(
-        CreateLeaveRequest {
-            employee_id,
-            leave_type,
-            start_date,
-            end_date,
-            reason,
-            applied_by,
-        },
+        request,
         state,
-    )
-    .await
+    ).await
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateLeaveStatusRequest {
+    pub leave_request_id: i64,
+    pub status: String,
+    pub approved_by: Option<String>,
+    pub approval_remarks: Option<String>,
+    pub actor_role: Option<String>,
 }
 
 /// READ: Get leave requests
 #[tauri::command]
 pub async fn list_leave_requests(
-    employee_id: Option<i64>,
-    status: Option<String>,
-    current_user_role: Option<String>,
+    request: ListLeaveRequestsRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -1364,28 +1387,37 @@ pub async fn list_leave_requests(
     let mut query = String::from(
         "SELECT lr.id, lr.employee_id, e.first_name, e.last_name,
                 COALESCE(lr.leave_type, 'Casual Leave') as leave_type, lr.start_date, lr.end_date,
-                julianday(lr.end_date) - julianday(lr.start_date) + 1 as total_days,
+                CAST(MAX(0, julianday(lr.end_date) - julianday(lr.start_date) + 1 - COALESCE((
+                    SELECT COUNT(*)
+                    FROM Holidays h
+                    WHERE date(h.date) BETWEEN date(lr.start_date) AND date(lr.end_date)
+                ), 0)) AS INTEGER) as total_days,
+                COALESCE((
+                    SELECT COUNT(*)
+                    FROM Holidays h
+                    WHERE date(h.date) BETWEEN date(lr.start_date) AND date(lr.end_date)
+                ), 0) as holiday_days,
                 lr.reason, LOWER(COALESCE(lr.status, 'pending')) as status,
-                lr.applied_at, lr.approved_by, lr.approved_at, lr.rejection_reason
+                lr.applied_at, lr.approved_by, lr.approved_at, lr.approval_remarks, lr.rejection_reason
         FROM LeaveRequests lr
         JOIN Employees e ON lr.employee_id = e.id
-        WHERE 1=1",
+        WHERE lr.deleted_at IS NULL",
     );
 
-    if let Some(eid) = employee_id {
+    if let Some(eid) = request.employee_id {
         query.push_str(&format!(" AND lr.employee_id = {}", eid));
     }
-    if let Some(st) = status {
+    if let Some(st) = request.status {
         query.push_str(&format!(" AND LOWER(COALESCE(lr.status, 'pending')) = '{}'", sanitize_input(&st.to_lowercase())));
     }
 
-    if let Some(role) = current_user_role {
+    if let Some(role) = request.current_user_role {
         if !is_leave_admin_role(Some(role.as_str())) {
-            query.push_str(&format!(" AND lr.employee_id = {}", employee_id.unwrap_or(-1)));
+            query.push_str(&format!(" AND lr.employee_id = {}", request.employee_id.unwrap_or(-1)));
         }
     }
 
-    query.push_str(" ORDER BY datetime(COALESCE(lr.applied_at, lr.created_at, datetime('now'))) DESC, lr.id DESC");
+    query.push_str(" ORDER BY datetime(COALESCE(lr.applied_at, lr.updated_at, datetime('now'))) DESC, lr.id DESC");
 
     let mut stmt = conn
         .prepare(&query)
@@ -1395,18 +1427,20 @@ pub async fn list_leave_requests(
         .query_map([], |row| {
             Ok(serde_json::json!({
                 "id": row.get::<_, i64>(0)?,
-                "employee_id": row.get::<_, i64>(1)?,
-                "employee_name": format!("{} {}", row.get::<_, String>(2)?, row.get::<_, String>(3)?),
-                "leave_type": row.get::<_, Option<String>>(4)?.unwrap_or_else(|| "Casual Leave".to_string()),
-                "start_date": row.get::<_, String>(5)?,
-                "end_date": row.get::<_, String>(6)?,
-                "total_days": row.get::<_, f64>(7)?,
-                "reason": row.get::<_, Option<String>>(8)?,
-                "status": row.get::<_, String>(9)?,
-                "applied_at": row.get::<_, Option<String>>(10)?.unwrap_or_default(),
-                "approved_by": row.get::<_, Option<String>>(11)?,
-                "approved_at": row.get::<_, Option<String>>(12)?,
-                "rejection_reason": row.get::<_, Option<String>>(13)?,
+                "employeeId": row.get::<_, i64>(1)?,
+                "employeeName": format!("{} {}", row.get::<_, String>(2)?, row.get::<_, String>(3)?),
+                "leaveType": row.get::<_, Option<String>>(4)?.unwrap_or_else(|| "Casual Leave".to_string()),
+                "startDate": row.get::<_, String>(5)?,
+                "endDate": row.get::<_, String>(6)?,
+                "totalDays": row.get::<_, i64>(7)?,
+                "holidayDays": row.get::<_, i64>(8)?,
+                "reason": row.get::<_, Option<String>>(9)?,
+                "status": row.get::<_, String>(10)?,
+                "appliedAt": row.get::<_, Option<String>>(11)?.unwrap_or_default(),
+                "approvedBy": row.get::<_, Option<String>>(12)?,
+                "approvedAt": row.get::<_, Option<String>>(13)?,
+                "approvalRemarks": row.get::<_, Option<String>>(14)?,
+                "rejectionReason": row.get::<_, Option<String>>(15)?,
             }))
         })
         .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
@@ -1423,11 +1457,7 @@ pub async fn list_leave_requests(
 /// UPDATE: Approve/Reject leave request
 #[tauri::command]
 pub async fn update_leave_status(
-    leave_request_id: i64,
-    status: String,
-    approved_by: Option<String>,
-    rejection_reason: Option<String>,
-    actor_role: Option<String>,
+    request: UpdateLeaveStatusRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -1438,13 +1468,13 @@ pub async fn update_leave_status(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    if !is_leave_admin_role(actor_role.as_deref()) {
+    if !is_leave_admin_role(request.actor_role.as_deref()) {
         return Err(AppError::PermissionDenied(
             "Only HR admin or system admin can approve or reject leave requests".into(),
         ));
     }
 
-    let status_sanitized = normalize_leave_status(&status);
+    let status_sanitized = normalize_leave_status(&request.status);
     if !matches!(status_sanitized.as_str(), "approved" | "rejected") {
         return Err(AppError::ValidationError(
             "Leave status must be approved or rejected".into(),
@@ -1453,13 +1483,14 @@ pub async fn update_leave_status(
 
     conn.execute(
         "UPDATE LeaveRequests 
-         SET status = ?1, approved_by = ?2, approved_at = datetime('now'), rejection_reason = ?3, updated_at = datetime('now')
-         WHERE id = ?4",
+         SET status = ?1, approved_by = ?2, approved_at = datetime('now'), approval_remarks = ?3, rejection_reason = ?4, updated_at = datetime('now')
+         WHERE id = ?5",
         params![
             status_sanitized,
-            approved_by,
-            rejection_reason,
-            leave_request_id
+            request.approved_by,
+            request.approval_remarks,
+            if status_sanitized == "rejected" { request.approval_remarks.clone() } else { None },
+            request.leave_request_id
         ],
     )
     .map_err(|e| AppError::DatabaseError(format!("Update failed: {}", e)))?;
@@ -1467,9 +1498,9 @@ pub async fn update_leave_status(
     log_audit(
         conn,
         "LeaveRequests",
-        Some(leave_request_id.to_string()),
+        Some(request.leave_request_id.to_string()),
         "UPDATE",
-        &format!("Leave request #{} {}", leave_request_id, status_sanitized),
+        &format!("Leave request #{} {}", request.leave_request_id, status_sanitized),
     )?;
 
     Ok(serde_json::json!({
@@ -1478,11 +1509,69 @@ pub async fn update_leave_status(
     }))
 }
 
+/// UPDATE: Edit leave request details
+#[tauri::command]
+pub async fn update_leave_request(
+    request: UpdateLeaveRequestDetails,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    if !is_leave_admin_role(request.actor_role.as_deref()) {
+        return Err(AppError::PermissionDenied(
+            "Only HR admin or system admin can edit leave requests".into(),
+        ));
+    }
+
+    if !validate_date(&request.start_date) || !validate_date(&request.end_date) {
+        return Err(AppError::ValidationError(
+            "Invalid date format. Use YYYY-MM-DD".into(),
+        ));
+    }
+
+    if request.end_date < request.start_date {
+        return Err(AppError::ValidationError(
+            "End date cannot be earlier than start date".into(),
+        ));
+    }
+
+    conn.execute(
+        "UPDATE LeaveRequests
+         SET leave_type = ?1, start_date = ?2, end_date = ?3, reason = ?4, updated_at = datetime('now')
+         WHERE id = ?5 AND deleted_at IS NULL",
+        params![
+            sanitize_input(&request.leave_type),
+            request.start_date,
+            request.end_date,
+            request.reason.as_ref().map(|s| sanitize_input(s)),
+            request.leave_request_id
+        ],
+    )
+    .map_err(|e| AppError::DatabaseError(format!("Edit failed: {}", e)))?;
+
+    log_audit(
+        conn,
+        "LeaveRequests",
+        Some(request.leave_request_id.to_string()),
+        "UPDATE",
+        &format!("Leave request #{} details updated", request.leave_request_id),
+    )?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Leave request updated successfully"
+    }))
+}
+
 #[tauri::command]
 pub async fn delete_leave_request(
-    leave_request_id: i64,
-    actor_role: Option<String>,
-    actor_employee_id: Option<i64>,
+    request: DeleteLeaveRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -1496,13 +1585,13 @@ pub async fn delete_leave_request(
     let leave = conn
         .query_row(
             "SELECT employee_id, LOWER(COALESCE(status, 'pending')) FROM LeaveRequests WHERE id = ?1",
-            params![leave_request_id],
+            params![request.leave_request_id],
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
         )
         .map_err(|_| AppError::NotFound("Leave request not found".into()))?;
 
-    let is_admin = is_leave_admin_role(actor_role.as_deref());
-    let can_self_delete = actor_employee_id.is_some() && actor_employee_id == Some(leave.0) && leave.1 == "pending";
+    let is_admin = is_leave_admin_role(request.actor_role.as_deref());
+    let can_self_delete = request.actor_employee_id.is_some() && request.actor_employee_id == Some(leave.0) && leave.1 == "pending";
 
     if !is_admin && !can_self_delete {
         return Err(AppError::PermissionDenied(
@@ -1512,16 +1601,16 @@ pub async fn delete_leave_request(
 
     conn.execute(
         "UPDATE LeaveRequests SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?1",
-        params![leave_request_id],
+        params![request.leave_request_id],
     )
     .map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
 
     log_audit(
         conn,
         "LeaveRequests",
-        Some(leave_request_id.to_string()),
+        Some(request.leave_request_id.to_string()),
         "DELETE",
-        &format!("Leave request #{} deleted", leave_request_id),
+        &format!("Leave request #{} deleted", request.leave_request_id),
     )?;
 
     Ok(serde_json::json!({
@@ -1590,7 +1679,7 @@ pub async fn get_leave_stats(
     let approved_today: i64 = conn.query_row(
         "SELECT COUNT(*) FROM LeaveRequests
          WHERE LOWER(COALESCE(status, 'pending')) = 'approved'
-           AND date(COALESCE(approved_at, applied_at, created_at)) = date('now')
+           AND date(COALESCE(approved_at, applied_at, updated_at)) = date('now')
            AND deleted_at IS NULL",
         [],
         |row| row.get(0),

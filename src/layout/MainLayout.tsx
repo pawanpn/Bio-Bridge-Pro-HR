@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { AttendanceConsole } from '../components/AttendanceConsole';
 import { ConnectivityBadge } from '../components/ConnectivityBadge';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { useAuth } from '../context/AuthContext';
@@ -45,7 +44,13 @@ export const MainLayout: React.FC = () => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const { hasAnyPermission, loading: permissionLoading } = usePermission(user?.id);
-  const [calendarMode, setCalendarMode] = useState(localStorage.getItem('calendarMode') || 'BS');
+  const [calendarMode, setCalendarMode] = useState(() => {
+    try {
+      return localStorage.getItem('calendarMode') || 'BS';
+    } catch {
+      return 'BS';
+    }
+  });
   const [activeTab, setActiveTab] = useState('Overview');
   const [branches, setBranches] = useState<{id: number, name: string}[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<number | string>('all');
@@ -55,17 +60,24 @@ export const MainLayout: React.FC = () => {
 
   // Initialize sync service
   useEffect(() => {
-    syncService.initialize();
-    syncService.setupRealtimeListeners((table, data) => {
-      console.log(`📡 Realtime update: ${table}`, data);
-      // Reload data when changes detected
+    let mounted = true;
+
+    syncService.initialize().catch((error) => {
+      console.error('Sync service init failed:', error);
+    });
+
+    void syncService.setupRealtimeListeners((table, data) => {
+      if (!mounted) return;
+      console.log('Realtime update:', table, data);
       if (table === 'employees' || table === 'attendance_logs') {
-        // Trigger reload of current page data
         window.dispatchEvent(new CustomEvent('data-synced', { detail: { table } }));
       }
+    }).catch((error) => {
+      console.error('Realtime listener setup failed:', error);
     });
-    
+
     return () => {
+      mounted = false;
       syncService.destroy();
     };
   }, []);
@@ -128,7 +140,11 @@ export const MainLayout: React.FC = () => {
   const toggleCalendar = () => {
     const nextMode = calendarMode === 'BS' ? 'AD' : 'BS';
     setCalendarMode(nextMode);
-    localStorage.setItem('calendarMode', nextMode);
+    try {
+      localStorage.setItem('calendarMode', nextMode);
+    } catch {
+      // Ignore persistence errors.
+    }
   };
 
   const handleLogout = async () => {
@@ -187,7 +203,7 @@ export const MainLayout: React.FC = () => {
   }, [navigate, breadcrumbHistory]);
 
   const isOperator = user?.role === 'OPERATOR';
-  const canAccessLeave = !permissionLoading && hasAnyPermission(['view_leaves', 'apply_leave', 'approve_leave']);
+  const canAccessLeave = user?.role === 'SUPER_ADMIN' || (!permissionLoading && hasAnyPermission(['view_leaves', 'apply_leave', 'approve_leave']));
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
@@ -500,8 +516,6 @@ export const MainLayout: React.FC = () => {
         <main className="flex-1 overflow-y-auto overflow-x-hidden bg-muted/20 p-3 sm:p-4 lg:p-6">
           <Outlet />
         </main>
-
-        <AttendanceConsole />
       </div>
     </div>
   );

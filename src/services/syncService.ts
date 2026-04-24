@@ -21,19 +21,30 @@ export interface ConnectivityState {
   supabaseConnected: boolean;
 }
 
+const getInitialOnlineState = () => {
+  try {
+    return typeof navigator !== 'undefined' ? navigator.onLine : true;
+  } catch {
+    return true;
+  }
+};
+
 class SyncService {
   private syncInterval: ReturnType<typeof setInterval> | null = null;
   private connectivityInterval: ReturnType<typeof setInterval> | null = null;
   private isSyncing = false;
   private listeners: Array<(state: ConnectivityState) => void> = [];
   private connectivityState: ConnectivityState = {
-    isOnline: navigator.onLine,
+    isOnline: getInitialOnlineState(),
     lastChecked: new Date(),
     supabaseConnected: false,
   };
 
   // Initialize the sync service
   async initialize() {
+    if (typeof window === 'undefined') {
+      return;
+    }
     console.log('🔄 Initializing Sync Service...');
     
     // Check initial connectivity
@@ -57,9 +68,10 @@ class SyncService {
     try {
       const { error } = await supabase.from('employees').select('id').limit(1);
       const isConnected = !error;
+      const isOnline = getInitialOnlineState();
       
       this.connectivityState = {
-        isOnline: navigator.onLine && isConnected,
+        isOnline: isOnline && isConnected,
         lastChecked: new Date(),
         supabaseConnected: isConnected,
       };
@@ -379,6 +391,8 @@ class SyncService {
     if (this.syncInterval) clearInterval(this.syncInterval);
     if (this.connectivityInterval) clearInterval(this.connectivityInterval);
     this.listeners = [];
+    this.syncInterval = null;
+    this.connectivityInterval = null;
     console.log('🛑 Sync Service destroyed');
   }
 }

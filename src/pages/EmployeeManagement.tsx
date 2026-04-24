@@ -1751,7 +1751,7 @@ export const EmployeeManagement: React.FC = () => {
             <div className="space-y-4">
               <div className="flex items-center gap-4 mb-6">
                 <div className="w-16 h-16 rounded-full bg-primary flex items-center justify-center text-white text-2xl font-bold">
-                  {viewDialog.employee.name?.charAt(0) || '?'}
+                  {(viewDialog.employee.name?.trim()?.charAt(0)) || '?'}
                 </div>
                 <div>
                   <h3 className="text-xl font-bold">{viewDialog.employee.name}</h3>

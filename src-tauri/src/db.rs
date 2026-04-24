@@ -242,6 +242,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             applied_at TEXT DEFAULT (datetime('now')),
             approved_by TEXT,
             approved_at TEXT,
+            approval_remarks TEXT,
             rejection_reason TEXT,
             updated_at TEXT DEFAULT (datetime('now')),
             deleted_at TEXT,
@@ -483,6 +484,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN applied_by TEXT", []);
     let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN applied_at TEXT", []);
     let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN approved_at TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN approval_remarks TEXT", []);
     let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN rejection_reason TEXT", []);
     let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN updated_at TEXT", []);
     let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN deleted_at TEXT", []);

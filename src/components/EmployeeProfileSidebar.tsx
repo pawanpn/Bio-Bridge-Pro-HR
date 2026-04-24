@@ -31,6 +31,7 @@ export const EmployeeProfileSidebar: React.FC<Props> = ({ employee, onClose }) =
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('');
   const [previewDoc, setPreviewDoc] = useState<{name: string, dataUrl: string} | null>(null);
+  const employeeInitial = employee.name?.trim()?.charAt(0) || 'E';
 
   const loadDocuments = useCallback(async () => {
     try {
@@ -115,7 +116,7 @@ export const EmployeeProfileSidebar: React.FC<Props> = ({ employee, onClose }) =
       <div style={headerStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={avatarStyle}>
-            {employee.name.charAt(0)}
+            {employeeInitial}
           </div>
           <div>
             <h3 style={{ margin: 0 }}>{employee.name}</h3>

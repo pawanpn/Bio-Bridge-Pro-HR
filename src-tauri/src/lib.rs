@@ -111,6 +111,7 @@ pub fn run() {
             crud::add_leave_request,
             crud::list_leave_requests,
             crud::update_leave_status,
+            crud::update_leave_request,
             crud::delete_leave_request,
             crud::get_leave_types,
             crud::get_leave_stats,

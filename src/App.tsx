@@ -23,10 +23,18 @@ import { ProjectsManagement } from './pages/ProjectsManagement';
 import { CRMManagement } from './pages/CRMManagement';
 import { AssetsManagement } from './pages/AssetsManagement';
 import { SystemTools } from './components/SystemTools';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
 
 function AppContent() {
   const { user, loading } = useAuth();
-  const isSetupComplete = localStorage.getItem('setupComplete') === 'true';
+  const isSetupComplete = (() => {
+    try {
+      return localStorage.getItem('setupComplete') === 'true';
+    } catch {
+      return false;
+    }
+  })();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
 
   // Show loading while checking auth
   if (loading) {
@@ -59,9 +67,13 @@ function AppContent() {
         <Route
           path="leave-management"
           element={
-            <PermissionGuard requiredPermission={['view_leaves', 'apply_leave', 'approve_leave']} showAccessDenied>
+            isSuperAdmin ? (
               <LeaveManagement />
-            </PermissionGuard>
+            ) : (
+              <PermissionGuard requiredPermission={['view_leaves', 'apply_leave', 'approve_leave']} showAccessDenied>
+                <LeaveManagement />
+              </PermissionGuard>
+            )
           }
         />
         <Route path="attendance" element={<AttendanceManagement />} />
@@ -88,9 +100,11 @@ function AppContent() {
 function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <AppContent />
-      </AuthProvider>
+      <AppErrorBoundary>
+        <AuthProvider>
+          <AppContent />
+        </AuthProvider>
+      </AppErrorBoundary>
     </BrowserRouter>
   );
 }

@@ -158,7 +158,7 @@ export const ERPDashboard: React.FC = () => {
         // Fetch real data from local database
         const [empResult, leaveResult, itemResult, projectResult, leadResult, dashStats] = await Promise.all([
           invoke<any>('list_employees').catch(() => ({ data: [] })),
-          invoke<any>('list_leave_requests').catch(() => ({ data: [] })),
+          invoke<any>('list_leave_requests', { request: {} }).catch(() => ({ data: [] })),
           invoke<any[]>('list_items').catch(() => []),
           invoke<any[]>('list_projects').catch(() => []),
           invoke<any[]>('list_leads').catch(() => []),
@@ -187,7 +187,7 @@ export const ERPDashboard: React.FC = () => {
           absentToday,
           lateToday: dashStats?.lateToday ?? 0,
           onLeave: onLeaveEmployees,
-          pendingLeaveRequests: leaves.filter((l: any) => l.status === 'Pending').length,
+          pendingLeaveRequests: leaves.filter((l: any) => String(l.status || '').toLowerCase() === 'pending').length,
           newHiresThisMonth: employees.filter((e: any) => {
             const joinDate = new Date(e.date_of_joining);
             const now = new Date();

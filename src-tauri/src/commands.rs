@@ -590,7 +590,7 @@ pub async fn list_employees_for_select(
                 "id": row.get::<_, i64>(0)?,
                 "employee_code": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                 "name": display_name,
-                "department": row.get::<_, Option<String>>(3)?.unwrap_or(Some("N/A".to_string()))
+                "department": row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "N/A".to_string())
             }))
         })?
         .filter_map(|r| r.ok())

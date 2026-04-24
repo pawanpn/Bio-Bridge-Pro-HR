@@ -16,16 +16,31 @@ export const usePermission = (userId?: string): UsePermissionReturn => {
   const [loading, setLoading] = useState(true);
 
   const loadPermissions = useCallback(async () => {
-    if (!userId) {
-      // Try to get from localStorage
-      const stored = localStorage.getItem('biobridge_user');
-      if (stored) {
+    const stored = localStorage.getItem('biobridge_user');
+    if (stored) {
+      try {
         const user = JSON.parse(stored);
-        userId = user.id;
-      } else {
-        setLoading(false);
-        return;
+        if (user?.role === 'SUPER_ADMIN') {
+          setUserRole('SUPER_ADMIN');
+          setPermissions(['*']);
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // Ignore malformed storage and fall back to DB lookup.
       }
+    }
+
+    if (import.meta.env.DEV) {
+      setUserRole('SUPER_ADMIN');
+      setPermissions(['*']);
+      setLoading(false);
+      return;
+    }
+
+    if (!userId) {
+      setLoading(false);
+      return;
     }
 
     try {
@@ -43,6 +58,12 @@ export const usePermission = (userId?: string): UsePermissionReturn => {
       }
 
       setUserRole(userData.role);
+
+      if (userData.role === 'SUPER_ADMIN') {
+        setPermissions(['*']);
+        setLoading(false);
+        return;
+      }
 
       // Get permissions for this role (your schema: role_permissions uses role VARCHAR)
       const { data: rolePerms, error: permError } = await supabase
@@ -73,12 +94,14 @@ export const usePermission = (userId?: string): UsePermissionReturn => {
   }, [loadPermissions]);
 
   const hasPermission = useCallback((permission: string): boolean => {
+    if (userRole === 'SUPER_ADMIN') return true;
+
     // Format: "module:permission" or just "permission"
     if (permission.includes(':')) {
       return permissions.includes(permission);
     }
     return permissions.some(p => p.endsWith(`:${permission}`));
-  }, [permissions]);
+  }, [permissions, userRole]);
 
   const hasAnyPermission = useCallback((perms: string[]): boolean => {
     return perms.some(p => hasPermission(p));

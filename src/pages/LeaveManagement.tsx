@@ -10,6 +10,7 @@ import {
   Filter,
   CalendarDays,
   UserRound,
+  Eye,
   ShieldCheck,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -44,10 +45,12 @@ interface LeaveRequest {
   startDate: string;
   endDate: string;
   totalDays?: number;
+  holidayDays?: number;
   status: string;
   reason?: string | null;
   approvedBy?: string | null;
   approvedAt?: string | null;
+  approvalRemarks?: string | null;
   rejectionReason?: string | null;
   appliedAt?: string | null;
 }
@@ -91,6 +94,21 @@ const formatDate = (dateStr: string) => {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
+const formatDateTime = (value?: string | null) => {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
+const getInitial = (value?: string | null) => value?.trim()?.charAt(0) || '?';
+
 export const LeaveManagement: React.FC = () => {
   const { user } = useAuth();
   const { hasAnyPermission, loading: permissionLoading } = usePermission(user?.id);
@@ -109,6 +127,16 @@ export const LeaveManagement: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [processing, setProcessing] = useState<number | null>(null);
+  const [selectedLeave, setSelectedLeave] = useState<LeaveRequest | null>(null);
+  const [selectedAction, setSelectedAction] = useState<'approved' | 'rejected' | null>(null);
+  const [selectedRemarks, setSelectedRemarks] = useState('');
+  const [isEditingLeave, setIsEditingLeave] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    leaveType: DEFAULT_LEAVE_TYPES[1],
+    startDate: '',
+    endDate: '',
+    reason: '',
+  });
   const [formData, setFormData] = useState({
     employeeId: '',
     leaveType: DEFAULT_LEAVE_TYPES[1],
@@ -146,9 +174,11 @@ export const LeaveManagement: React.FC = () => {
 
       const canSeeEveryone = canApproveLeave || isHrAdmin;
       const leaveResponse = await invoke<any>('list_leave_requests', {
-        employeeId: canSeeEveryone ? undefined : resolvedEmployeeId ?? undefined,
-        status: filterStatus === 'all' ? undefined : filterStatus,
-        currentUserRole: user?.role,
+        request: {
+          employeeId: canSeeEveryone ? undefined : resolvedEmployeeId ?? undefined,
+          status: filterStatus === 'all' ? undefined : filterStatus,
+          currentUserRole: user?.role,
+        },
       });
 
       const rows = Array.isArray(leaveResponse) ? leaveResponse : (leaveResponse?.data || []);
@@ -166,7 +196,6 @@ export const LeaveManagement: React.FC = () => {
     canApproveLeave,
     canApplyLeave,
     filterStatus,
-    formData.employeeId,
     isAuthorized,
     isHrAdmin,
     permissionLoading,
@@ -208,6 +237,10 @@ export const LeaveManagement: React.FC = () => {
     await fetchData();
   };
 
+  const canDeleteSelected = selectedLeave
+    ? canApproveLeave || isHrAdmin || (canApplyLeave && currentEmployeeId === selectedLeave.employeeId)
+    : false;
+
   const handleAddLeave = async () => {
     const employeeId = parseInt(formData.employeeId, 10);
 
@@ -227,13 +260,15 @@ export const LeaveManagement: React.FC = () => {
     }
 
     try {
-      await invoke('create_leave_request', {
-        employeeId,
-        leaveType: formData.leaveType,
-        startDate: formData.startDate,
-        endDate: formData.endDate,
-        reason: formData.reason || null,
-        appliedBy: user?.username || user?.email || null,
+      await invoke('add_leave_request', {
+        request: {
+          employeeId: employeeId,
+          leaveType: formData.leaveType,
+          startDate: formData.startDate,
+          endDate: formData.endDate,
+          reason: formData.reason || null,
+          appliedBy: user?.username || user?.email || null,
+        },
       });
 
       setShowForm(false);
@@ -250,23 +285,82 @@ export const LeaveManagement: React.FC = () => {
     }
   };
 
-  const handleStatusUpdate = async (leaveId: number, status: 'approved' | 'rejected') => {
-    if (!canApproveLeave) {
+  const openLeavePreview = (leave: LeaveRequest) => {
+    setSelectedLeave(leave);
+    setSelectedAction(null);
+    setSelectedRemarks('');
+    setIsEditingLeave(false);
+    setEditFormData({
+      leaveType: leave.leaveType || DEFAULT_LEAVE_TYPES[1],
+      startDate: leave.startDate || '',
+      endDate: leave.endDate || '',
+      reason: leave.reason || '',
+    });
+  };
+
+  const closeLeavePreview = () => {
+    setSelectedLeave(null);
+    setSelectedAction(null);
+    setSelectedRemarks('');
+    setIsEditingLeave(false);
+    setEditFormData({
+      leaveType: DEFAULT_LEAVE_TYPES[1],
+      startDate: '',
+      endDate: '',
+      reason: '',
+    });
+  };
+
+  const handleSaveLeaveEdit = async () => {
+    if (!selectedLeave || !isHrAdmin) {
+      alert('Only HR admin can edit leave requests.');
+      return;
+    }
+
+    if (!editFormData.startDate || !editFormData.endDate) {
+      alert('Please fill in both start and end dates.');
+      return;
+    }
+
+    setProcessing(selectedLeave.id);
+    try {
+      await invoke('update_leave_request', {
+        request: {
+          leaveRequestId: selectedLeave.id,
+          leaveType: editFormData.leaveType,
+          startDate: editFormData.startDate,
+          endDate: editFormData.endDate,
+          reason: editFormData.reason || null,
+          actorRole: user?.role,
+        },
+      });
+      closeLeavePreview();
+      await refreshAfterAction();
+    } catch (e) {
+      alert('Failed to update leave request: ' + e);
+    } finally {
+      setProcessing(null);
+    }
+  };
+
+  const handleConfirmStatusUpdate = async () => {
+    if (!canApproveLeave || !selectedLeave || !selectedAction) {
       alert('Only HR admin can approve or reject leave requests.');
       return;
     }
 
-    const rejectionReason = status === 'rejected' ? prompt('Enter rejection reason (optional):') || null : null;
-
-    setProcessing(leaveId);
+    setProcessing(selectedLeave.id);
     try {
       await invoke('update_leave_status', {
-        leaveRequestId: leaveId,
-        status,
-        approvedBy: status === 'approved' ? (user?.username || user?.full_name || user?.email || 'HR Admin') : null,
-        rejectionReason,
-        actorRole: user?.role,
+        request: {
+          leaveRequestId: selectedLeave.id,
+          status: selectedAction,
+          approvedBy: user?.username || user?.full_name || user?.email || 'HR Admin',
+          approvalRemarks: selectedRemarks || null,
+          actorRole: user?.role,
+        },
       });
+      closeLeavePreview();
       await refreshAfterAction();
     } catch (e) {
       alert('Failed to update leave status: ' + e);
@@ -289,10 +383,15 @@ export const LeaveManagement: React.FC = () => {
 
     try {
       await invoke('delete_leave_request', {
-        leaveRequestId: leaveId,
-        actorRole: user?.role,
-        actorEmployeeId: currentEmployeeId,
+        request: {
+          leaveRequestId: leaveId,
+          actorRole: user?.role,
+          actorEmployeeId: currentEmployeeId,
+        },
       });
+      if (selectedLeave?.id === leaveId) {
+        closeLeavePreview();
+      }
       await refreshAfterAction();
     } catch (e) {
       alert('Failed to delete leave request: ' + e);
@@ -330,6 +429,9 @@ export const LeaveManagement: React.FC = () => {
           <h1 className="text-2xl font-bold tracking-tight">Leave Management</h1>
           <p className="text-sm text-muted-foreground">
             Employees can apply for their own leave. Only HR admin can approve or reject requests.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Holiday dates inside the leave range are excluded from the total leave days.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -424,14 +526,19 @@ export const LeaveManagement: React.FC = () => {
             </p>
           </CardContent>
         ) : (
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Employee</TableHead>
                 <TableHead>Leave Period</TableHead>
                 <TableHead>Type</TableHead>
+                <TableHead>Total Days</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Approved By</TableHead>
+                <TableHead>Applied At</TableHead>
+                <TableHead>Reviewed By</TableHead>
+                <TableHead>Reviewed On</TableHead>
+                <TableHead>Remarks</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -449,7 +556,7 @@ export const LeaveManagement: React.FC = () => {
                     <TableCell>
                       <div className="flex items-center gap-3">
                         <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm">
-                          {leave.employeeName.charAt(0)}
+                          {getInitial(leave.employeeName)}
                         </div>
                         <div>
                           <div className="font-medium">{leave.employeeName}</div>
@@ -461,7 +568,8 @@ export const LeaveManagement: React.FC = () => {
                       <div className="font-medium">{formatDate(leave.startDate)}</div>
                       <div className="text-xs text-muted-foreground">
                         to {formatDate(leave.endDate)}
-                        {leave.totalDays ? ` • ${leave.totalDays} day(s)` : ''}
+                        {typeof leave.totalDays === 'number' ? ` • ${leave.totalDays} day(s)` : ''}
+                        {typeof leave.holidayDays === 'number' && leave.holidayDays > 0 ? ` • ${leave.holidayDays} holiday(s) excluded` : ''}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -470,53 +578,36 @@ export const LeaveManagement: React.FC = () => {
                         <span className="text-sm">{leave.leaveType}</span>
                       </div>
                     </TableCell>
+                    <TableCell>
+                      <div className="font-semibold">{typeof leave.totalDays === 'number' ? leave.totalDays : '—'}</div>
+                    </TableCell>
                     <TableCell>{getStatusBadge(leave.status)}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatDateTime(leave.appliedAt)}
+                    </TableCell>
                     <TableCell className={leave.approvedBy ? '' : 'text-muted-foreground'}>
                       <div>{leave.approvedBy || '—'}</div>
-                      {leave.rejectionReason && (
-                        <div className="text-xs text-muted-foreground mt-1">
-                          Rejected: {leave.rejectionReason}
-                        </div>
-                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatDateTime(leave.approvedAt)}
+                    </TableCell>
+                    <TableCell className="max-w-xs">
+                      <div className="text-xs text-muted-foreground truncate">
+                        {leave.approvalRemarks || leave.rejectionReason || '—'}
+                      </div>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        {normalizedStatus === 'pending' && canApproveLeave && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-green-600 border-green-600/30 hover:bg-green-600/10 h-8 w-8 p-0"
-                              onClick={() => handleStatusUpdate(leave.id, 'approved')}
-                              disabled={processing === leave.id}
-                              title="Approve"
-                            >
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-red-600 border-red-600/30 hover:bg-red-600/10 h-8 w-8 p-0"
-                              onClick={() => handleStatusUpdate(leave.id, 'rejected')}
-                              disabled={processing === leave.id}
-                              title="Reject"
-                            >
-                              <XIcon className="h-4 w-4" />
-                            </Button>
-                          </>
-                        )}
-                        {canManageRow && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-red-600 border-red-600/30 hover:bg-red-600/10 h-8 w-8 p-0"
-                            onClick={() => handleDelete(leave.id)}
-                            disabled={processing === leave.id}
-                            title="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-3"
+                          onClick={() => openLeavePreview(leave)}
+                          title="Open details"
+                        >
+                          <Eye className="h-4 w-4 mr-1" />
+                          Action
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -524,6 +615,7 @@ export const LeaveManagement: React.FC = () => {
               })}
             </TableBody>
           </Table>
+          </div>
         )}
       </Card>
 
@@ -646,6 +738,231 @@ export const LeaveManagement: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {selectedLeave && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/20"
+            onClick={closeLeavePreview}
+          />
+          <aside className="fixed right-0 top-0 z-50 h-full w-full max-w-md border-l bg-background shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between border-b px-4 py-4">
+              <div>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">Leave Preview</p>
+                <h3 className="text-lg font-semibold">{selectedLeave.employeeName}</h3>
+              </div>
+              <div className="flex items-center gap-2">
+                {isHrAdmin && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsEditingLeave((prev) => !prev)}
+                  >
+                    {isEditingLeave ? 'View' : 'Edit'}
+                  </Button>
+                )}
+                <Button variant="ghost" size="sm" onClick={closeLeavePreview}>
+                  <XIcon className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {isEditingLeave && (
+                <Card>
+                  <CardContent className="p-4 space-y-4">
+                    <div className="text-sm font-semibold">Edit Leave Details</div>
+                    <div className="space-y-2">
+                      <Label htmlFor="editLeaveType">Leave Type</Label>
+                      <Select
+                        id="editLeaveType"
+                        value={editFormData.leaveType}
+                        onChange={(e) => setEditFormData((prev) => ({ ...prev, leaveType: e.target.value }))}
+                      >
+                        {(leaveTypes.length ? leaveTypes : DEFAULT_LEAVE_TYPES).map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="editStartDate">Start Date</Label>
+                        <Input
+                          id="editStartDate"
+                          type="date"
+                          value={editFormData.startDate}
+                          onChange={(e) => setEditFormData((prev) => ({ ...prev, startDate: e.target.value }))}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="editEndDate">End Date</Label>
+                        <Input
+                          id="editEndDate"
+                          type="date"
+                          value={editFormData.endDate}
+                          onChange={(e) => setEditFormData((prev) => ({ ...prev, endDate: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="editReason">Reason</Label>
+                      <textarea
+                        id="editReason"
+                        className="flex min-h-[90px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        value={editFormData.reason}
+                        onChange={(e) => setEditFormData((prev) => ({ ...prev, reason: e.target.value }))}
+                        placeholder="Update leave reason..."
+                        rows={4}
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button className="flex-1" onClick={handleSaveLeaveEdit} disabled={processing === selectedLeave.id}>
+                        Save Changes
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => setIsEditingLeave(false)}
+                      >
+                        Cancel Edit
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+              <Card>
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm text-muted-foreground">Employee</div>
+                      <div className="font-semibold">{selectedLeave.employeeName}</div>
+                    </div>
+                    {getStatusBadge(selectedLeave.status)}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <div className="text-muted-foreground">Leave Type</div>
+                      <div className="font-medium">{selectedLeave.leaveType}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Total Days</div>
+                      <div className="font-medium">
+                        {typeof selectedLeave.totalDays === 'number' ? selectedLeave.totalDays : '—'}
+                        {typeof selectedLeave.holidayDays === 'number' && selectedLeave.holidayDays > 0
+                          ? ` (${selectedLeave.holidayDays} holiday(s) excluded)`
+                          : ''}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">From</div>
+                      <div className="font-medium">{formatDate(selectedLeave.startDate)}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">To</div>
+                      <div className="font-medium">{formatDate(selectedLeave.endDate)}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Applied At</div>
+                      <div className="font-medium">{formatDateTime(selectedLeave.appliedAt)}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Reviewed At</div>
+                      <div className="font-medium">{formatDateTime(selectedLeave.approvedAt)}</div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-4 space-y-3">
+                  <div className="text-sm font-semibold">Reason</div>
+                  <div className="text-sm text-muted-foreground whitespace-pre-wrap">
+                    {selectedLeave.reason || 'No reason provided.'}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-4 space-y-3">
+                  <div className="text-sm font-semibold">Review Details</div>
+                  <div className="grid grid-cols-1 gap-3 text-sm">
+                    <div>
+                      <div className="text-muted-foreground">Reviewed By</div>
+                      <div className="font-medium">{selectedLeave.approvedBy || '—'}</div>
+                    </div>
+                    <div>
+                      <div className="text-muted-foreground">Remarks</div>
+                      <div className="font-medium whitespace-pre-wrap">
+                        {selectedLeave.approvalRemarks || selectedLeave.rejectionReason || '—'}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {canApproveLeave && normalizeStatus(selectedLeave.status) === 'pending' && (
+                <Card>
+                  <CardContent className="p-4 space-y-3">
+                    <div className="text-sm font-semibold">Approve / Reject</div>
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1"
+                        variant={selectedAction === 'approved' ? 'default' : 'outline'}
+                        onClick={() => setSelectedAction('approved')}
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        className="flex-1"
+                        variant={selectedAction === 'rejected' ? 'destructive' : 'outline'}
+                        onClick={() => setSelectedAction('rejected')}
+                      >
+                        Reject
+                      </Button>
+                    </div>
+
+                    {selectedAction && (
+                      <div className="space-y-2">
+                        <Label htmlFor="previewRemarks">Remarks</Label>
+                        <textarea
+                          id="previewRemarks"
+                          className="flex min-h-[90px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                          value={selectedRemarks}
+                          onChange={(e) => setSelectedRemarks(e.target.value)}
+                          placeholder={selectedAction === 'approved' ? 'Approval remarks...' : 'Rejection reason / remarks...'}
+                          rows={4}
+                        />
+                        <Button
+                          className="w-full"
+                          onClick={handleConfirmStatusUpdate}
+                          disabled={processing === selectedLeave.id}
+                        >
+                          {selectedAction === 'approved' ? 'Confirm Approval' : 'Confirm Rejection'}
+                        </Button>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {canDeleteSelected && (
+                <Button
+                  variant="outline"
+                  className="w-full text-red-600 border-red-600/30 hover:bg-red-600/10"
+                  onClick={() => handleDelete(selectedLeave.id)}
+                  disabled={processing === selectedLeave.id}
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Leave Request
+                </Button>
+              )}
+            </div>
+          </aside>
+        </>
+      )}
     </div>
   );
 };

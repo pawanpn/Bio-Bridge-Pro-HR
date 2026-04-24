@@ -9,13 +9,31 @@ let SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://your-project.su
 let SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key';
 let SUPABASE_SERVICE_KEY = import.meta.env.VITE_SUPABASE_SERVICE_KEY || '';
 
+const safeLocalStorageGet = (key: string) => {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
+  } catch {
+    return null;
+  }
+};
+
+const safeLocalStorageSet = (key: string, value: string) => {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(key, value);
+    }
+  } catch {
+    // Ignore storage errors during boot.
+  }
+};
+
 // Check if user has completed setup
-const isSetupComplete = localStorage.getItem('setupComplete') === 'true';
+const isSetupComplete = safeLocalStorageGet('setupComplete') === 'true';
 
 // Override with setup wizard values if available
 if (isSetupComplete) {
-  SUPABASE_URL = localStorage.getItem('supabaseUrl') || SUPABASE_URL;
-  SUPABASE_ANON_KEY = localStorage.getItem('supabaseAnonKey') || SUPABASE_ANON_KEY;
+  SUPABASE_URL = safeLocalStorageGet('supabaseUrl') || SUPABASE_URL;
+  SUPABASE_ANON_KEY = safeLocalStorageGet('supabaseAnonKey') || SUPABASE_ANON_KEY;
 }
 
 // Create Supabase client (singleton) - all queries target PUBLIC schema
@@ -24,8 +42,8 @@ let supabaseClient: SupabaseClient;
 export const initializeSupabase = (url: string, anonKey: string): SupabaseClient => {
   SUPABASE_URL = url;
   SUPABASE_ANON_KEY = anonKey;
-  localStorage.setItem('supabaseUrl', url);
-  localStorage.setItem('supabaseAnonKey', anonKey);
+  safeLocalStorageSet('supabaseUrl', url);
+  safeLocalStorageSet('supabaseAnonKey', anonKey);
 
   supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     db: { schema: PUBLIC_SCHEMA },
@@ -119,10 +137,15 @@ export interface SyncStats {
 
 // Helper function to get current sync stats
 export const getSyncStats = async (): Promise<SyncStats> => {
-  const stats = localStorage.getItem('biobridge_sync_stats');
-  if (stats) {
-    return JSON.parse(stats);
+  try {
+    const stats = safeLocalStorageGet('biobridge_sync_stats');
+    if (stats) {
+      return JSON.parse(stats);
+    }
+  } catch {
+    // Fall through to default state.
   }
+
   return {
     lastSync: null,
     totalSynced: 0,
@@ -137,7 +160,7 @@ export const getSyncStats = async (): Promise<SyncStats> => {
 export const updateSyncStats = async (stats: Partial<SyncStats>) => {
   const current = await getSyncStats();
   const updated = { ...current, ...stats };
-  localStorage.setItem('biobridge_sync_stats', JSON.stringify(updated));
+  safeLocalStorageSet('biobridge_sync_stats', JSON.stringify(updated));
 };
 
 // Check if Supabase is configured
@@ -149,18 +172,25 @@ export const isSupabaseConfigured = (): boolean => {
 
 // Check internet connectivity
 export const isOnline = (): boolean => {
-  return navigator.onLine;
+  try {
+    return typeof navigator !== 'undefined' ? navigator.onLine : true;
+  } catch {
+    return true;
+  }
 };
 
 // Listen for online/offline events
 export const onConnectivityChange = (callback: (online: boolean) => void) => {
-  window.addEventListener('online', () => callback(true));
-  window.addEventListener('offline', () => callback(false));
+  const handleOnline = () => callback(true);
+  const handleOffline = () => callback(false);
+
+  window.addEventListener('online', handleOnline);
+  window.addEventListener('offline', handleOffline);
   
   // Return cleanup function
   return () => {
-    window.removeEventListener('online', () => callback(true));
-    window.removeEventListener('offline', () => callback(false));
+    window.removeEventListener('online', handleOnline);
+    window.removeEventListener('offline', handleOffline);
   };
 };
 

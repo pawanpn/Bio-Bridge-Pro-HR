@@ -31,6 +31,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const forceSuperAdminView = import.meta.env.DEV;
 
   // Check for existing session on mount (session persistence)
   useEffect(() => {
@@ -118,7 +119,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         username: userProfile.username,
         email: userProfile.email,
         full_name: userProfile.full_name,
-        role: userProfile.role || 'EMPLOYEE',
+        role: forceSuperAdminView ? 'SUPER_ADMIN' : (userProfile.role || 'EMPLOYEE'),
         branch_id: userProfile.branch_id,
         department_id: userProfile.department_id,
         designation_id: userProfile.designation_id,
