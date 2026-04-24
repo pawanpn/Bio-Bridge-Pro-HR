@@ -2836,17 +2836,17 @@ pub async fn get_daily_reports(
 
     let mut query = String::from(
         "SELECT e.id, e.name, e.department, 
-                date(al.timestamp, 'localtime') as att_date,
-                MIN(datetime(al.timestamp, 'localtime')) as first_in,
-                MAX(datetime(al.timestamp, 'localtime')) as last_out,
-                GROUP_CONCAT(strftime('%H:%M', al.timestamp, 'localtime'), ' | ') as all_punches,
+                date(al.timestamp) as att_date,
+                MIN(datetime(al.timestamp)) as first_in,
+                MAX(datetime(al.timestamp)) as last_out,
+                GROUP_CONCAT(strftime('%H:%M', al.timestamp), ' | ') as all_punches,
                 e.employee_code,
                 b.name as branch_name,
                 al.punch_method
          FROM Employees e
          JOIN AttendanceLogs al ON e.id = al.employee_id
          LEFT JOIN Branches b ON e.branch_id = b.id
-         WHERE date(al.timestamp, 'localtime') BETWEEN date(?1) AND date(?2)"
+         WHERE date(al.timestamp) BETWEEN date(?1) AND date(?2)"
     );
 
     let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![
@@ -2920,10 +2920,10 @@ pub async fn get_monthly_ledger(
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut query = String::from(
-        "SELECT e.id, e.name, strftime('%d', al.timestamp, 'localtime') as day, COUNT(*)
+        "SELECT e.id, e.name, strftime('%d', al.timestamp) as day, COUNT(*)
          FROM Employees e
          JOIN AttendanceLogs al ON e.id = al.employee_id
-         WHERE strftime('%Y-%m', al.timestamp, 'localtime') = ?1"
+         WHERE strftime('%Y-%m', al.timestamp) = ?1"
     );
 
     let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(year_month)];
@@ -3010,11 +3010,11 @@ pub async fn get_raw_logs(
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     let mut query = String::from(
-        "SELECT al.id, e.name, datetime(al.timestamp, 'localtime'), al.punch_method, b.name as branch_name
+        "SELECT al.id, e.name, datetime(al.timestamp), al.punch_method, b.name as branch_name
          FROM AttendanceLogs al
          JOIN Employees e ON al.employee_id = e.id
          LEFT JOIN Branches b ON al.branch_id = b.id
-         WHERE date(al.timestamp, 'localtime') BETWEEN date(?1) AND date(?2)"
+         WHERE date(al.timestamp) BETWEEN date(?1) AND date(?2)"
     );
 
     let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![

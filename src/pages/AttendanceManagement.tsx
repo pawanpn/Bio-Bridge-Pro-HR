@@ -100,8 +100,8 @@ export const AttendanceManagement: React.FC = () => {
   // Manual entry
   const [manualForm, setManualForm] = useState({
     employeeId: '',
-    date: new Date().toISOString().split('T')[0],
-    time: '09:00',
+    date: new Date().toLocaleDateString('en-CA'), // YYYY-MM-DD in local time
+    time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
     method: 'Manual',
   });
   const [manualStatus, setManualStatus] = useState('');
@@ -240,8 +240,8 @@ export const AttendanceManagement: React.FC = () => {
       setManualStatus('✅ Attendance recorded successfully!');
       setManualForm({
         employeeId: '',
-        date: new Date().toISOString().split('T')[0],
-        time: '09:00',
+        date: new Date().toLocaleDateString('en-CA'),
+        time: new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }),
         method: 'Manual',
       });
       loadDailyLogs();
@@ -539,7 +539,7 @@ export const AttendanceManagement: React.FC = () => {
                   </TableRow>
                 ) : (
                   [...dailyLogs]
-                    .sort((a, b) => {
+                    .sort((a: any, b: any) => {
                       if (!sortConfig) return 0;
                       const aVal = a[sortConfig.key] || '';
                       const bVal = b[sortConfig.key] || '';

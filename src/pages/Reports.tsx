@@ -36,6 +36,11 @@ interface DailyAttendance {
   all_punches: string;
   method: string;
   status: string;
+  check_in?: string;
+  check_out?: string;
+  late_entry?: string;
+  early_exit?: string;
+  working_hours?: string;
 }
 
 interface MonthlyLedger {
@@ -261,7 +266,7 @@ export const Reports: React.FC = () => {
                             }`}
                           >
                              <div className={`p-1.5 rounded flex-shrink-0 ${activeTab === tab.key ? 'bg-primary text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-500'}`}>
-                                {React.cloneElement(tab.icon as React.ReactElement, { size: 14 })}
+                                {React.cloneElement(tab.icon as React.ReactElement, { size: 14 } as any)}
                              </div>
                              <span className={`text-[10px] font-bold leading-tight ${activeTab === tab.key ? 'text-primary' : 'text-slate-600 dark:text-slate-400'}`}>{tab.label}</span>
                           </button>
