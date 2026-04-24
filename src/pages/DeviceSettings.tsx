@@ -230,7 +230,7 @@ export const DeviceSettings: React.FC = () => {
           httpsEnabled: form.https_enabled ? 1 : 0,
         });
       } else {
-        await invoke('add_device', {
+        await invoke('register_new_device', {
           device: {
             name: form.name, brand: form.brand, ip: form.ip, port: Number(form.port),
             commKey: Number(form.comm_key), machineNumber: Number(form.machine_number),

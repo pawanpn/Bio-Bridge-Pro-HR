@@ -10,6 +10,22 @@ use crate::security::{decrypt_data, encrypt_data, sanitize_input, validate_date,
 use crate::AppState;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use rand::{rngs::OsRng, RngCore};
+
+fn generate_uuid_v4() -> String {
+    let mut bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3],
+        bytes[4], bytes[5],
+        bytes[6], bytes[7],
+        bytes[8], bytes[9],
+        bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+    )
+}
 
 // ============================================================================
 // INVENTORY CRUD OPERATIONS
@@ -292,6 +308,7 @@ pub async fn get_inventory_stats(
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateEmployeeRequest {
+    pub employee_uuid: Option<String>,
     pub employee_code: String,
     pub first_name: String,
     pub middle_name: Option<String>,
@@ -347,10 +364,14 @@ pub struct CreateEmployeeRequest {
     pub biometric_id: Option<i32>,
     pub shift_start_time: Option<String>,
     pub shift_end_time: Option<String>,
+    pub sync_status: Option<String>,
+    pub last_modified: Option<String>,
+    pub server_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdateEmployeeRequest {
+    pub employee_uuid: Option<String>,
     pub employee_code: Option<String>,
     pub first_name: Option<String>,
     pub middle_name: Option<String>,
@@ -410,6 +431,9 @@ pub struct UpdateEmployeeRequest {
     pub biometric_id: Option<i32>,
     pub shift_start_time: Option<String>,
     pub shift_end_time: Option<String>,
+    pub sync_status: Option<String>,
+    pub last_modified: Option<String>,
+    pub server_id: Option<String>,
 }
 
 /// CREATE: Add new employee
@@ -432,6 +456,18 @@ pub async fn create_employee(
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM Employees", [], |r| r.get(0)).unwrap_or(0);
         employee_code = format!("BB-{:04}", count + 1);
     }
+    let employee_uuid = request
+        .employee_uuid
+        .clone()
+        .unwrap_or_else(generate_uuid_v4);
+    let sync_status = request
+        .sync_status
+        .clone()
+        .unwrap_or_else(|| "pending".to_string());
+    let last_modified = request
+        .last_modified
+        .clone()
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
     
     let first_name = sanitize_input(&request.first_name);
     let last_name = sanitize_input(&request.last_name);
@@ -470,7 +506,7 @@ pub async fn create_employee(
     // Insert employee with all fields
     let _id = conn.execute(
         "INSERT INTO Employees (
-            employee_code, first_name, middle_name, last_name, name, full_name,
+            employee_uuid, employee_code, first_name, middle_name, last_name, name, full_name,
             date_of_birth, gender, personal_email, personal_phone,
             current_address, permanent_address, citizenship_number, pan_number,
             department_id, designation_id, branch_id, date_of_joining,
@@ -484,15 +520,16 @@ pub async fn create_employee(
             workflow_role, mobile_punch, app_role, whatsapp_alert,
             whatsapp_exception, whatsapp_punch, supervisor_mobile, biometric_id,
             shift_start_time, shift_end_time,
-            status, created_at, updated_at
+            status, sync_status, last_modified, server_id, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
             ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
             ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44,
             ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53, ?54, ?55, ?56, ?57,
-            'active', datetime('now'), datetime('now')
+            'active', ?58, ?59, ?60, datetime('now'), datetime('now')
         )",
         params![
+            &employee_uuid,
             &employee_code,
             &first_name,
             &request.middle_name.as_ref().map(|s| sanitize_input(s)),
@@ -550,6 +587,9 @@ pub async fn create_employee(
             &request.biometric_id,
             &request.shift_start_time,
             &request.shift_end_time,
+            &sync_status,
+            &last_modified,
+            &request.server_id,
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to create employee: {}", e)))?;
 
@@ -559,6 +599,7 @@ pub async fn create_employee(
     // Prepare sync payload with ALL fields
     let sync_payload = serde_json::json!({
         "id": employee_id,
+        "employee_uuid": employee_uuid,
         "employee_code": employee_code,
         "first_name": first_name,
         "middle_name": request.middle_name,
@@ -581,7 +622,10 @@ pub async fn create_employee(
         "app_role": request.app_role,
         "shift_start_time": request.shift_start_time,
         "shift_end_time": request.shift_end_time,
-        "status": "active"
+        "status": "active",
+        "sync_status": sync_status,
+        "last_modified": last_modified,
+        "server_id": request.server_id
     });
 
     let _ = crate::sync_service::_queue_for_sync(
@@ -608,6 +652,14 @@ pub async fn create_employee(
         "employee_id": employee_id,
         "employee_code": employee_code
     }))
+}
+
+#[tauri::command]
+pub async fn register_new_staff(
+    request: CreateEmployeeRequest,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    create_employee(request, state).await
 }
 
 /// READ: Get employee by ID
@@ -640,7 +692,8 @@ pub async fn get_employee(
                 e.nationality, e.verification_mode, e.device_privilege, e.device_password, e.card_no,
                 e.bio_photo, e.enable_attendance, e.enable_holiday, e.outdoor_management, e.workflow_role,
                 e.mobile_punch, e.app_role, e.whatsapp_alert, e.whatsapp_exception, e.whatsapp_punch,
-                e.supervisor_mobile, e.biometric_id, e.shift_start_time, e.shift_end_time
+                e.supervisor_mobile, e.biometric_id, e.shift_start_time, e.shift_end_time,
+                e.employee_uuid, e.sync_status, e.last_modified, e.server_id
         FROM Employees e
         LEFT JOIN Departments d ON e.department_id = d.id
         LEFT JOIN Designations des ON e.designation_id = des.id
@@ -710,6 +763,10 @@ pub async fn get_employee(
             "supervisor_mobile": row.get::<_, Option<String>>(50)?,
             "shift_start_time": row.get::<_, Option<String>>(51)?,
             "shift_end_time": row.get::<_, Option<String>>(52)?,
+            "employee_uuid": row.get::<_, Option<String>>(53)?,
+            "sync_status": row.get::<_, Option<String>>(54)?,
+            "last_modified": row.get::<_, Option<String>>(55)?,
+            "server_id": row.get::<_, Option<String>>(56)?,
         }))
     }).optional()
     .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
@@ -753,7 +810,8 @@ pub async fn list_employees(
                 e.gender, e.date_of_joining, e.employment_type, e.employment_status,
                 e.department_id, e.designation_id, e.branch_id, e.status, e.name,
                 d.name as dept_name, des.name as desig_name, b.name as branch_name,
-                datetime(e.deleted_at, 'localtime'), e.biometric_id, e.shift_start_time, e.shift_end_time
+                datetime(e.deleted_at, 'localtime'), e.biometric_id, e.shift_start_time, e.shift_end_time,
+                e.employee_uuid, e.sync_status, e.last_modified, e.server_id
         FROM Employees e
         LEFT JOIN Departments d ON e.department_id = d.id
         LEFT JOIN Designations des ON e.designation_id = des.id
@@ -826,6 +884,10 @@ pub async fn list_employees(
                 "biometric_id": row.get::<_, Option<i32>>(18)?,
                 "shift_start_time": row.get::<_, Option<String>>(19)?,
                 "shift_end_time": row.get::<_, Option<String>>(20)?,
+                "employee_uuid": row.get::<_, Option<String>>(21)?,
+                "sync_status": row.get::<_, Option<String>>(22)?,
+                "last_modified": row.get::<_, Option<String>>(23)?,
+                "server_id": row.get::<_, Option<String>>(24)?,
             }))
         })
         .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
@@ -864,9 +926,23 @@ pub async fn update_employee(
 
     // Fetch old values for audit
     let _old_values = get_employee_for_audit(conn, employee_id)?;
+    let modified_at = request
+        .last_modified
+        .clone()
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+    let sync_status_value = request
+        .sync_status
+        .clone()
+        .unwrap_or_else(|| "modified".to_string());
+    let server_id_value = request.server_id.clone();
 
     let mut updates = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+    if let Some(ref employee_uuid) = request.employee_uuid {
+        updates.push("employee_uuid = ?");
+        values.push(Box::new(sanitize_input(employee_uuid)));
+    }
 
     if let Some(ref first_name) = request.first_name {
         updates.push("first_name = ?");
@@ -1102,6 +1178,14 @@ pub async fn update_employee(
         updates.push("shift_end_time = ?");
         values.push(Box::new(sanitize_input(&shift_end_time)));
     }
+    if let Some(ref sync_status) = request.sync_status {
+        updates.push("sync_status = ?");
+        values.push(Box::new(sanitize_input(sync_status)));
+    }
+    if let Some(ref server_id) = request.server_id {
+        updates.push("server_id = ?");
+        values.push(Box::new(sanitize_input(server_id)));
+    }
 
     // Dynamic Full Name Regeneration
     let first = request.first_name.clone().or_else(|| _old_values.as_ref().and_then(|v| v["first_name"].as_str().map(|s| s.to_string()))).unwrap_or_default();
@@ -1119,6 +1203,12 @@ pub async fn update_employee(
     }
 
     updates.push("updated_at = datetime('now')");
+    updates.push("last_modified = ?");
+    values.push(Box::new(modified_at.clone()));
+    if request.sync_status.is_none() {
+        updates.push("sync_status = ?");
+        values.push(Box::new(sync_status_value.clone()));
+    }
     // ID comes AFTER all field placeholders
     values.push(Box::new(employee_id));
 
@@ -1142,6 +1232,7 @@ pub async fn update_employee(
     // Push to sync queue
     let sync_payload = serde_json::json!({
         "id": employee_id,
+        "employee_uuid": request.employee_uuid,
         "first_name": request.first_name,
         "last_name": request.last_name,
         "department_id": request.department_id,
@@ -1151,7 +1242,10 @@ pub async fn update_employee(
         "mobile_punch": request.mobile_punch,
         "shift_start_time": request.shift_start_time,
         "shift_end_time": request.shift_end_time,
-        "updated_at": chrono::Utc::now().to_rfc3339()
+        "updated_at": chrono::Utc::now().to_rfc3339(),
+        "last_modified": modified_at,
+        "sync_status": sync_status_value,
+        "server_id": server_id_value,
     });
     let _ = crate::sync_service::_queue_for_sync(
         conn,
