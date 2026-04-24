@@ -750,7 +750,7 @@ pub async fn list_employees(
         WHERE 1=1"
     );
 
-    let mut param_index = 1;
+    let param_index = 1;
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
     // Status Filtering Logic

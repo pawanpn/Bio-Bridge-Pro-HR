@@ -654,8 +654,15 @@ pub async fn delete_branch(id: i64, state: tauri::State<'_, AppState>) -> Result
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    // Prevent delete if Gates or Employees or Devices exist
+    // Cascade: AttendanceLogs -> Devices -> Gates -> Branch
+    conn.execute("PRAGMA foreign_keys = OFF", [])?;
+    conn.execute("DELETE FROM AttendanceLogs WHERE branch_id = ?1", params![id])?;
+    conn.execute("DELETE FROM AttendanceLogs WHERE device_id IN (SELECT id FROM Devices WHERE branch_id = ?1)", params![id])?;
+    conn.execute("DELETE FROM Devices WHERE branch_id = ?1", params![id])?;
+    conn.execute("DELETE FROM AttendanceLogs WHERE gate_id IN (SELECT id FROM Gates WHERE branch_id = ?1)", params![id])?;
+    conn.execute("DELETE FROM Gates WHERE branch_id = ?1", params![id])?;
     conn.execute("DELETE FROM Branches WHERE id = ?1", params![id])?;
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
     Ok(())
 }
 
@@ -714,7 +721,13 @@ pub async fn delete_gate(id: i64, state: tauri::State<'_, AppState>) -> Result<(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
+    // Cascade: AttendanceLogs -> Devices -> Gate
+    conn.execute("PRAGMA foreign_keys = OFF", [])?;
+    conn.execute("DELETE FROM AttendanceLogs WHERE gate_id = ?1", params![id])?;
+    conn.execute("DELETE FROM AttendanceLogs WHERE device_id IN (SELECT id FROM Devices WHERE gate_id = ?1)", params![id])?;
+    conn.execute("DELETE FROM Devices WHERE gate_id = ?1", params![id])?;
     conn.execute("DELETE FROM Gates WHERE id = ?1", params![id])?;
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
     Ok(())
 }
 #[tauri::command]
