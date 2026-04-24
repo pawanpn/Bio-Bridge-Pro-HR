@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import { getAccessibleBranchIds, isSuperAdmin } from '@/config/accessPolicy';
 import {
   Calendar, Upload, UserPlus,
   Clock, CheckCircle, AlertCircle, RefreshCw, Fingerprint, Database, Search
@@ -98,6 +99,9 @@ type DailyViewMode = 'logs' | 'summary';
 
 export const AttendanceManagement: React.FC = () => {
   const { user } = useAuth();
+  const superAdmin = isSuperAdmin(user?.role);
+  const accessibleBranchIds = getAccessibleBranchIds(user);
+  const hasBranchScope = superAdmin || accessibleBranchIds.length === 0;
   const [activeTab, setActiveTab] = useState<TabType>('daily');
   const [branches, setBranches] = useState<Branch[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -150,6 +154,15 @@ export const AttendanceManagement: React.FC = () => {
   // CSV Import
   const [csvContent, setCsvContent] = useState('');
   const [csvStatus, setCsvStatus] = useState('');
+  const scopedBranches = hasBranchScope
+    ? branches
+    : branches.filter(branch => accessibleBranchIds.includes(String(branch.id)));
+  const scopedEmployees = hasBranchScope
+    ? employees
+    : employees.filter(emp => !emp.branch_id || accessibleBranchIds.includes(String(emp.branch_id)));
+  const scopedDevices = hasBranchScope
+    ? devices
+    : devices.filter(device => accessibleBranchIds.includes(String(device.branch_id)));
 
   // Load data
   const loadData = useCallback(async () => {
@@ -163,13 +176,13 @@ export const AttendanceManagement: React.FC = () => {
         invoke<number | null>('get_local_sync_target'),
         invoke<UnknownEmployee[]>('get_unmapped_logs').catch(() => []),
       ]);
-      setBranches(branchData);
+      setBranches(hasBranchScope ? branchData : branchData.filter((branch: any) => accessibleBranchIds.includes(String(branch.id))));
       
       const empData = Array.isArray(empResult) ? empResult : (empResult as any)?.data || [];
-      setEmployees(empData);
+      setEmployees(hasBranchScope ? empData : empData.filter((emp: any) => !emp.branch_id || accessibleBranchIds.includes(String(emp.branch_id))));
       
-      setDevices(deviceData);
-      setGates(gateData);
+      setDevices(hasBranchScope ? deviceData : deviceData.filter((device: any) => accessibleBranchIds.includes(String(device.branch_id))));
+      setGates(hasBranchScope ? gateData : gateData.filter((gate: any) => accessibleBranchIds.includes(String(gate.branch_id))));
       setLocalDefaultId(localId);
       setUnknownIds(Array.isArray(unknownData) ? unknownData : []);
     } catch (error) {
@@ -177,7 +190,7 @@ export const AttendanceManagement: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [selectedBranch]);
+  }, [selectedBranch, hasBranchScope, accessibleBranchIds]);
 
   const handleSetLocalDefault = async (deviceId: number) => {
     try {
@@ -195,6 +208,13 @@ export const AttendanceManagement: React.FC = () => {
     window.addEventListener('data-synced', handleDataSynced);
     return () => window.removeEventListener('data-synced', handleDataSynced);
   }, [loadData]);
+
+  useEffect(() => {
+    if (!hasBranchScope && !selectedBranch && scopedBranches.length > 0) {
+      setSelectedBranch(scopedBranches[0].id);
+      setSyncBranch(String(scopedBranches[0].id));
+    }
+  }, [hasBranchScope, selectedBranch, scopedBranches]);
 
   // Load daily logs when date or branch changes
   useEffect(() => {
@@ -468,14 +488,14 @@ export const AttendanceManagement: React.FC = () => {
 
       {selectedBranch && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {devices.length === 0 ? (
+          {scopedDevices.length === 0 ? (
             <Card className="md:col-span-3 border-dashed bg-muted/20">
               <CardContent className="h-20 flex items-center justify-center text-sm text-muted-foreground italic">
                 No attendance devices found for this branch.
               </CardContent>
             </Card>
           ) : (
-            devices.map(device => (
+            scopedDevices.map(device => (
               <Card key={device.id} className="shadow-sm border-muted/60">
                 <CardContent className="p-4 py-3">
                   <div className="flex items-center justify-between mb-3">
@@ -532,7 +552,7 @@ export const AttendanceManagement: React.FC = () => {
                 className="w-full h-11 px-4 rounded-xl border border-slate-200 bg-white dark:bg-slate-950 dark:border-slate-800 text-sm font-medium focus:ring-2 focus:ring-primary/20 transition-all"
               >
                 <option value="">All Branches</option>
-                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                {scopedBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </div>
 
@@ -1225,7 +1245,7 @@ export const AttendanceManagement: React.FC = () => {
                   className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1"
                 >
                   <option value="">Select Employee</option>
-                  {employees
+                  {scopedEmployees
                     .filter(e => !selectedBranch || e.branch_id === selectedBranch)
                       .map(e => (
                         <option key={e.id} value={e.id}>

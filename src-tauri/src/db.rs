@@ -156,7 +156,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     let migrations = vec![
         ("employee_uuid", "TEXT"), ("first_name", "TEXT"), ("middle_name", "TEXT"), ("last_name", "TEXT"), 
         ("employee_code", "TEXT"), ("department_id", "INTEGER"), ("designation_id", "INTEGER"), 
-        ("biometric_id", "INTEGER"), ("pan_number", "TEXT"), ("citizenship_number", "TEXT"), 
+        ("biometric_id", "INTEGER"), ("organization_id", "INTEGER DEFAULT 1"), ("pan_number", "TEXT"), ("citizenship_number", "TEXT"), 
         ("date_of_joining", "TEXT"), ("date_of_birth", "TEXT"), ("gender", "TEXT"), 
         ("marital_status", "TEXT"), ("personal_email", "TEXT"), ("personal_phone", "TEXT"),
         ("current_address", "TEXT"), ("permanent_address", "TEXT"),
@@ -430,6 +430,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("first_name", "TEXT"),
         ("middle_name", "TEXT"),
         ("last_name", "TEXT"),
+        ("organization_id", "INTEGER DEFAULT 1"),
         ("date_of_birth", "TEXT"),
         ("gender", "TEXT"),
         ("marital_status", "TEXT"),

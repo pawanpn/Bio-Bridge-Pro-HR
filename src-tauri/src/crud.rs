@@ -3142,13 +3142,103 @@ pub async fn get_dashboard_stats(
 // ============================================================================
 
 #[tauri::command]
+pub async fn list_organizations(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, address, contact_info, auth_key, license_expiry FROM Organizations ORDER BY name")
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let organizations = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "address": row.get::<_, Option<String>>(2)?,
+                "contact_info": row.get::<_, Option<String>>(3)?,
+                "auth_key": row.get::<_, Option<String>>(4)?,
+                "license_expiry": row.get::<_, Option<String>>(5)?,
+            }))
+        })
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(organizations)
+}
+
+#[tauri::command]
+pub async fn add_organization(
+    name: String,
+    address: Option<String>,
+    contact_info: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "INSERT INTO Organizations (name, address, contact_info) VALUES (?1, ?2, ?3)",
+        params![name, address, contact_info],
+    )?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "id": conn.last_insert_rowid()
+    }))
+}
+
+#[tauri::command]
+pub async fn update_organization(
+    id: i64,
+    name: String,
+    address: Option<String>,
+    contact_info: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    conn.execute(
+        "UPDATE Organizations SET name = ?1, address = ?2, contact_info = ?3 WHERE id = ?4",
+        params![name, address, contact_info, id],
+    )?;
+
+    Ok(serde_json::json!({"success": true}))
+}
+
+#[tauri::command]
+pub async fn delete_organization(id: i64, state: tauri::State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let branch_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM Branches WHERE org_id = ?1 OR organization_id = ?1", params![id], |row| row.get(0))
+        .unwrap_or(0);
+
+    if branch_count > 0 {
+        return Err(AppError::ValidationError(
+            "Delete branches under this organization first.".into(),
+        ));
+    }
+
+    conn.execute("DELETE FROM Organizations WHERE id = ?1", params![id])?;
+
+    Ok(serde_json::json!({"success": true}))
+}
+
+#[tauri::command]
 pub async fn list_branches(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    let mut stmt = conn.prepare("SELECT id, name, location FROM Branches ORDER BY name")
+    let mut stmt = conn.prepare("SELECT id, name, location, org_id, organization_id FROM Branches ORDER BY name")
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     let branches = stmt.query_map([], |row| {
-        Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?, "location": row.get::<_, Option<String>>(2)? }))
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "location": row.get::<_, Option<String>>(2)?,
+            "org_id": row.get::<_, Option<i64>>(3)?,
+            "organization_id": row.get::<_, Option<i64>>(4)?,
+        }))
     }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
     Ok(branches)
 }

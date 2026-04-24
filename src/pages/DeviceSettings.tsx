@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Wifi, WifiOff, FileText, Plus } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { getAccessibleBranchIds, isSuperAdmin } from '@/config/accessPolicy';
 
 interface Device {
   id: number;
@@ -48,6 +50,10 @@ const emptyForm = (): Omit<Device, 'id' | 'status' | 'is_default'> => ({
 });
 
 export const DeviceSettings: React.FC = () => {
+  const { user } = useAuth();
+  const superAdmin = isSuperAdmin(user?.role);
+  const accessibleBranchIds = getAccessibleBranchIds(user);
+  const hasBranchScope = superAdmin || accessibleBranchIds.length === 0;
   const [devices, setDevices] = useState<Device[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<Device | null>(null);
@@ -72,13 +78,19 @@ export const DeviceSettings: React.FC = () => {
 
   const [branches, setBranches] = useState<Branch[]>([]);
   const [gates, setGates] = useState<Gate[]>([]);
+  const scopedBranches = hasBranchScope
+    ? branches
+    : branches.filter(branch => accessibleBranchIds.includes(String(branch.id)));
 
   const loadDevices = useCallback(async () => {
     try {
       const data = await invoke<Device[]>('list_all_devices');
-      setDevices(data || []);
+      const scopedDevices = hasBranchScope
+        ? (data || [])
+        : (data || []).filter(dev => !dev.branch_id || accessibleBranchIds.includes(String(dev.branch_id)));
+      setDevices(scopedDevices);
       const bs = await invoke<Branch[]>('list_branches');
-      setBranches(bs || []);
+      setBranches(hasBranchScope ? (bs || []) : (bs || []).filter(branch => accessibleBranchIds.includes(String(branch.id))));
 
       // DYNAMIC STATUS CHECK
       if (data && data.length > 0) {
@@ -87,7 +99,7 @@ export const DeviceSettings: React.FC = () => {
     } catch (e) {
       console.error('Failed to load devices/branches:', e);
     }
-  }, []);
+  }, [hasBranchScope, accessibleBranchIds]);
 
   const verifyDeviceStatuses = async (devList: Device[]) => {
     for (const dev of devList) {
@@ -108,6 +120,7 @@ export const DeviceSettings: React.FC = () => {
 
   const loadGates = async (branch_id: number) => {
     if(!branch_id) return;
+    if (!hasBranchScope && !accessibleBranchIds.includes(String(branch_id))) return;
     try {
       const gs = await invoke<Gate[]>('list_gates', { branchId: branch_id });
       setGates(gs || []);
@@ -116,7 +129,7 @@ export const DeviceSettings: React.FC = () => {
 
   useEffect(() => {
     if(form.branch_id) loadGates(form.branch_id);
-  }, [form.branch_id]);
+  }, [form.branch_id, loadGates]);
 
 
   useEffect(() => {
@@ -152,6 +165,15 @@ export const DeviceSettings: React.FC = () => {
       if (unlistenComplete) unlistenComplete();
     };
   }, [loadDevices]);
+
+  useEffect(() => {
+    if (!hasBranchScope) {
+      const allowedBranch = scopedBranches[0]?.id;
+      if (allowedBranch && !accessibleBranchIds.includes(String(form.branch_id))) {
+        setForm(f => ({ ...f, branch_id: allowedBranch }));
+      }
+    }
+  }, [hasBranchScope, accessibleBranchIds, scopedBranches, form.branch_id]);
 
   const openAddModal = () => {
     setEditingDevice(null);
@@ -661,7 +683,7 @@ export const DeviceSettings: React.FC = () => {
                   <div style={{ flex: 1 }}>
                     <label style={labelStyle}>Branch</label>
                     <select style={inputStyle} value={form.branch_id} onChange={e => setForm(f => ({ ...f, branch_id: Number(e.target.value) }))}>
-                       {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                       {scopedBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                     </select>
                   </div>
                   <div style={{ flex: 1 }}>

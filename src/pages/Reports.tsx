@@ -7,6 +7,8 @@ import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { AppConfig } from '../config/appConfig';
+import { useAuth } from '@/context/AuthContext';
+import { getAccessibleBranchIds, isSuperAdmin } from '@/config/accessPolicy';
 
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -71,6 +73,13 @@ interface Branch {
   name: string;
 }
 
+interface EmployeeOption {
+  id: number;
+  name: string;
+  employee_code: string;
+  branch_id?: number | null;
+}
+
 const tabs = [
   { key: 'daily' as const, label: 'Daily Attendance', icon: <Calendar className="h-4 w-4" /> },
   { key: 'ledger' as const, label: 'Monthly Ledger', icon: <FileText className="h-4 w-4" /> },
@@ -79,6 +88,9 @@ const tabs = [
 ];
 
 export const Reports: React.FC = () => {
+  const { user } = useAuth();
+  const accessibleBranchIds = getAccessibleBranchIds(user);
+  const superAdmin = isSuperAdmin(user?.role);
   const [activeTab, setActiveTab] = useState<'daily' | 'ledger' | 'salary' | 'raw'>('daily');
   const [fromDate, setFromDate] = useState(new Date().toISOString().split('T')[0]);
   const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0]);
@@ -87,7 +99,7 @@ export const Reports: React.FC = () => {
   const [branch, setBranch] = useState<number | null>(null);
   const [gate, setGate] = useState<number | null>(null);
   const [search, setSearch] = useState('');
-  const [employees, setEmployees] = useState<{id: number, name: string, employee_code: string}[]>([]);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('');
 
   const [branches, setBranches] = useState<Branch[]>([]);
@@ -103,9 +115,23 @@ export const Reports: React.FC = () => {
 
   const calendarMode = localStorage.getItem('calendarMode') || 'AD';
 
+  const hasBranchScope = superAdmin || accessibleBranchIds.length === 0;
+  const scopedBranches = hasBranchScope
+    ? branches
+    : branches.filter(branch => accessibleBranchIds.includes(String(branch.id)));
+  const scopedEmployees = hasBranchScope
+    ? employees
+    : employees.filter(emp => !emp.branch_id || accessibleBranchIds.includes(String(emp.branch_id)));
+
   useEffect(() => {
     loadMetadata();
   }, []);
+
+  useEffect(() => {
+    if (!hasBranchScope && !branch && scopedBranches.length === 1) {
+      setBranch(scopedBranches[0].id);
+    }
+  }, [hasBranchScope, branch, scopedBranches]);
 
   useEffect(() => {
     if (branch) {
@@ -123,9 +149,9 @@ export const Reports: React.FC = () => {
       const depts = await invoke<any[]>('list_departments');
       setDepartments(['All', ...depts.map(d => d.name)]);
       const brs = await invoke<Branch[]>('list_branches');
-      setBranches(brs);
+      setBranches(hasBranchScope ? brs : brs.filter(b => accessibleBranchIds.includes(String(b.id))));
       const emps = await invoke<any[]>('list_employees_for_select');
-      setEmployees(emps);
+      setEmployees(hasBranchScope ? emps : emps.filter(emp => !emp.branch_id || accessibleBranchIds.includes(String(emp.branch_id))));
     } catch (e) {
       console.error(e);
     }
@@ -136,17 +162,18 @@ export const Reports: React.FC = () => {
     setHasGenerated(true);
     try {
       const empId = selectedEmployeeId ? Number(selectedEmployeeId) : null;
+      const effectiveBranch = branch ?? (hasBranchScope ? null : scopedBranches[0]?.id ?? null);
       if (activeTab === 'daily') {
-        const data = await invoke<DailyAttendance[]>('get_daily_reports', { fromDate, toDate, dept: department, search, employeeId: empId, branchId: branch, gateId: gate });
+        const data = await invoke<DailyAttendance[]>('get_daily_reports', { fromDate, toDate, dept: department, search, employeeId: empId, branchId: effectiveBranch, gateId: gate });
         setDailyData(data);
       } else if (activeTab === 'ledger') {
-        const data = await invoke<MonthlyLedger[]>('get_monthly_ledger', { yearMonth: month, branchId: branch, gateId: gate, dept: department });
+        const data = await invoke<MonthlyLedger[]>('get_monthly_ledger', { yearMonth: month, branchId: effectiveBranch, gateId: gate, dept: department });
         setLedgerData(data);
       } else if (activeTab === 'salary') {
-        const data = await invoke<SalarySheet[]>('get_salary_sheet', { yearMonth: month, branchId: branch, gateId: gate });
+        const data = await invoke<SalarySheet[]>('get_salary_sheet', { yearMonth: month, branchId: effectiveBranch, gateId: gate });
         setSalaryData(data);
       } else if (activeTab === 'raw') {
-        const data = await invoke<RawLog[]>('get_raw_logs', { fromDate, toDate, search, employeeId: empId, branchId: branch, gateId: gate });
+        const data = await invoke<RawLog[]>('get_raw_logs', { fromDate, toDate, search, employeeId: empId, branchId: effectiveBranch, gateId: gate });
         setRawData(data);
       }
     } catch (e) {
@@ -289,7 +316,7 @@ export const Reports: React.FC = () => {
                            <Label className="text-[9px] uppercase font-bold text-slate-400 mb-1 block">Branch</Label>
                            <Select value={branch?.toString() || ''} onChange={e => setBranch(Number(e.target.value) || null)} className="h-9 text-xs">
                               <option value="">All Branches</option>
-                              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                              {scopedBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                            </Select>
                         </div>
                         <div className="min-w-[120px]">
@@ -332,7 +359,7 @@ export const Reports: React.FC = () => {
                               className="h-9 text-xs"
                            >
                               <option value="">All Employees</option>
-                              {employees.map(emp => (
+                              {scopedEmployees.map(emp => (
                                  <option key={emp.id} value={emp.id}>{emp.name}</option>
                               ))}
                            </Select>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import { getAccessibleBranchIds, isSuperAdmin } from '@/config/accessPolicy';
 import {
   Bell, Send, Trash2, Eye, CheckCheck, AlertCircle, Info,
   Calendar, Users, Globe, Clock
@@ -53,7 +54,9 @@ type TabType = 'inbox' | 'sent' | 'compose' | 'all';
 
 export const NotificationSystem: React.FC = () => {
   const { user } = useAuth();
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const superAdmin = isSuperAdmin(user?.role);
+  const accessibleBranchIds = getAccessibleBranchIds(user);
+  const hasBranchScope = superAdmin || accessibleBranchIds.length === 0;
   
   const [activeTab, setActiveTab] = useState<TabType>('inbox');
   const [myNotifications, setMyNotifications] = useState<Notification[]>([]);
@@ -74,6 +77,9 @@ export const NotificationSystem: React.FC = () => {
     expiresAt: '',
   });
   const [sendStatus, setSendStatus] = useState('');
+  const scopedBranches = hasBranchScope
+    ? branches
+    : branches.filter(branch => accessibleBranchIds.includes(String(branch.id)));
 
   // Load data
   const loadData = useCallback(async () => {
@@ -86,9 +92,9 @@ export const NotificationSystem: React.FC = () => {
       ]);
       setMyNotifications(notifications);
       setUnreadCount(count);
-      setBranches(branchData);
+      setBranches(hasBranchScope ? branchData : branchData.filter((branch: any) => accessibleBranchIds.includes(String(branch.id))));
       
-      if (isSuperAdmin) {
+      if (superAdmin) {
         const allNotifs = await invoke<any[]>('get_all_notifications');
         setAllNotifications(allNotifs);
         const userData = await invoke<any[]>('list_users');
@@ -99,7 +105,7 @@ export const NotificationSystem: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [isSuperAdmin]);
+  }, [superAdmin, hasBranchScope, accessibleBranchIds]);
 
   useEffect(() => {
     loadData();
@@ -113,6 +119,14 @@ export const NotificationSystem: React.FC = () => {
     }
     if (!user) {
       setSendStatus('❌ You must be logged in to send notifications');
+      return;
+    }
+    if (composeForm.receiverType === 'USER' && !superAdmin) {
+      setSendStatus('❌ Only super admin can target specific users');
+      return;
+    }
+    if (composeForm.receiverType === 'BRANCH' && !composeForm.branchId && scopedBranches.length > 0) {
+      setSendStatus('❌ Select a branch first');
       return;
     }
     setSendStatus('');
@@ -246,7 +260,7 @@ export const NotificationSystem: React.FC = () => {
           active={activeTab === 'compose'}
           onClick={() => setActiveTab('compose')}
         />
-        {isSuperAdmin && (
+        {superAdmin && (
           <TabButton
             icon={<Eye className="w-4 h-4" />}
             label="All Notifications"
@@ -378,7 +392,7 @@ export const NotificationSystem: React.FC = () => {
                     className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1"
                   >
                     <option value="">Select Branch</option>
-                    {branches.map(b => (
+                    {scopedBranches.map(b => (
                       <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
                   </select>
@@ -386,7 +400,7 @@ export const NotificationSystem: React.FC = () => {
               )}
 
               {/* User Selector */}
-              {composeForm.receiverType === 'USER' && isSuperAdmin && (
+              {composeForm.receiverType === 'USER' && superAdmin && (
                 <div>
                   <Label>Select User</Label>
                   <select
@@ -469,7 +483,7 @@ export const NotificationSystem: React.FC = () => {
       )}
 
       {/* All Notifications Tab (Super Admin) */}
-      {activeTab === 'all' && isSuperAdmin && (
+      {activeTab === 'all' && superAdmin && (
         <Card>
           <CardHeader>
             <CardTitle>All Notifications</CardTitle>

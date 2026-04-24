@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import { getAccessibleBranchIds, isSuperAdmin } from '@/config/accessPolicy';
 import { Building2, DoorOpen, Monitor, Plus, Edit2, Trash2, Eye, Shield, AlertCircle, Download, Upload, Wifi, WifiOff, Info } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,12 +26,22 @@ import {
 } from '@/components/ui/table';
 import { BranchMigrationWizard } from '../components/BranchMigrationWizard';
 
+interface Organization {
+  id: number;
+  name: string;
+  address?: string | null;
+  contact_info?: string | null;
+  license_expiry?: string | null;
+}
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
 interface Branch {
   id: number;
   name: string;
   location?: string;
+  org_id?: number | null;
+  organization_id?: number | null;
   gate_count?: number;
   device_count?: number;
   employee_count?: number;
@@ -66,15 +77,18 @@ interface Device {
   https_enabled?: boolean;
 }
 
-type TabType = 'branches' | 'gates' | 'devices';
+type TabType = 'organizations' | 'branches' | 'gates' | 'devices';
 
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export const BranchGateDeviceManagement: React.FC = () => {
   const { user } = useAuth();
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const superAdmin = isSuperAdmin(user?.role);
+  const accessibleBranchIds = getAccessibleBranchIds(user);
+  const hasBranchScope = superAdmin || accessibleBranchIds.length === 0;
   
-  const [activeTab, setActiveTab] = useState<TabType>('branches');
+  const [activeTab, setActiveTab] = useState<TabType>(superAdmin ? 'organizations' : 'branches');
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [gates, setGates] = useState<Gate[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -84,6 +98,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
 
   // Dialogs
   const [branchDialog, setBranchDialog] = useState({ open: false, editing: null as Branch | null });
+  const [organizationDialog, setOrganizationDialog] = useState({ open: false, editing: null as Organization | null });
   const [gateDialog, setGateDialog] = useState({ open: false, editing: null as Gate | null, preselectBranch: null as number | null });
   const [deviceDialog, setDeviceDialog] = useState({ 
     open: false, 
@@ -101,11 +116,24 @@ export const BranchGateDeviceManagement: React.FC = () => {
   // Sync state
   const [syncingDevices, setSyncingDevices] = useState<Set<number>>(new Set());
   const [syncMessages, setSyncMessages] = useState<Record<number, string>>({});
+  const scopedBranches = hasBranchScope
+    ? branches
+    : branches.filter(branch => accessibleBranchIds.includes(String(branch.id)));
+  const scopedOrganizations = superAdmin ? organizations : [];
+  const scopedGates = hasBranchScope
+    ? gates
+    : gates.filter(gate => accessibleBranchIds.includes(String(gate.branch_id)));
+  const scopedDevices = hasBranchScope
+    ? devices
+    : devices.filter(device => accessibleBranchIds.includes(String(device.branch_id)));
 
   // Load data
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      const organizationData = await invoke<Organization[]>('list_organizations');
+      setOrganizations(superAdmin ? (Array.isArray(organizationData) ? organizationData : []) : []);
+
       // Load branches with counts
       const branchData = await invoke<any[]>('list_branches');
       const enhancedBranches = await Promise.all(
@@ -120,7 +148,10 @@ export const BranchGateDeviceManagement: React.FC = () => {
           };
         })
       );
-      setBranches(enhancedBranches);
+      const visibleBranches = superAdmin
+        ? enhancedBranches
+        : enhancedBranches.filter((branch: any) => accessibleBranchIds.includes(String(branch.id)));
+      setBranches(visibleBranches);
 
       // Load ALL gates for dropdowns and enhanced views
       const gateData = await invoke<any[]>('list_gates', { branchId: null });
@@ -134,23 +165,55 @@ export const BranchGateDeviceManagement: React.FC = () => {
           };
         })
       );
-      setGates(enhancedGates);
+      setGates(superAdmin ? enhancedGates : enhancedGates.filter((gate: any) => accessibleBranchIds.includes(String(gate.branch_id))));
 
       // Load all devices
       const deviceData = await invoke<any[]>('list_all_devices');
-      setDevices(deviceData);
+      setDevices(superAdmin ? deviceData : deviceData.filter((device: any) => accessibleBranchIds.includes(String(device.branch_id))));
+
+      if (selectedBranchId && !visibleBranches.some((b: any) => b.id === selectedBranchId)) {
+        setSelectedBranchId(null);
+      }
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
       setLoading(false);
     }
-  }, [selectedBranchId]);
+  }, [selectedBranchId, superAdmin, accessibleBranchIds]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    if (!superAdmin && !selectedBranchId && scopedBranches.length > 0) {
+      setSelectedBranchId(scopedBranches[0].id);
+    }
+    if (!superAdmin && activeTab === 'organizations') {
+      setActiveTab('branches');
+    }
+  }, [superAdmin, selectedBranchId, scopedBranches, activeTab]);
+
   // Branch handlers
+  const handleAddOrganization = () => {
+    setOrganizationDialog({ open: true, editing: null });
+  };
+
+  const handleEditOrganization = (organization: Organization) => {
+    setOrganizationDialog({ open: true, editing: organization });
+  };
+
+  const handleDeleteOrganization = async (id: number) => {
+    if (!confirm('Delete this organization? This should only be used when the organization is empty.')) return;
+    try {
+      await invoke('delete_organization', { id });
+      await loadData();
+    } catch (error) {
+      console.error('Failed to delete organization:', error);
+      alert('Delete failed: ' + error);
+    }
+  };
+
   const handleAddBranch = () => {
     setBranchDialog({ open: true, editing: null });
   };
@@ -366,7 +429,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
         <h1 className="text-3xl font-bold text-foreground mb-2">Organization Structure</h1>
         <p className="text-muted-foreground">
           Manage branches, gates, and devices hierarchically
-          {isSuperAdmin && (
+          {superAdmin && (
             <span className="ml-2 inline-flex items-center gap-1 text-primary">
               <Shield className="w-4 h-4" />
               Super Admin View
@@ -377,6 +440,12 @@ export const BranchGateDeviceManagement: React.FC = () => {
 
       {/* Tab Navigation */}
       <div className="flex gap-2 mb-6 border-b border-border">
+        <TabButton
+          icon={<Shield className="w-4 h-4" />}
+          label="Organizations"
+          active={activeTab === 'organizations'}
+          onClick={() => setActiveTab('organizations')}
+        />
         <TabButton
           icon={<Building2 className="w-4 h-4" />}
           label="Branches"
@@ -400,7 +469,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
       </div>
 
       {/* Branch Filter */}
-      {activeTab !== 'branches' && (
+      {activeTab !== 'organizations' && (
         <div className="mb-6 p-4 bg-card border border-border rounded-lg">
           <Label className="text-sm font-medium mb-2 block">Select Branch</Label>
           <select
@@ -412,7 +481,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
             className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
           >
             <option value="">All Branches (Super Admin)</option>
-            {branches.map(b => (
+            {scopedBranches.map(b => (
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
           </select>
@@ -420,11 +489,22 @@ export const BranchGateDeviceManagement: React.FC = () => {
       )}
 
       {/* Content */}
+      {activeTab === 'organizations' && superAdmin && (
+        <OrganizationsTab
+          organizations={scopedOrganizations}
+          branches={scopedBranches}
+          onAdd={handleAddOrganization}
+          onEdit={handleEditOrganization}
+          onDelete={handleDeleteOrganization}
+          loading={loading}
+        />
+      )}
+
       {activeTab === 'branches' && (
         <BranchesTab
-          branches={branches}
-          gates={gates}
-          devices={devices}
+          branches={scopedBranches}
+          gates={scopedGates}
+          devices={scopedDevices}
           onAdd={handleAddBranch}
           onEdit={handleEditBranch}
           onDelete={(id, name) => setMigrationWizard({ open: true, branch: { id, name } })}
@@ -438,9 +518,9 @@ export const BranchGateDeviceManagement: React.FC = () => {
 
       {activeTab === 'gates' && (
         <GatesTab
-          gates={selectedBranchId ? gates.filter(g => g.branch_id === selectedBranchId) : gates}
-          branches={branches}
-          branchName={selectedBranchId ? (branches.find(b => b.id === selectedBranchId)?.name || '') : 'All Branches'}
+          gates={selectedBranchId ? scopedGates.filter(g => g.branch_id === selectedBranchId) : scopedGates}
+          branches={scopedBranches}
+          branchName={selectedBranchId ? (scopedBranches.find(b => b.id === selectedBranchId)?.name || '') : 'All Branches'}
           onAdd={() => handleAddGate()}
           onEdit={handleEditGate}
           onDelete={(id, name) => setDeleteDialog({ open: true, type: 'gate', id, name })}
@@ -454,13 +534,13 @@ export const BranchGateDeviceManagement: React.FC = () => {
 
       {activeTab === 'devices' && (
         <DevicesTab
-          devices={devices.filter(d => {
+          devices={scopedDevices.filter(d => {
             if (selectedBranchId && d.branch_id !== selectedBranchId) return false;
             if (selectedGateId && d.gate_id !== selectedGateId) return false;
             return true;
           })}
-          branches={branches}
-          gates={gates}
+          branches={scopedBranches}
+          gates={scopedGates}
           onAdd={() => handleAddDevice()}
           onEdit={handleEditDevice}
           onDelete={(id, name) => setDeleteDialog({ open: true, type: 'device', id, name })}
@@ -475,11 +555,41 @@ export const BranchGateDeviceManagement: React.FC = () => {
       )}
 
       {/* Dialogs */}
+      <OrganizationDialog
+        open={organizationDialog.open}
+        editing={organizationDialog.editing}
+        onClose={() => setOrganizationDialog({ open: false, editing: null })}
+        onSave={async (data) => {
+          try {
+            if (organizationDialog.editing) {
+              await invoke('update_organization', {
+                id: organizationDialog.editing.id,
+                name: data.name,
+                address: data.address || null,
+                contactInfo: data.contact_info || null,
+              });
+            } else {
+              await invoke('add_organization', {
+                name: data.name,
+                address: data.address || null,
+                contactInfo: data.contact_info || null,
+              });
+            }
+            setOrganizationDialog({ open: false, editing: null });
+            loadData();
+          } catch (error) {
+            console.error('Failed to save organization:', error);
+            alert('Failed to save organization: ' + error);
+          }
+        }}
+      />
+
       <BranchDialog
         open={branchDialog.open}
         editing={branchDialog.editing}
-        gates={gates}
-        devices={devices}
+        organizations={scopedOrganizations}
+        gates={scopedGates}
+        devices={scopedDevices}
         onClose={() => setBranchDialog({ open: false, editing: null })}
         onSave={async (data) => {
           try {
@@ -487,12 +597,14 @@ export const BranchGateDeviceManagement: React.FC = () => {
               await invoke('update_branch', { 
                 id: branchDialog.editing.id, 
                 name: data.name, 
-                location: data.location 
+                location: data.location,
+                organizationId: data.organizationId
               });
             } else {
               await invoke('add_branch', { 
                 name: data.name, 
-                location: data.location 
+                location: data.location,
+                organizationId: data.organizationId
               });
             }
             setBranchDialog({ open: false, editing: null });
@@ -514,7 +626,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
         editing={gateDialog.editing}
         preselectBranch={gateDialog.preselectBranch}
         branchId={selectedBranchId || 0}
-        branches={branches}
+        branches={scopedBranches}
         onClose={() => setGateDialog({ open: false, editing: null, preselectBranch: null })}
         onSave={async (data) => {
           try {
@@ -544,8 +656,8 @@ export const BranchGateDeviceManagement: React.FC = () => {
         editing={deviceDialog.editing}
         preselectBranch={deviceDialog.preselectBranch}
         preselectGate={deviceDialog.preselectGate}
-        branches={branches}
-        gates={gates}
+        branches={scopedBranches}
+        gates={scopedGates}
         onClose={() => setDeviceDialog({ open: false, editing: null, preselectBranch: null, preselectGate: null })}
         onSave={async (data) => {
           try {
@@ -608,6 +720,81 @@ const TabButton: React.FC<{
 );
 
 // ── Branches Tab ────────────────────────────────────────────────────────────
+
+const OrganizationsTab: React.FC<{
+  organizations: Organization[];
+  branches: Branch[];
+  onAdd: () => void;
+  onEdit: (organization: Organization) => void;
+  onDelete: (id: number) => void;
+  loading: boolean;
+}> = ({ organizations, branches, onAdd, onEdit, onDelete, loading }) => (
+  <div>
+    <div className="flex justify-between items-center mb-4">
+      <div>
+        <h2 className="text-xl font-semibold">Organization</h2>
+        <p className="text-sm text-muted-foreground">Define the company container before arranging branches and gates.</p>
+      </div>
+      <Button onClick={onAdd}>
+        <Plus className="w-4 h-4 mr-2" />
+        Add Organization
+      </Button>
+    </div>
+
+    <Card>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Organization</TableHead>
+              <TableHead>Address</TableHead>
+              <TableHead>Branches</TableHead>
+              <TableHead>Contact</TableHead>
+              <TableHead>Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center py-8">Loading...</TableCell>
+              </TableRow>
+            ) : organizations.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                  No organization found. Create one to start structuring the company.
+                </TableCell>
+              </TableRow>
+            ) : (
+              organizations.map(org => {
+                const branchCount = branches.filter(b => Number(b.org_id || b.organization_id || 1) === org.id).length;
+                return (
+                  <TableRow key={org.id}>
+                    <TableCell className="font-medium">{org.name}</TableCell>
+                    <TableCell className="text-muted-foreground">{org.address || '—'}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">{branchCount}</Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{org.contact_info || '—'}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="icon" onClick={() => onEdit(org)} title="Edit Organization">
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => onDelete(org.id)} title="Delete Organization">
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  </div>
+);
 
 const BranchesTab: React.FC<{
   branches: Branch[];
@@ -947,35 +1134,39 @@ const DevicesTab: React.FC<{
 const BranchDialog: React.FC<{
   open: boolean;
   editing: Branch | null;
+  organizations: Organization[];
   gates: Gate[];
   devices: Device[];
   onClose: () => void;
-  onSave: (data: { name: string; location: string }) => void;
+  onSave: (data: { name: string; location: string; organizationId: number }) => void;
   onAddGate: (branchId?: number) => void;
   onEditGate: (gate: Gate) => void;
   onDeleteGate: (id: number, name: string) => void;
   onAddDevice: (branchId?: number) => void;
   onEditDevice: (device: Device) => void;
   onDeleteDevice: (id: number, name: string) => void;
-}> = ({ open, editing, gates, devices, onClose, onSave, onAddGate, onEditGate, onDeleteGate, onAddDevice, onEditDevice, onDeleteDevice }) => {
+}> = ({ open, editing, organizations, gates, devices, onClose, onSave, onAddGate, onEditGate, onDeleteGate, onAddDevice, onEditDevice, onDeleteDevice }) => {
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
+  const [organizationId, setOrganizationId] = useState<number>(organizations[0]?.id || 1);
   const [dialogTab, setDialogTab] = useState<'details' | 'gates' | 'devices'>('details');
 
   useEffect(() => {
     if (editing) {
       setName(editing.name);
       setLocation(editing.location || '');
+      setOrganizationId(Number(editing.org_id || editing.organization_id || organizations[0]?.id || 1));
     } else {
       setName('');
       setLocation('');
+      setOrganizationId(organizations[0]?.id || 1);
     }
     setDialogTab('details');
-  }, [editing]);
+  }, [editing, organizations, open]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave({ name, location });
+    onSave({ name, location, organizationId });
   };
 
   const branchGates = editing ? gates.filter(g => g.branch_id === editing.id) : [];
@@ -1033,6 +1224,18 @@ const BranchDialog: React.FC<{
                   onChange={(e) => setLocation(e.target.value)}
                   placeholder="e.g., New Road, Kathmandu"
                 />
+              </div>
+              <div>
+                <Label>Organization</Label>
+                <select
+                  value={organizationId}
+                  onChange={(e) => setOrganizationId(Number(e.target.value))}
+                  className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                >
+                  {organizations.map(org => (
+                    <option key={org.id} value={org.id}>{org.name}</option>
+                  ))}
+                </select>
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
@@ -1133,6 +1336,79 @@ const BranchDialog: React.FC<{
 };
 
 // ── Gate Dialog ─────────────────────────────────────────────────────────────
+
+const OrganizationDialog: React.FC<{
+  open: boolean;
+  editing: Organization | null;
+  onClose: () => void;
+  onSave: (data: { name: string; address: string; contact_info: string }) => void;
+}> = ({ open, editing, onClose, onSave }) => {
+  const [name, setName] = useState('');
+  const [address, setAddress] = useState('');
+  const [contactInfo, setContactInfo] = useState('');
+
+  useEffect(() => {
+    if (editing) {
+      setName(editing.name || '');
+      setAddress(editing.address || '');
+      setContactInfo(editing.contact_info || '');
+    } else {
+      setName('');
+      setAddress('');
+      setContactInfo('');
+    }
+  }, [editing, open]);
+
+  return (
+    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{editing ? 'Edit Organization' : 'Create Organization'}</DialogTitle>
+          <DialogDescription>
+            Keep the company container clean before adding branches and gates.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSave({ name, address, contact_info: contactInfo });
+          }}
+          className="space-y-4"
+        >
+          <div>
+            <Label>Organization Name</Label>
+            <Input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g., BioBridge Pro HR"
+              required
+            />
+          </div>
+          <div>
+            <Label>Address</Label>
+            <Input
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="e.g., Kathmandu, Nepal"
+            />
+          </div>
+          <div>
+            <Label>Contact Info</Label>
+            <Input
+              value={contactInfo}
+              onChange={(e) => setContactInfo(e.target.value)}
+              placeholder="Phone or email"
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit">{editing ? 'Update' : 'Create'}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 const GateDialog: React.FC<{
   open: boolean;

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { invoke } from '@tauri-apps/api/core';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,6 +50,11 @@ interface SetupData {
   // Step 5: Organization Structure
   branchName: string;
   branchLocation: string;
+  gateName: string;
+  deviceName: string;
+  deviceIp: string;
+  devicePort: string;
+  deviceBrand: string;
   departments: string[];
 }
 
@@ -79,6 +85,11 @@ export const EnhancedSetupWizard: React.FC = () => {
     fiscalYearStart: '2080-01-01',
     branchName: 'Head Office',
     branchLocation: '',
+    gateName: 'Main Gate',
+    deviceName: 'Attendance Device',
+    deviceIp: '',
+    devicePort: '4370',
+    deviceBrand: 'ZKTeco',
     departments: ['HR', 'Finance', 'IT', 'Operations', 'Sales', 'Marketing']
   });
 
@@ -88,7 +99,7 @@ export const EnhancedSetupWizard: React.FC = () => {
 
   const nextStep = () => {
     if (validateStep(step)) {
-      setStep(s => Math.min(s + 1, 5));
+      setStep(s => Math.min(s + 1, 6));
       setError('');
     }
   };
@@ -119,6 +130,20 @@ export const EnhancedSetupWizard: React.FC = () => {
         }
         if (setupData.adminPassword.length < 6) {
           setError('Password must be at least 6 characters');
+          return false;
+        }
+        return true;
+      case 5:
+        if (!setupData.branchName.trim()) {
+          setError('Branch name is required');
+          return false;
+        }
+        if (!setupData.gateName.trim()) {
+          setError('Gate name is required');
+          return false;
+        }
+        if (!setupData.deviceName.trim() || !setupData.deviceIp.trim()) {
+          setError('Device name and IP are required');
           return false;
         }
         return true;
@@ -531,6 +556,41 @@ export const EnhancedSetupWizard: React.FC = () => {
     return branchData;
   };
 
+  const createLocalBootstrap = async () => {
+    const org = await invoke<any>('add_organization', {
+      name: setupData.companyName,
+      address: setupData.companyAddress || null,
+      contactInfo: setupData.companyPhone || setupData.companyEmail || null,
+    });
+
+    const organizationId = Number(org?.id || 1);
+    const branch = await invoke<any>('add_branch', {
+      name: setupData.branchName,
+      location: setupData.branchLocation || null,
+      organizationId,
+    });
+
+    const branchId = Number(branch?.id || 1);
+    const gate = await invoke<any>('add_gate', {
+      branchId,
+      name: setupData.gateName,
+    });
+
+    const gateId = Number(gate?.id || 1);
+    await invoke('add_device', {
+      device: {
+        name: setupData.deviceName,
+        brand: setupData.deviceBrand,
+        ip_address: setupData.deviceIp,
+        port: Number(setupData.devicePort) || 4370,
+        comm_key: 0,
+        machine_number: 1,
+        branch_id: branchId,
+        gate_id: gateId,
+      },
+    });
+  };
+
   const handleCompleteSetup = async () => {
     setLoading(true);
     setError('');
@@ -609,6 +669,8 @@ export const EnhancedSetupWizard: React.FC = () => {
         await insertDefaultData(supabaseClient, orgData.id);
       }
 
+      await createLocalBootstrap();
+
       // Save configuration to localStorage
       localStorage.setItem('setupComplete', 'true');
       localStorage.setItem('supabaseUrl', setupData.supabaseUrl);
@@ -631,7 +693,8 @@ export const EnhancedSetupWizard: React.FC = () => {
     { icon: Database, title: 'Database' },
     { icon: Shield, title: 'Admin User' },
     { icon: Globe, title: 'Localization' },
-    { icon: Settings, title: 'Complete' }
+    { icon: Settings, title: 'Structure' },
+    { icon: CheckCircle2, title: 'Complete' }
   ];
 
   return (
@@ -644,7 +707,7 @@ export const EnhancedSetupWizard: React.FC = () => {
               <CardDescription>Configure your system for first-time use</CardDescription>
             </div>
             <Badge variant="outline" className="text-sm">
-              Step {step} of 5
+              Step {step} of 6
             </Badge>
           </div>
 
@@ -652,7 +715,7 @@ export const EnhancedSetupWizard: React.FC = () => {
           <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
             <div
               className="h-full bg-blue-600 transition-all duration-300 ease-in-out"
-              style={{ width: `${(step / 5) * 100}%` }}
+              style={{ width: `${(step / 6) * 100}%` }}
             />
           </div>
 
@@ -1005,13 +1068,109 @@ export const EnhancedSetupWizard: React.FC = () => {
             </div>
           )}
 
-          {/* Step 5: Review & Complete */}
+          {/* Step 5: Organization Structure */}
           {step === 5 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xl font-semibold mb-2">Organization Structure</h3>
+                <p className="text-sm text-muted-foreground">
+                  Define the first branch, gate, and attendance device used by the desktop app.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="branchName">Branch Name *</Label>
+                  <Input
+                    id="branchName"
+                    value={setupData.branchName}
+                    onChange={(e) => updateSetupData('branchName', e.target.value)}
+                    placeholder="Head Office"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="branchLocation">Branch Location</Label>
+                  <Input
+                    id="branchLocation"
+                    value={setupData.branchLocation}
+                    onChange={(e) => updateSetupData('branchLocation', e.target.value)}
+                    placeholder="Kathmandu, Nepal"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="gateName">Gate / Entrance Name *</Label>
+                  <Input
+                    id="gateName"
+                    value={setupData.gateName}
+                    onChange={(e) => updateSetupData('gateName', e.target.value)}
+                    placeholder="Main Gate"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="deviceName">Attendance Device Name *</Label>
+                  <Input
+                    id="deviceName"
+                    value={setupData.deviceName}
+                    onChange={(e) => updateSetupData('deviceName', e.target.value)}
+                    placeholder="Attendance Device"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="deviceIp">Device IP Address *</Label>
+                  <Input
+                    id="deviceIp"
+                    value={setupData.deviceIp}
+                    onChange={(e) => updateSetupData('deviceIp', e.target.value)}
+                    placeholder="192.168.1.100"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="devicePort">Port</Label>
+                    <Input
+                      id="devicePort"
+                      value={setupData.devicePort}
+                      onChange={(e) => updateSetupData('devicePort', e.target.value)}
+                      placeholder="4370"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="deviceBrand">Brand</Label>
+                    <Input
+                      id="deviceBrand"
+                      value={setupData.deviceBrand}
+                      onChange={(e) => updateSetupData('deviceBrand', e.target.value)}
+                      placeholder="ZKTeco"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-between">
+                <Button variant="outline" onClick={prevStep}>
+                  <ArrowLeft size={16} />
+                  Back
+                </Button>
+                <Button onClick={nextStep}>
+                  Next
+                  <ArrowRight size={16} />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 6: Review & Complete */}
+          {step === 6 && (
             <div className="space-y-6">
               <div>
                 <h3 className="text-xl font-semibold mb-2">Review & Complete Setup</h3>
                 <p className="text-sm text-muted-foreground">
-                  Review your configuration and complete the setup. All tables and default data will be created automatically.
+                  Review your configuration and complete the setup. Local branch, gate, and device records will be created before login.
                 </p>
               </div>
 
@@ -1045,11 +1204,14 @@ export const EnhancedSetupWizard: React.FC = () => {
                 <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                   <h4 className="font-semibold mb-2 text-blue-900">What will be created:</h4>
                   <ul className="text-sm space-y-1 text-blue-800">
+                    <li>✓ Organization container: {setupData.companyName}</li>
+                    <li>✓ Branch: {setupData.branchName}</li>
+                    <li>✓ Gate: {setupData.gateName}</li>
+                    <li>✓ Device: {setupData.deviceName} ({setupData.deviceIp})</li>
                     <li>✓ {setupData.departments.length} default departments ({setupData.departments.join(', ')})</li>
                     <li>✓ 6 role levels (Super Admin, Admin, Manager, Supervisor, Employee, Viewer)</li>
                     <li>✓ 25+ granular permissions</li>
                     <li>✓ Default system settings</li>
-                    <li>✓ Branch: {setupData.branchName}</li>
                   </ul>
                 </div>
               </div>
@@ -1081,7 +1243,7 @@ export const EnhancedSetupWizard: React.FC = () => {
 
         <CardFooter className="flex justify-between py-4">
           <div className="text-xs text-muted-foreground">
-            {step === 5 ? 'Final step' : `${5 - step} steps remaining`}
+            {step === 6 ? 'Final step' : `${6 - step} steps remaining`}
           </div>
           <button
             onClick={() => {

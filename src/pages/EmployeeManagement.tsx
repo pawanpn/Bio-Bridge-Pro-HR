@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import { getAccessibleBranchIds } from '@/config/accessPolicy';
 import { Switch } from '@/components/ui/switch';
 import {
   Users, UserPlus, Search, Filter, Download, Upload,
@@ -162,6 +163,16 @@ const emptyForm: EmployeeForm = {
 export const EmployeeManagement: React.FC = () => {
   const { user, resetPassword } = useAuth();
   const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const accessibleBranchIds = getAccessibleBranchIds(user);
+  const hasBranchScope = isSuperAdmin || accessibleBranchIds.length === 0;
+
+  const filterEmployeesByScope = (rows: any[]) => {
+    if (hasBranchScope) return rows;
+    return rows.filter((emp) => {
+      const branchId = emp.branch_id;
+      return !branchId || accessibleBranchIds.includes(String(branchId));
+    });
+  };
   
   // State
   const [employees, setEmployees] = useState<any[]>([]);
@@ -260,8 +271,10 @@ export const EmployeeManagement: React.FC = () => {
           ? empResult.value
           : empResult.value?.data || [];
 
-        console.log('[EmployeeManagement] Setting employees:', empData.length);
-        setEmployees(empData);
+        const scopedEmployees = filterEmployeesByScope(empData);
+
+        console.log('[EmployeeManagement] Setting employees:', scopedEmployees.length);
+        setEmployees(scopedEmployees);
 
         if (empResult.value?.debug) {
           setDebugInfo(empResult.value.debug);

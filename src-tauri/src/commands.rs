@@ -290,7 +290,7 @@ pub async fn test_device_connection(
 }
 
 #[tauri::command]
-pub async fn add_device(device: Value, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+pub async fn add_device(device: Value, state: tauri::State<'_, AppState>) -> Result<Value, AppError> {
     let db_guard = state
         .db
         .lock()
@@ -319,11 +319,14 @@ pub async fn add_device(device: Value, state: tauri::State<'_, AppState>) -> Res
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to add device: {}", e)))?;
 
-    Ok(())
+    Ok(json!({
+        "success": true,
+        "id": conn.last_insert_rowid()
+    }))
 }
 
 #[tauri::command]
-pub async fn register_new_device(device: Value, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+pub async fn register_new_device(device: Value, state: tauri::State<'_, AppState>) -> Result<Value, AppError> {
     add_device(device, state).await
 }
 
@@ -1169,6 +1172,7 @@ pub async fn scan_network(_base_ip: String) -> Result<(), AppError> {
 pub async fn add_branch(
     name: String,
     location: Option<String>,
+    organization_id: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -1181,11 +1185,14 @@ pub async fn add_branch(
 
     // Default org_id = 1 for now
     conn.execute(
-        "INSERT INTO Branches (org_id, name, location) VALUES (1, ?1, ?2)",
-        params![name, location],
+        "INSERT INTO Branches (org_id, organization_id, name, location) VALUES (?1, ?2, ?3, ?4)",
+        params![organization_id.unwrap_or(1), organization_id.unwrap_or(1), name, location],
     )?;
 
-    Ok(serde_json::json!({"success": true}))
+    Ok(serde_json::json!({
+        "success": true,
+        "id": conn.last_insert_rowid()
+    }))
 }
 
 #[tauri::command]
@@ -1193,6 +1200,7 @@ pub async fn update_branch(
     id: i64,
     name: String,
     location: Option<String>,
+    organization_id: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -1204,8 +1212,8 @@ pub async fn update_branch(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "UPDATE Branches SET name = ?1, location = ?2 WHERE id = ?3",
-        params![name, location, id],
+        "UPDATE Branches SET name = ?1, location = ?2, organization_id = COALESCE(?3, organization_id, 1), org_id = COALESCE(?3, org_id, 1) WHERE id = ?4",
+        params![name, location, organization_id, id],
     )?;
 
     Ok(serde_json::json!({"success": true}))
@@ -1248,11 +1256,14 @@ pub async fn add_gate(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "INSERT INTO Gates (branch_id, name) VALUES (?1, ?2)",
+        "INSERT INTO Gates (branch_id, organization_id, name) VALUES (?1, 1, ?2)",
         params![branch_id, name],
     )?;
 
-    Ok(serde_json::json!({"success": true}))
+    Ok(serde_json::json!({
+        "success": true,
+        "id": conn.last_insert_rowid()
+    }))
 }
 
 #[tauri::command]
@@ -1271,7 +1282,7 @@ pub async fn update_gate(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "UPDATE Gates SET branch_id = ?1, name = ?2 WHERE id = ?3",
+        "UPDATE Gates SET branch_id = ?1, organization_id = COALESCE(organization_id, 1), name = ?2 WHERE id = ?3",
         params![branch_id, name, id],
     )?;
 
