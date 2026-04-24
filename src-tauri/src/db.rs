@@ -174,8 +174,8 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         let _ = conn.execute(&format!("ALTER TABLE Employees ADD COLUMN {} {}", col, col_type), []);
     }
 
-
-
+    let _ = conn.execute("ALTER TABLE Departments ADD COLUMN branch_id INTEGER", []);
+    let _ = conn.execute("ALTER TABLE Designations ADD COLUMN branch_id INTEGER", []);
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Devices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
