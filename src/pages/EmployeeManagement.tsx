@@ -34,6 +34,7 @@ import { Textarea } from '@/components/ui/textarea';
 
 // Employee Form Interface
 interface EmployeeForm {
+  employee_uuid: string;
   employee_code: string;
   first_name: string;
   middle_name: string;
@@ -96,6 +97,7 @@ interface EmployeeForm {
 }
 
 const emptyForm: EmployeeForm = {
+  employee_uuid: '',
   employee_code: '',
   first_name: '',
   middle_name: '',
@@ -339,13 +341,12 @@ export const EmployeeManagement: React.FC = () => {
   };
 
   const handleAddEmployee = () => {
-    // Auto-calculate the next sequential Employee ID (BB-00XX) 
-    const maxId = employees.reduce((max, emp) => Math.max(max, parseInt(emp.id) || 0), 0);
-    const nextCode = `BB-${String(maxId + 1).padStart(4, '0')}`;
+    const employeeUuid = window.crypto?.randomUUID?.() || `emp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     
     setFormData({
       ...emptyForm,
-      employee_code: nextCode
+      employee_uuid: employeeUuid,
+      employee_code: `EMP-${employeeUuid.slice(0, 8).toUpperCase()}`
     });
     setFormStep(1);
     setFormStatus('');
@@ -381,6 +382,7 @@ export const EmployeeManagement: React.FC = () => {
     try {
       // Build full request with all fields from the form
       const request = {
+        employee_uuid: formData.employee_uuid || (window.crypto?.randomUUID?.() || `emp-${Date.now()}-${Math.random().toString(16).slice(2)}`),
         employee_code: formData.employee_code,
         first_name: formData.first_name,
         middle_name: formData.middle_name || undefined,
@@ -440,6 +442,9 @@ export const EmployeeManagement: React.FC = () => {
         biometric_id: formData.biometric_id ? parseInt(String(formData.biometric_id)) : undefined,
         shift_start_time: formData.shift_start_time || undefined,
         shift_end_time: formData.shift_end_time || undefined,
+        sync_status: formDialog.editing ? 'modified' : 'pending',
+        last_modified: new Date().toISOString(),
+        server_id: undefined,
       };
 
       // Save using the crud commands (local SQLite first)
@@ -449,7 +454,7 @@ export const EmployeeManagement: React.FC = () => {
           request,
         });
       } else {
-        await invoke('create_employee', { request });
+        await invoke('register_new_staff', { request });
       }
 
       setFormStatus('✅ Employee saved successfully!');

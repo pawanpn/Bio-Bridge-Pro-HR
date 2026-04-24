@@ -8,6 +8,22 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 use tauri::Manager;
+use rand::{rngs::OsRng, RngCore};
+
+fn generate_uuid_v4() -> String {
+    let mut bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3],
+        bytes[4], bytes[5],
+        bytes[6], bytes[7],
+        bytes[8], bytes[9],
+        bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+    )
+}
 
 #[tauri::command]
 pub async fn list_all_devices(
@@ -259,11 +275,17 @@ pub async fn add_device(device: Value, state: tauri::State<'_, AppState>) -> Res
     let conn = db_guard
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let device_uuid = device["device_uuid"]
+        .as_str()
+        .map(|s| s.to_string())
+        .unwrap_or_else(generate_uuid_v4);
+    let last_modified = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
-        "INSERT INTO Devices (name, brand, ip_address, port, comm_key, machine_number, branch_id, gate_id, status)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'offline')",
+        "INSERT INTO Devices (device_uuid, name, brand, ip_address, port, comm_key, machine_number, branch_id, gate_id, status, sync_status, last_modified)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'offline', 'pending', ?10)",
         params![
+            device_uuid,
             device["name"].as_str().unwrap_or("New Device"),
             device["brand"].as_str().unwrap_or("ZKTeco"),
             device["ip"].as_str().unwrap_or(""),
@@ -272,10 +294,16 @@ pub async fn add_device(device: Value, state: tauri::State<'_, AppState>) -> Res
             device["machine_number"].as_i64().unwrap_or(1) as i32,
             device["branch_id"].as_i64(),
             device["gate_id"].as_i64(),
+            last_modified,
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to add device: {}", e)))?;
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn register_new_device(device: Value, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    add_device(device, state).await
 }
 
 #[tauri::command]
@@ -293,7 +321,7 @@ pub async fn update_device(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, machine_number=?6, branch_id=?7, gate_id=?8 WHERE id=?9",
+        "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, machine_number=?6, branch_id=?7, gate_id=?8, sync_status='modified', last_modified=?9 WHERE id=?10",
         params![
             device["name"].as_str().unwrap_or(""),
             device["brand"].as_str().unwrap_or("ZKTeco"),
@@ -303,6 +331,7 @@ pub async fn update_device(
             device["machine_number"].as_i64().unwrap_or(1) as i32,
             device["branch_id"].as_i64(),
             device["gate_id"].as_i64(),
+            chrono::Utc::now().to_rfc3339(),
             id
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to update device: {}", e)))?;

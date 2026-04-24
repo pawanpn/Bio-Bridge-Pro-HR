@@ -80,6 +80,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_uuid TEXT,
             name TEXT NOT NULL,
             first_name TEXT,
             middle_name TEXT,
@@ -138,6 +139,9 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             employment_status TEXT DEFAULT 'Active',
             employment_type TEXT DEFAULT 'Full-time',
             status TEXT DEFAULT 'active',
+            sync_status TEXT DEFAULT 'pending',
+            last_modified TEXT DEFAULT (datetime('now')),
+            server_id TEXT,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now')),
             FOREIGN KEY(branch_id) REFERENCES Branches(id)
@@ -147,7 +151,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
 
     // Safe Migration Logic: Add columns one by one if they don't exist
     let migrations = vec![
-        ("first_name", "TEXT"), ("middle_name", "TEXT"), ("last_name", "TEXT"), 
+        ("employee_uuid", "TEXT"), ("first_name", "TEXT"), ("middle_name", "TEXT"), ("last_name", "TEXT"), 
         ("employee_code", "TEXT"), ("department_id", "INTEGER"), ("designation_id", "INTEGER"), 
         ("biometric_id", "INTEGER"), ("pan_number", "TEXT"), ("citizenship_number", "TEXT"), 
         ("date_of_joining", "TEXT"), ("date_of_birth", "TEXT"), ("gender", "TEXT"), 
@@ -168,6 +172,8 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("enable_holiday", "INTEGER DEFAULT 1"), ("outdoor_management", "INTEGER DEFAULT 0"),
         ("workflow_role", "TEXT"), ("app_role", "TEXT"),
         ("deleted_at", "TEXT"),
+        ("sync_status", "TEXT DEFAULT 'pending'"), ("last_modified", "TEXT DEFAULT (datetime('now'))"),
+        ("server_id", "TEXT"),
         ("shift_start_time", "TEXT"), ("shift_end_time", "TEXT")
     ];
 
@@ -180,6 +186,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Devices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_uuid TEXT,
             name TEXT NOT NULL,
             brand TEXT NOT NULL,
             ip_address TEXT NOT NULL,
@@ -196,7 +203,10 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             dhcp INTEGER DEFAULT 0,
             server_mode TEXT,
             server_address TEXT,
-            https_enabled INTEGER DEFAULT 0
+            https_enabled INTEGER DEFAULT 0,
+            sync_status TEXT DEFAULT 'pending',
+            last_modified TEXT DEFAULT (datetime('now')),
+            server_id TEXT
         )",
         [],
     )?;
@@ -369,6 +379,10 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("server_mode", "TEXT"),
         ("server_address", "TEXT"),
         ("https_enabled", "INTEGER DEFAULT 0"),
+        ("device_uuid", "TEXT"),
+        ("sync_status", "TEXT DEFAULT 'pending'"),
+        ("last_modified", "TEXT DEFAULT (datetime('now'))"),
+        ("server_id", "TEXT"),
     ];
     for (col, col_type) in columns {
         let _ = conn.execute(
@@ -474,7 +488,15 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     );
     let _ = conn.execute(
+        "UPDATE Employees SET employee_uuid = LOWER(HEX(RANDOMBLOB(4)) || '-' || HEX(RANDOMBLOB(2)) || '-4' || SUBSTR(HEX(RANDOMBLOB(2)), 2) || '-' || SUBSTR('89AB', ABS(RANDOM()) % 4 + 1, 1) || SUBSTR(HEX(RANDOMBLOB(2)), 2) || '-' || HEX(RANDOMBLOB(6))) WHERE employee_uuid IS NULL OR employee_uuid = ''",
+        [],
+    );
+    let _ = conn.execute(
         "UPDATE Employees SET employment_status = UPPER(status) WHERE status IS NOT NULL",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE Employees SET sync_status = COALESCE(sync_status, 'pending'), last_modified = COALESCE(last_modified, datetime('now'))",
         [],
     );
 
@@ -490,6 +512,14 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN deleted_at TEXT", []);
     let _ = conn.execute(
         "UPDATE LeaveRequests SET status = LOWER(status) WHERE status IS NOT NULL",
+        [],
+    );
+    let _ = conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_employee_uuid ON Employees (employee_uuid)",
+        [],
+    );
+    let _ = conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_device_uuid ON Devices (device_uuid)",
         [],
     );
 

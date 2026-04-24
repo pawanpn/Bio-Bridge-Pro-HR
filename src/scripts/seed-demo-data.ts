@@ -149,7 +149,7 @@ export async function seedAllDemoData(): Promise<string> {
     results.push('\n📱 Seeding Devices...');
     for (const device of DEMO_DEVICES) {
       try {
-        await invoke('add_device', { device });
+        await invoke('register_new_device', { device });
         results.push(`  ✅ Device: ${device.name}`);
       } catch (e) {
         results.push(`  ⚠️ Device ${device.name} may already exist`);
@@ -160,7 +160,28 @@ export async function seedAllDemoData(): Promise<string> {
     results.push('\n👥 Seeding Employees...');
     for (const emp of DEMO_EMPLOYEES) {
       try {
-        await invoke('create_employee', emp);
+        const employeeUuid = crypto.randomUUID();
+        await invoke('register_new_staff', { request: {
+          employee_uuid: employeeUuid,
+          employee_code: `EMP-${employeeUuid.slice(0, 8).toUpperCase()}`,
+          first_name: emp.firstName,
+          last_name: emp.lastName,
+          personal_email: emp.email,
+          personal_phone: emp.phone,
+          branch_id: String(emp.branchId),
+          department_id: undefined,
+          designation_id: undefined,
+          employment_type: 'Full-time',
+          employment_status: 'Active',
+          enable_self_service: true,
+          enable_mobile_access: true,
+          enable_attendance: true,
+          enable_holiday: true,
+          mobile_punch: false,
+          app_role: 'employee',
+          sync_status: 'pending',
+          last_modified: new Date().toISOString(),
+        }});
         results.push(`  ✅ Employee: ${emp.firstName} ${emp.lastName}`);
       } catch (e) {
         results.push(`  ⚠️ Employee ${emp.firstName} may already exist`);
