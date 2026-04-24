@@ -681,9 +681,9 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     )?;
 
-    // Seed default system device for manual entries
+    // Seed default system device for manual entries (using 999 to avoid collision with physical devices)
     let _ = conn.execute(
-        "INSERT OR IGNORE INTO Devices (id, name, brand, ip_address, port, status) VALUES (1, 'System/Manual', 'Internal', '0.0.0.0', 0, 'online')",
+        "INSERT OR IGNORE INTO Devices (id, name, brand, ip_address, port, status) VALUES (999, 'System/Manual', 'Internal', '0.0.0.0', 0, 'online')",
         [],
     );
 

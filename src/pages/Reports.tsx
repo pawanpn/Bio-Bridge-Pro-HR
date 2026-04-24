@@ -194,10 +194,14 @@ export const Reports: React.FC = () => {
 
     doc.save(`BioBridge_${activeTab}_${new Date().getTime()}.pdf`);
   };
-
   const exportExcel = () => {
+    const cleanedDailyData = dailyData.map(d => ({
+      ...d,
+      all_punches: d.all_punches?.split(' | ').map(p => p.split('::')[0]).join(' | ')
+    }));
+
     const ws = XLSX.utils.json_to_sheet(
-        activeTab === 'daily' ? dailyData :
+        activeTab === 'daily' ? cleanedDailyData :
         activeTab === 'ledger' ? ledgerData.map(l => ({ Employee: l.name, ...l.attendance })) :
         activeTab === 'salary' ? salaryData : rawData
     );
@@ -445,15 +449,22 @@ const DailyTable = ({ data }: { data: DailyAttendance[] }) => (
             <TableCell className="font-mono text-xs">{d.date}</TableCell>
             <TableCell>
               <div className="flex flex-wrap gap-1.5">
-                {punchArray.map((p, pi) => (
-                  <div key={pi} className="flex flex-col">
-                    <Badge variant="outline" className="text-[10px] font-black py-0.5 px-2 border-primary/20 bg-primary/5 text-primary">
-                      {p}
-                    </Badge>
-                    {pi === 0 && <span className="text-[8px] text-center text-slate-400 font-bold uppercase">In</span>}
-                    {pi === punchArray.length - 1 && pi > 0 && <span className="text-[8px] text-center text-slate-400 font-bold uppercase">Out</span>}
-                  </div>
-                ))}
+                {punchArray.map((p_str, pi) => {
+                  const [p, method] = p_str.split('::');
+                  return (
+                    <div key={pi} className="flex flex-col">
+                      <Badge 
+                        variant="outline" 
+                        className="text-[10px] font-black py-0.5 px-2 border-primary/20 bg-primary/5 text-primary cursor-help"
+                        title={`Source: ${method || 'Device'}`}
+                      >
+                        {p}
+                      </Badge>
+                      {pi === 0 && <span className="text-[8px] text-center text-slate-400 font-bold uppercase">In</span>}
+                      {pi === punchArray.length - 1 && pi > 0 && <span className="text-[8px] text-center text-slate-400 font-bold uppercase">Out</span>}
+                    </div>
+                  );
+                })}
               </div>
             </TableCell>
             <TableCell>

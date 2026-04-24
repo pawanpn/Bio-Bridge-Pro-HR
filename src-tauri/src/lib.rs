@@ -63,6 +63,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // From commands.rs (Hardware & General)
             commands::list_all_devices,
+            commands::set_local_sync_target,
+            commands::get_local_sync_target,
             commands::test_device_connection,
             commands::add_device,
             commands::update_device,

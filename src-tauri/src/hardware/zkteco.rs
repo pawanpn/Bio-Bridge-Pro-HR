@@ -302,7 +302,7 @@ impl DeviceDriver for ZKTecoDriver {
                                 let _ = app_handle.emit("realtime-punch", serde_json::json!({
                                     "device_id": device_id,
                                     "employee_id": emp_id,
-                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    "timestamp": chrono::Local::now().to_rfc3339(),
                                     "punch_method": "Realtime"
                                 }));
                             }
