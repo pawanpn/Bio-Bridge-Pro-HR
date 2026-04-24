@@ -113,6 +113,8 @@ pub fn run() {
             crud::get_monthly_ledger,
             crud::get_salary_sheet,
             crud::get_raw_logs,
+            crud::get_attendance_summary,
+            crud::get_attendance_range_summary,
             crud::export_usb_db,
             crud::create_invoice,
             crud::list_invoices,

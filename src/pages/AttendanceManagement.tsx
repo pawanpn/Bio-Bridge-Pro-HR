@@ -33,6 +33,7 @@ interface AttendanceLog {
   timestamp: string;
   punch_method: string;
   is_synced: boolean;
+  name?: string;
 }
 
 interface Employee {
@@ -70,6 +71,7 @@ interface Device {
 }
 
 type TabType = 'daily' | 'manual' | 'import' | 'history';
+type DailyViewMode = 'logs' | 'summary';
 
 // ── Main Component ──────────────────────────────────────────────────────────
 
@@ -97,6 +99,18 @@ export const AttendanceManagement: React.FC = () => {
   const [syncGate, setSyncGate] = useState<string>("1");
   const [gates, setGates] = useState<any[]>([]);
   const [allHistoryLogs, setAllHistoryLogs] = useState<AttendanceLog[]>([]);
+  const [historySearch, setHistorySearch] = useState('');
+
+  // Summary / Absent-Present-Late view
+  const [dailyViewMode, setDailyViewMode] = useState<DailyViewMode>('logs');
+  const [attendanceSummary, setAttendanceSummary] = useState<any>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+
+  // Employee + date range filter for logs
+  const [empFilter, setEmpFilter] = useState<string>('');
+  const [dateFrom, setDateFrom] = useState(new Date().toISOString().split('T')[0]);
+  const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
+  const [rangeMode, setRangeMode] = useState(false);
 
   // Manual entry
   const [manualForm, setManualForm] = useState({
@@ -119,7 +133,7 @@ export const AttendanceManagement: React.FC = () => {
         invoke<any[]>('list_branches'),
         invoke<any>('list_employees'),
         invoke<any[]>('list_all_devices', { branchId: selectedBranch }),
-        invoke<any[]>('list_gates'),
+        invoke<any[]>('list_gates', { branchId: selectedBranch }),
         invoke<number | null>('get_local_sync_target'),
       ]);
       setBranches(branchData);
@@ -155,12 +169,62 @@ export const AttendanceManagement: React.FC = () => {
   }, [loadData]);
 
   // Load daily logs when date or branch changes
-  // Load logs when tab, date, or branch changes
   useEffect(() => {
     loadDailyLogs();
   }, [activeTab, selectedDate, selectedBranch]);
 
+  // Auto-reload summary when date or branch changes
+  useEffect(() => {
+    if (dailyViewMode === 'summary') {
+      loadSummary();
+    }
+  }, [selectedDate, selectedBranch, dailyViewMode]);
+
+  const loadSummary = async () => {
+    setSummaryLoading(true);
+    try {
+      if (rangeMode) {
+        const result = await invoke<any>('get_attendance_range_summary', {
+          fromDate: dateFrom,
+          toDate: dateTo,
+          branchId: selectedBranch,
+          employeeId: empFilter ? Number(empFilter) : null,
+          lateThreshold: null,
+        });
+        setAttendanceSummary({ ...result, isRange: true });
+      } else {
+        const result = await invoke<any>('get_attendance_summary', {
+          date: selectedDate,
+          branchId: selectedBranch,
+          lateThreshold: null,
+        });
+        setAttendanceSummary({ ...result, isRange: false });
+      }
+    } catch (err) {
+      console.error('Summary load failed:', err);
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
   const loadDailyLogs = async () => {
+    const loadHistory = async () => {
+      try {
+        const historyRes = await invoke<any>('get_attendance_logs', {
+          employeeId: null,
+          startDate: null,
+          endDate: null
+        });
+        const logs = historyRes.data || [];
+        const filtered = selectedBranch 
+          ? logs.filter((l: any) => l.branch_id === selectedBranch)
+          : logs;
+        setAllHistoryLogs(filtered);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+
     setLoading(true);
     try {
       const logs = await invoke<any[]>('get_daily_reports', {
@@ -172,14 +236,8 @@ export const AttendanceManagement: React.FC = () => {
       });
       setDailyLogs(logs || []);
       
-      // Also load full history if on history tab
       if (activeTab === 'history') {
-        const historyRes = await invoke<any>('get_attendance_logs', {
-          employeeId: null,
-          startDate: null,
-          endDate: null
-        });
-        setAllHistoryLogs(historyRes.data || []);
+        await loadHistory();
       }
     } catch (error) {
       console.error('Failed to load daily logs:', error);
@@ -188,7 +246,13 @@ export const AttendanceManagement: React.FC = () => {
     }
   };
 
-  // Device sync function
+  const filteredHistory = allHistoryLogs.filter(log => {
+    const name = (log as any).name || log.employee_name || "";
+    const id = log.employee_id?.toString() || "";
+    const search = historySearch.toLowerCase();
+    return name.toLowerCase().includes(search) || id.includes(search);
+  });
+
   const handleSyncFromDevice = async (device: Device) => {
     setSyncing(true);
     setSyncedLogs([]);
@@ -211,7 +275,6 @@ export const AttendanceManagement: React.FC = () => {
         setSyncStatus(`ℹ️ No new logs found on ${device.name}.`);
       }
       loadDailyLogs();
-      // Notify other components (like EmployeeManagement) that new data is available
       window.dispatchEvent(new CustomEvent('data-synced', { detail: { table: 'employees' } }));
     } catch (error) {
       console.error('Sync failed:', error);
@@ -222,22 +285,6 @@ export const AttendanceManagement: React.FC = () => {
     }
   };
 
-  const handleTestDeviceConnection = async (device: Device) => {
-    try {
-      await invoke('test_device_connection', {
-        ip: device.ip,
-        port: device.port,
-        commKey: device.comm_key,
-        machineNumber: device.machine_number,
-        brand: device.brand
-      });
-      alert(`✅ ${device.name} is online and reachable!`);
-    } catch (error) {
-      alert(`❌ Connection failed: ${error}`);
-    }
-  };
-
-  // Manual attendance entry
   const handleManualEntry = async () => {
     if (!manualForm.employeeId || !manualForm.date || !manualForm.time) {
       setManualStatus('❌ Please fill all fields');
@@ -264,7 +311,6 @@ export const AttendanceManagement: React.FC = () => {
     }
   };
 
-  // CSV Import
   const handleCsvFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -297,7 +343,6 @@ export const AttendanceManagement: React.FC = () => {
     }
   };
 
-  // Stats calculation
   const todayStats = {
     totalPunches: dailyLogs.length,
     uniqueEmployees: new Set(dailyLogs.map(l => (l as any).id)).size,
@@ -307,7 +352,6 @@ export const AttendanceManagement: React.FC = () => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6">
-      {/* Header & Sync Status indicator */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Attendance Management</h1>
@@ -333,57 +377,57 @@ export const AttendanceManagement: React.FC = () => {
         </div>
       </div>
 
-      {/* Device Connection Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {devices.length === 0 ? (
-          <Card className="md:col-span-3 border-dashed bg-muted/20">
-            <CardContent className="h-20 flex items-center justify-center text-sm text-muted-foreground italic">
-              No attendance devices are currently configured.
-            </CardContent>
-          </Card>
-        ) : (
-          devices.map(device => (
-            <Card key={device.id} className="shadow-sm border-muted/60">
-              <CardContent className="p-4 py-3">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${device.status === 'Online' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-red-500'}`} />
-                    <span className="font-bold text-sm tracking-tight">{device.name}</span>
-                  </div>
-                  <Badge variant="outline" className="text-[9px] uppercase tracking-wider font-bold">
-                    {device.brand}
-                  </Badge>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-muted-foreground font-mono bg-muted/50 px-1.5 py-0.5 rounded">
-                    {device.ip}:{device.port}
-                  </span>
-                  <div className="flex gap-2">
-                    <Button 
-                      size="sm" 
-                      variant={localDefaultId === device.id ? "default" : "outline"}
-                      className={`h-7 px-3 text-[10px] font-bold ${localDefaultId === device.id ? 'bg-primary' : 'text-slate-400'}`}
-                      onClick={() => handleSetLocalDefault(device.id)}
-                    >
-                      {localDefaultId === device.id ? <CheckCircle className="w-3 h-3 mr-1" /> : <Database className="w-3 h-3 mr-1" />}
-                      {localDefaultId === device.id ? 'ACTIVE' : 'SET SYNC'}
-                    </Button>
-                    <Button 
-                      size="sm" 
-                      className="h-7 px-4 text-xs font-bold" 
-                      onClick={() => handleSyncFromDevice(device)}
-                      disabled={syncing}
-                    >
-                      {syncing ? '...' : 'PULL LOGS'}
-                    </Button>
-                  </div>
-                </div>
+      {selectedBranch && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {devices.length === 0 ? (
+            <Card className="md:col-span-3 border-dashed bg-muted/20">
+              <CardContent className="h-20 flex items-center justify-center text-sm text-muted-foreground italic">
+                No attendance devices found for this branch.
               </CardContent>
             </Card>
-          ))
-        )}
-      </div>
-      {/* Consolidated Filters & Sync Parameters */}
+          ) : (
+            devices.map(device => (
+              <Card key={device.id} className="shadow-sm border-muted/60">
+                <CardContent className="p-4 py-3">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2 h-2 rounded-full ${device.status === 'Online' ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-red-500'}`} />
+                      <span className="font-bold text-sm tracking-tight">{device.name}</span>
+                    </div>
+                    <Badge variant="outline" className="text-[9px] uppercase tracking-wider font-bold">
+                      {device.brand}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-muted-foreground font-mono bg-muted/50 px-1.5 py-0.5 rounded">
+                      {device.ip}:{device.port}
+                    </span>
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm" 
+                        variant={localDefaultId === device.id ? "default" : "outline"}
+                        className={`h-7 px-3 text-[10px] font-bold ${localDefaultId === device.id ? 'bg-primary' : 'text-slate-400'}`}
+                        onClick={() => handleSetLocalDefault(device.id)}
+                      >
+                        {localDefaultId === device.id ? <CheckCircle className="w-3 h-3 mr-1" /> : <Database className="w-3 h-3 mr-1" />}
+                        {localDefaultId === device.id ? 'ACTIVE' : 'SET SYNC'}
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        className="h-7 px-4 text-xs font-bold" 
+                        onClick={() => handleSyncFromDevice(device)}
+                        disabled={syncing}
+                      >
+                        {syncing ? '...' : 'PULL LOGS'}
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          ))}
+        </div>
+      )}
       <Card className="border-none shadow-sm bg-slate-50 dark:bg-black/20 my-6">
         <CardContent className="p-4">
           <div className="flex flex-wrap items-end gap-4">
@@ -414,6 +458,18 @@ export const AttendanceManagement: React.FC = () => {
               </select>
             </div>
 
+            <div className="flex-1 min-w-[180px] space-y-1.5">
+              <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Sync Device</Label>
+              <select
+                value={localDefaultId || ''}
+                onChange={(e) => setLocalDefaultId(e.target.value ? Number(e.target.value) : null)}
+                className="w-full h-11 px-4 rounded-xl border border-slate-200 bg-white dark:bg-slate-950 dark:border-slate-800 text-sm font-medium focus:ring-2 focus:ring-primary/20 transition-all"
+              >
+                <option value="">Select Device</option>
+                {devices.map(d => <option key={d.id} value={d.id}>{d.name} ({d.ip})</option>)}
+              </select>
+            </div>
+
             <div className="min-w-[150px] space-y-1.5">
               <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Date</Label>
               <Input
@@ -435,22 +491,22 @@ export const AttendanceManagement: React.FC = () => {
               </Button>
               
               <Button 
-                className="h-11 px-8 rounded-xl bg-blue-900 border-none hover:bg-blue-800 text-white font-bold shadow-lg shadow-blue-900/20"
+                className={`h-11 px-8 rounded-xl border-none font-bold shadow-lg transition-all ${localDefaultId ? 'bg-blue-900 hover:bg-blue-800 text-white shadow-blue-900/20' : 'bg-slate-200 text-slate-500 cursor-not-allowed'}`}
                 onClick={() => {
                    const target = devices.find(d => d.id === localDefaultId);
                    if (target) handleSyncFromDevice(target);
-                   else alert("Please select an 'ACTIVE' sync target device for this PC first.");
+                   else alert("Please select a Sync Device first.");
                 }}
+                disabled={!localDefaultId || syncing}
               >
                 <Fingerprint className="w-4 h-4 mr-2" />
-                Sync Default
+                {syncing ? 'Syncing...' : 'Sync Selected'}
               </Button>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card>
           <CardContent className="p-4 flex items-center justify-between">
@@ -490,7 +546,6 @@ export const AttendanceManagement: React.FC = () => {
         </Card>
       </div>
 
-      {/* Tab Navigation */}
       <div className="flex gap-2 mb-6 border-b border-border">
         <TabButton
           icon={<Calendar className="w-4 h-4" />}
@@ -522,143 +577,373 @@ export const AttendanceManagement: React.FC = () => {
         />
       </div>
 
-      {/* Daily Attendance Tab */}
       {activeTab === 'daily' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Attendance Logs - {selectedDate}</span>
-              <Badge variant="secondary">
-                {dailyLogs.length} records
-              </Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-slate-50/50">
-                  <TableHead className="cursor-pointer hover:text-primary transition-colors" onClick={() => setSortConfig({key: 'name', direction: sortConfig?.key === 'name' && sortConfig.direction === 'asc' ? 'desc' : 'asc'})}>
-                    Member Name {sortConfig?.key === 'name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                  </TableHead>
-                  <TableHead className="cursor-pointer hover:text-primary transition-colors" onClick={() => setSortConfig({key: 'branch_name', direction: sortConfig?.key === 'branch_name' && sortConfig.direction === 'asc' ? 'desc' : 'asc'})}>
-                    Branch {sortConfig?.key === 'branch_name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
-                  </TableHead>
-                  <TableHead>Timestamps (In/Out History)</TableHead>
-                  <TableHead>Method</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-12">
-                       <RefreshCw className="h-8 w-8 animate-spin mx-auto text-primary opacity-20" />
-                    </TableCell>
-                  </TableRow>
-                ) : dailyLogs.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-12 text-muted-foreground italic">
-                      No attendance records found for this date.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  [...dailyLogs]
-                    .sort((a: any, b: any) => {
-                      if (!sortConfig) return 0;
-                      const aVal = a[sortConfig.key] || '';
-                      const bVal = b[sortConfig.key] || '';
-                      return sortConfig.direction === 'asc' 
-                        ? aVal.toString().localeCompare(bVal.toString())
-                        : bVal.toString().localeCompare(aVal.toString());
-                    })
-                    .map((log: any) => (
-                    <TableRow key={log.id} className="hover:bg-slate-50 transition-colors">
-                      <TableCell className="font-bold text-slate-700">
-                         {log.name || 'Unknown'} 
-                         <span className="ml-2 px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-[10px] font-mono">#{log.employee_code || log.id}</span>
-                      </TableCell>
-                      <TableCell className="text-slate-500 text-sm">
-                        {log.branch_name || '—'}
-                      </TableCell>
-                      <TableCell>
-                         <div className="flex flex-wrap gap-1">
-                            {log.all_punches?.split(' | ').map((p_str: string, i: number) => {
-                              const [p, method] = p_str.split('::');
-                              return (
-                                 <Badge 
-                                    key={i} 
-                                    variant="secondary" 
-                                    className="bg-blue-50 text-blue-700 border-blue-100 font-mono text-[10px] cursor-help"
-                                    title={`Source: ${method || 'Device'}`}
-                                 >
-                                    {p}
-                                 </Badge>
-                              );
-                            })}
-                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="capitalize text-[10px]">{log.punch_method || 'Device'}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="default" className="bg-green-50 text-green-700 border-green-100 text-[10px]">
-                           ✓ Saved Log
-                        </Badge>
-                      </TableCell>
+        <div className="space-y-4">
+          {/* View Mode Toggle + Employee/Date Range Filter */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex gap-1 p-1 bg-slate-100 rounded-xl">
+              <button
+                onClick={() => setDailyViewMode('logs')}
+                className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                  dailyViewMode === 'logs' ? 'bg-white shadow text-primary' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >📋 Logs View</button>
+              <button
+                onClick={() => { setDailyViewMode('summary'); loadSummary(); }}
+                className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                  dailyViewMode === 'summary' ? 'bg-white shadow text-primary' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >📊 Present / Absent / Late</button>
+            </div>
+
+            {/* Employee + Date Range filter (Common) */}
+            <div className="flex flex-wrap items-end gap-2">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Filter Employee</label>
+                <select
+                  value={empFilter}
+                  onChange={e => setEmpFilter(e.target.value)}
+                  className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">All Employees</option>
+                  {employees.map((e: any) => (
+                    <option key={e.id} value={e.id}>{e.name || e.full_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-1">
+                <input type="checkbox" id="range-toggle" checked={rangeMode}
+                  onChange={e => setRangeMode(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-blue-600"
+                />
+                <label htmlFor="range-toggle" className="text-[10px] font-bold text-slate-500 uppercase">Date Range</label>
+              </div>
+              {rangeMode && (
+                <>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">From</label>
+                    <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+                      className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">To</label>
+                    <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+                      className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white font-mono"
+                    />
+                  </div>
+                  <Button size="sm" className="h-9 text-xs" onClick={() => {
+                    if (dailyViewMode === 'logs') {
+                      invoke<any[]>('get_daily_reports', {
+                        fromDate: dateFrom, toDate: dateTo, dept: 'All', search: '',
+                        branchId: selectedBranch, employeeId: empFilter ? Number(empFilter) : null, gateId: null
+                      }).then(logs => setDailyLogs(logs || [])).catch(console.error);
+                    } else {
+                      // We'll update the summary for range if we can, 
+                      // for now it will use the range to maybe show multiple days?
+                      // Actually, let's keep it daily for summary but consistent UI.
+                      loadSummary();
+                    }
+                  }}>Apply</Button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* ── SUMMARY VIEW ── */}
+          {dailyViewMode === 'summary' && (
+            <div className="space-y-4">
+              {summaryLoading ? (
+                <div className="flex items-center justify-center h-40">
+                  <RefreshCw className="h-8 w-8 animate-spin text-primary opacity-30" />
+                </div>
+              ) : attendanceSummary ? (
+                <>
+                  {/* Summary KPI Row */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center">
+                      <p className="text-3xl font-black text-green-600">
+                        {attendanceSummary.isRange 
+                          ? attendanceSummary.summary.filter((s: any) => s.days_present > 0).length
+                          : attendanceSummary.present.filter((e: any) => !empFilter || String(e.id) === empFilter).length}
+                      </p>
+                      <p className="text-xs font-bold text-green-500 mt-1">✓ {attendanceSummary.isRange ? 'Ever Present' : 'On Time'}</p>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-center">
+                      <p className="text-3xl font-black text-amber-600">
+                        {attendanceSummary.isRange
+                          ? attendanceSummary.summary.reduce((acc: number, s: any) => acc + s.days_late, 0)
+                          : attendanceSummary.late.filter((e: any) => !empFilter || String(e.id) === empFilter).length}
+                      </p>
+                      <p className="text-xs font-bold text-amber-500 mt-1">⏰ {attendanceSummary.isRange ? 'Total Late Days' : 'Late'}</p>
+                    </div>
+                    <div className="bg-red-50 border border-red-100 rounded-xl p-4 text-center">
+                      <p className="text-3xl font-black text-red-600">
+                        {attendanceSummary.isRange
+                          ? attendanceSummary.summary.filter((s: any) => s.days_present === 0).length
+                          : attendanceSummary.absent.filter((e: any) => !empFilter || String(e.id) === empFilter).length}
+                      </p>
+                      <p className="text-xs font-bold text-red-500 mt-1">✗ {attendanceSummary.isRange ? 'Always Absent' : 'Absent'}</p>
+                    </div>
+                  </div>
+
+                  {/* Range vs Daily Lists */}
+                  {attendanceSummary.isRange ? (
+                    <Card>
+                      <CardHeader className="pb-2 pt-3 px-4">
+                        <CardTitle className="text-sm">Range Summary ({attendanceSummary.from} to {attendanceSummary.to})</CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-0">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-slate-50/50">
+                              <TableHead>Employee</TableHead>
+                              <TableHead>Days Present</TableHead>
+                              <TableHead>Days Late</TableHead>
+                              <TableHead>Shift Start</TableHead>
+                              <TableHead>Status</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {attendanceSummary.summary.map((s: any) => (
+                              <TableRow key={s.id}>
+                                <TableCell className="font-bold">{s.name}</TableCell>
+                                <TableCell>{s.days_present}</TableCell>
+                                <TableCell className={s.days_late > 0 ? 'text-amber-600 font-bold' : ''}>{s.days_late}</TableCell>
+                                <TableCell className="text-xs text-slate-500 font-mono">{s.shift_start}</TableCell>
+                                <TableCell>
+                                  {s.days_present > 0 ? (
+                                    <Badge className="bg-green-50 text-green-700">Present</Badge>
+                                  ) : (
+                                    <Badge variant="destructive">Absent Entire Range</Badge>
+                                  )}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* Present */}
+                      <Card className="border-green-100">
+                        <CardHeader className="pb-2 pt-3 px-4">
+                          <CardTitle className="text-sm text-green-700 flex items-center gap-2">
+                            <CheckCircle className="w-4 h-4" /> On Time ({attendanceSummary.present.filter((e: any) => !empFilter || String(e.id) === empFilter).length})
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-0 max-h-72 overflow-y-auto">
+                          {attendanceSummary.present
+                            .filter((e: any) => !empFilter || String(e.id) === empFilter)
+                            .map((emp: any) => (
+                            <div key={emp.id} className="flex items-center justify-between px-4 py-2 border-b border-green-50 hover:bg-green-50/50">
+                              <div>
+                                <p className="text-sm font-semibold text-slate-700">{emp.name}</p>
+                                <p className="text-[10px] text-slate-400">{emp.department || '—'}</p>
+                              </div>
+                              <div className="text-right">
+                                <Badge className="bg-green-100 text-green-700 border-0 text-[10px] font-mono">{emp.first_punch}</Badge>
+                                <p className="text-[9px] text-slate-400 mt-0.5">Shift: {emp.shift_start}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </CardContent>
+                      </Card>
+
+                      {/* Late */}
+                      <Card className="border-amber-100">
+                        <CardHeader className="pb-2 pt-3 px-4">
+                          <CardTitle className="text-sm text-amber-700 flex items-center gap-2">
+                            <Clock className="w-4 h-4" /> Late ({attendanceSummary.late.filter((e: any) => !empFilter || String(e.id) === empFilter).length})
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-0 max-h-72 overflow-y-auto">
+                          {attendanceSummary.late
+                            .filter((e: any) => !empFilter || String(e.id) === empFilter)
+                            .map((emp: any) => (
+                            <div key={emp.id} className="flex items-center justify-between px-4 py-2 border-b border-amber-50 hover:bg-amber-50/50">
+                              <div>
+                                <p className="text-sm font-semibold text-slate-700">{emp.name}</p>
+                                <p className="text-[10px] text-slate-400">{emp.department || '—'}</p>
+                              </div>
+                              <div className="text-right">
+                                <Badge className="bg-amber-100 text-amber-700 border-0 text-[10px] font-mono">{emp.first_punch}</Badge>
+                                <p className="text-[9px] text-slate-400 mt-0.5 font-bold">Shift: {emp.shift_start}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </CardContent>
+                      </Card>
+
+                      {/* Absent */}
+                      <Card className="border-red-100">
+                        <CardHeader className="pb-2 pt-3 px-4">
+                          <CardTitle className="text-sm text-red-700 flex items-center gap-2">
+                            <AlertCircle className="w-4 h-4" /> Absent ({attendanceSummary.absent.filter((e: any) => !empFilter || String(e.id) === empFilter).length})
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="p-0 max-h-72 overflow-y-auto">
+                          {attendanceSummary.absent
+                            .filter((e: any) => !empFilter || String(e.id) === empFilter)
+                            .map((emp: any) => (
+                            <div key={emp.id} className="flex items-center justify-between px-4 py-2 border-b border-red-50 hover:bg-red-50/50">
+                              <div>
+                                <p className="text-sm font-semibold text-slate-700">{emp.name}</p>
+                                <p className="text-[10px] text-slate-400">{emp.department || '—'}</p>
+                              </div>
+                              <Badge className="bg-red-100 text-red-700 border-0 text-[10px]">—</Badge>
+                            </div>
+                          ))}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="text-center py-12 text-muted-foreground italic">Select a date and click "Present / Absent / Late" to load summary.</div>
+              )}
+            </div>
+          )}
+
+          {/* ── LOGS VIEW ── */}
+          {dailyViewMode === 'logs' && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span>Attendance Logs — {rangeMode ? `${dateFrom} → ${dateTo}` : selectedDate}</span>
+                  <Badge variant="secondary">{dailyLogs.length} records</Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50/50">
+                      <TableHead className="cursor-pointer hover:text-primary transition-colors" onClick={() => setSortConfig({key: 'name', direction: sortConfig?.key === 'name' && sortConfig.direction === 'asc' ? 'desc' : 'asc'})}>
+                        Member Name {sortConfig?.key === 'name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                      </TableHead>
+                      <TableHead className="cursor-pointer hover:text-primary transition-colors" onClick={() => setSortConfig({key: 'branch_name', direction: sortConfig?.key === 'branch_name' && sortConfig.direction === 'asc' ? 'desc' : 'asc'})}>
+                        Branch {sortConfig?.key === 'branch_name' && (sortConfig.direction === 'asc' ? '↑' : '↓')}
+                      </TableHead>
+                      <TableHead>Timestamps (In/Out History)</TableHead>
+                      <TableHead>Method</TableHead>
+                      <TableHead>Status</TableHead>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                  </TableHeader>
+                  <TableBody>
+                    {loading ? (
+                      <TableRow><TableCell colSpan={5} className="text-center py-12">
+                        <RefreshCw className="h-8 w-8 animate-spin mx-auto text-primary opacity-20" />
+                      </TableCell></TableRow>
+                    ) : dailyLogs.length === 0 ? (
+                      <TableRow><TableCell colSpan={5} className="text-center py-12 text-muted-foreground italic">
+                        No attendance records found for this date.
+                      </TableCell></TableRow>
+                    ) : (
+                      [...dailyLogs]
+                        .filter((log: any) => !empFilter || String(log.id) === empFilter)
+                        .sort((a: any, b: any) => {
+                          if (!sortConfig) return 0;
+                          const aVal = a[sortConfig.key] || '';
+                          const bVal = b[sortConfig.key] || '';
+                          return sortConfig.direction === 'asc'
+                            ? aVal.toString().localeCompare(bVal.toString())
+                            : bVal.toString().localeCompare(aVal.toString());
+                        })
+                        .map((log: any) => (
+                          <TableRow key={log.id} className="hover:bg-slate-50 transition-colors">
+                            <TableCell className="font-bold text-slate-700">
+                              {log.name || 'Unknown'}
+                              <span className="ml-2 px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-[10px] font-mono">#{log.employee_code || log.id}</span>
+                            </TableCell>
+                            <TableCell className="text-slate-500 text-sm">{log.branch_name || '—'}</TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1">
+                                {log.all_punches?.split(' | ').map((p_str: string, i: number) => {
+                                  const [p, method] = p_str.split('::');
+                                  return (
+                                    <Badge key={i} variant="secondary"
+                                      className="bg-blue-50 text-blue-700 border-blue-100 font-mono text-[10px] cursor-help"
+                                      title={`Source: ${method || 'Device'}`}>{p}</Badge>
+                                  );
+                                })}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="capitalize text-[10px]">{log.punch_method || 'Device'}</Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="default" className="bg-green-50 text-green-700 border-green-100 text-[10px]">✓ Saved Log</Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                    )}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
 
-      {/* History Tab */}
       {activeTab === 'history' && (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Full Attendance History (Last 1000 logs)</span>
-              <Badge variant="outline">{allHistoryLogs.length} total logs</Badge>
-            </CardTitle>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-bold">Full Attendance History (Last 1000 logs)</h3>
+              <div className="flex items-center gap-3">
+                 <div className="relative">
+                    <Input 
+                      placeholder="Search employee..." 
+                      value={historySearch}
+                      onChange={(e) => setHistorySearch(e.target.value)}
+                      className="h-9 w-64 pl-8 text-xs rounded-lg border-slate-200 focus:ring-primary/20"
+                    />
+                    <div className="absolute left-2.5 top-2.5 text-slate-400">
+                       <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                    </div>
+                 </div>
+                 <Badge variant="secondary" className="text-[10px] py-0.5">{filteredHistory.length} total logs</Badge>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="max-h-[600px] overflow-auto">
-              <Table>
-                <TableHeader className="bg-muted/50 sticky top-0 z-10 shadow-sm">
-                  <TableRow>
-                    <TableHead>Employee</TableHead>
-                    <TableHead>ID</TableHead>
-                    <TableHead>Timestamp</TableHead>
-                    <TableHead>Method</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {allHistoryLogs.length === 0 ? (
+            <div className="border rounded-xl overflow-hidden bg-white">
+              <div className="max-h-[500px] overflow-y-auto custom-scrollbar">
+                <Table>
+                  <TableHeader className="bg-slate-50 sticky top-0 z-10">
                     <TableRow>
-                      <TableCell colSpan={5} className="h-40 text-center text-muted-foreground italic">
-                        No historical logs found. Pull data from your biometric device to see records.
-                      </TableCell>
+                      <TableHead className="text-[10px] font-bold uppercase">Employee</TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase">ID</TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase">Timestamp</TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase">Method</TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase">Status</TableHead>
                     </TableRow>
-                  ) : (
-                    allHistoryLogs.map((log) => (
-                      <TableRow key={log.id} className="hover:bg-muted/30">
-                        <TableCell className="font-semibold">{log.employee_name || 'Unknown'}</TableCell>
-                        <TableCell className="text-xs font-mono text-muted-foreground">#{log.employee_id}</TableCell>
-                        <TableCell className="text-xs">{log.timestamp}</TableCell>
-                        <TableCell><Badge variant="secondary" className="text-[10px] font-normal">{log.punch_method}</Badge></TableCell>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredHistory.map((log, i) => (
+                      <TableRow key={i} className="hover:bg-slate-50/50 transition-colors">
+                        <TableCell className="py-3 font-bold text-slate-700">{(log as any).employee_name || (log as any).name}</TableCell>
+                        <TableCell className="text-muted-foreground text-xs">#{log.employee_id}</TableCell>
+                        <TableCell className="font-mono text-xs">{log.timestamp}</TableCell>
+                        <TableCell><Badge variant="outline" className="text-[9px] uppercase">{log.punch_method}</Badge></TableCell>
                         <TableCell>
-                          <Badge variant={log.is_synced ? 'default' : 'outline'} className="text-[10px]">
+                          <Badge variant={log.is_synced ? 'default' : 'outline'} className="bg-slate-50 text-slate-700 border-slate-200 text-[9px] font-bold">
                             {log.is_synced ? 'Cloud Synced' : 'Local Only'}
                           </Badge>
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                    ))}
+                    {filteredHistory.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="h-32 text-center text-muted-foreground italic">
+                          No logs found matching your search.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </CardContent>
         </Card>

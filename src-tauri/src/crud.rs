@@ -1443,7 +1443,7 @@ pub async fn get_attendance_logs(
 
     let mut query = String::from(
         "SELECT al.id, al.employee_id, e.name,
-                al.timestamp, al.log_type, al.punch_method, al.is_synced
+                al.timestamp, al.log_type, al.punch_method, al.is_synced, e.branch_id
         FROM AttendanceLogs al
         LEFT JOIN Employees e ON al.employee_id = e.id
         WHERE 1=1",
@@ -1475,6 +1475,7 @@ pub async fn get_attendance_logs(
                 "log_type": row.get::<_, Option<String>>(4)?,
                 "punch_method": row.get::<_, Option<String>>(5)?,
                 "is_synced": row.get::<_, bool>(6).unwrap_or(false),
+                "branch_id": row.get::<_, Option<i64>>(7)?,
             }))
         })
         .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
@@ -2529,9 +2530,11 @@ pub async fn get_dashboard_stats(
         |r| r.get(0),
     )?;
 
-    // Count distinct employees who have logged today
+    // Count distinct employees who have logged today using local time conversion logic
     let present_today: i64 = conn.query_row(
-        "SELECT COUNT(DISTINCT employee_id) FROM AttendanceLogs WHERE date(timestamp) = date('now')",
+        "SELECT COUNT(DISTINCT employee_id) FROM AttendanceLogs 
+         WHERE (CASE WHEN punch_method = 'Manual' OR device_id = 999 THEN date(timestamp)
+                     ELSE date(timestamp, 'localtime') END) = date('now', 'localtime')",
         [],
         |r| r.get(0)
     ).unwrap_or_else(|_| 0);
@@ -2544,11 +2547,14 @@ pub async fn get_dashboard_stats(
 
     // Get present staff list for the side panel
     let mut stmt = conn.prepare(
-        "SELECT DISTINCT e.id, e.first_name || ' ' || e.last_name, strftime('%H:%M', al.timestamp)
+        "SELECT DISTINCT e.id, e.first_name || ' ' || e.last_name, 
+                CASE WHEN al.punch_method = 'Manual' OR al.device_id = 999 THEN strftime('%H:%M', al.timestamp)
+                     ELSE strftime('%H:%M', al.timestamp, 'localtime') END as punch_time
          FROM AttendanceLogs al
          JOIN Employees e ON al.employee_id = e.id
-         WHERE date(al.timestamp) = date('now')
-         ORDER BY al.timestamp DESC"
+         WHERE (CASE WHEN al.punch_method = 'Manual' OR al.device_id = 999 THEN date(al.timestamp)
+                     ELSE date(al.timestamp, 'localtime') END) = date('now', 'localtime')
+         ORDER BY punch_time DESC"
     ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let present_staff: Vec<serde_json::Value> = stmt
@@ -2568,7 +2574,11 @@ pub async fn get_dashboard_stats(
         "SELECT id, first_name || ' ' || last_name 
          FROM Employees 
          WHERE status != 'deleted' 
-         AND id NOT IN (SELECT DISTINCT employee_id FROM AttendanceLogs WHERE date(timestamp) = date('now'))"
+         AND id NOT IN (
+             SELECT DISTINCT employee_id FROM AttendanceLogs 
+             WHERE (CASE WHEN punch_method = 'Manual' OR device_id = 999 THEN date(timestamp)
+                         ELSE date(timestamp, 'localtime') END) = date('now', 'localtime')
+         )"
     ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let absent_staff: Vec<serde_json::Value> = stmt
@@ -2819,6 +2829,227 @@ pub async fn delete_designation(id: i64, state: tauri::State<'_, AppState>) -> R
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     Ok(())
 }
+
+/// GET ATTENDANCE SUMMARY — Present / Absent / Late breakdown for a given date
+#[tauri::command]
+pub async fn get_attendance_summary(
+    date: String,
+    branch_id: Option<i64>,
+    late_threshold: Option<String>, // default "09:15"
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    // 0. Get global default threshold from SystemConfigs
+    let global_threshold: String = conn.query_row(
+        "SELECT value FROM SystemConfigs WHERE key = 'office_start_time'",
+        [],
+        |row| row.get(0)
+    ).unwrap_or_else(|_| "09:15".to_string());
+
+    let threshold = late_threshold.unwrap_or(global_threshold);
+
+    // 1. All active employees for the given branch
+    let mut emp_query = "SELECT e.id, e.name, e.department, b.name as branch_name, e.shift_start_time 
+                         FROM Employees e 
+                         LEFT JOIN Branches b ON e.branch_id = b.id
+                         WHERE (e.status IS NULL OR e.status != 'deleted')".to_string();
+    let mut emp_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
+    if let Some(bid) = branch_id {
+        emp_query.push_str(" AND e.branch_id = ?");
+        emp_params.push(Box::new(bid));
+    }
+    emp_query.push_str(" ORDER BY e.name");
+
+    let mut stmt = conn.prepare(&emp_query).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let param_refs: Vec<&dyn rusqlite::ToSql> = emp_params.iter().map(|p| p.as_ref()).collect();
+
+    let all_employees: Vec<serde_json::Value> = stmt.query_map(&param_refs[..], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "department": row.get::<_, Option<String>>(2)?,
+            "branch_name": row.get::<_, Option<String>>(3)?,
+            "shift_start": row.get::<_, Option<String>>(4)?,
+        }))
+    }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
+
+    // 2. Employees who punched on the given date, with their first punch time (localtime-aware)
+    let punch_query = "
+        SELECT al.employee_id,
+               MIN(CASE WHEN al.punch_method = 'Manual' OR al.device_id = 999 
+                        THEN strftime('%H:%M', al.timestamp)
+                        ELSE strftime('%H:%M', al.timestamp, 'localtime') END) as first_punch
+        FROM AttendanceLogs al
+        WHERE (CASE WHEN al.punch_method = 'Manual' OR al.device_id = 999 
+                    THEN date(al.timestamp)
+                    ELSE date(al.timestamp, 'localtime') END) = ?1
+        GROUP BY al.employee_id
+    ";
+
+    let mut stmt2 = conn.prepare(punch_query).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let punch_map: std::collections::HashMap<i64, String> = stmt2.query_map([&date], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    }).map_err(|e| AppError::DatabaseError(e.to_string()))?
+    .filter_map(|r| r.ok())
+    .collect();
+
+    // 3. Categorize: present, late, absent
+    let mut present = Vec::new();
+    let mut late = Vec::new();
+    let mut absent = Vec::new();
+
+    for emp in &all_employees {
+        let emp_id = emp["id"].as_i64().unwrap_or(0);
+        let emp_shift = emp["shift_start"].as_str().unwrap_or(&threshold);
+        
+        if let Some(first_punch) = punch_map.get(&emp_id) {
+            let is_late = first_punch.as_str() > emp_shift;
+            let entry = serde_json::json!({
+                "id": emp_id,
+                "name": emp["name"],
+                "department": emp["department"],
+                "branch_name": emp["branch_name"],
+                "first_punch": first_punch,
+                "shift_start": emp_shift,
+            });
+            if is_late {
+                late.push(entry);
+            } else {
+                present.push(entry);
+            }
+        } else {
+            absent.push(serde_json::json!({
+                "id": emp_id,
+                "name": emp["name"],
+                "department": emp["department"],
+                "branch_name": emp["branch_name"],
+                "first_punch": null,
+                "shift_start": emp_shift,
+            }));
+        }
+    }
+
+    Ok(serde_json::json!({
+        "date": date,
+        "present": present,
+        "late": late,
+        "absent": absent,
+        "total": all_employees.len(),
+        "present_count": present.len(),
+        "late_count": late.len(),
+        "absent_count": absent.len(),
+    }))
+}
+
+/// GET ATTENDANCE RANGE SUMMARY — Aggregated stats for a date range
+#[tauri::command]
+pub async fn get_attendance_range_summary(
+    from_date: String,
+    to_date: String,
+    branch_id: Option<i64>,
+    employee_id: Option<i64>,
+    late_threshold: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let global_threshold: String = conn.query_row(
+        "SELECT value FROM SystemConfigs WHERE key = 'office_start_time'",
+        [],
+        |row| row.get(0)
+    ).unwrap_or_else(|_| "09:15".to_string());
+
+    let threshold = late_threshold.unwrap_or(global_threshold);
+
+    // 1. Get employees
+    let mut emp_query = "SELECT e.id, e.name, e.department, b.name as branch_name, e.shift_start_time 
+                         FROM Employees e 
+                         LEFT JOIN Branches b ON e.branch_id = b.id
+                         WHERE (e.status IS NULL OR e.status != 'deleted')".to_string();
+    let mut emp_params: Vec<Box<dyn rusqlite::ToSql>> = vec![];
+    if let Some(bid) = branch_id {
+        emp_query.push_str(" AND e.branch_id = ?");
+        emp_params.push(Box::new(bid));
+    }
+    if let Some(eid) = employee_id {
+        emp_query.push_str(" AND e.id = ?");
+        emp_params.push(Box::new(eid));
+    }
+    emp_query.push_str(" ORDER BY e.name");
+
+    let mut stmt = conn.prepare(&emp_query).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let param_refs: Vec<&dyn rusqlite::ToSql> = emp_params.iter().map(|p| p.as_ref()).collect();
+
+    let employees: Vec<serde_json::Value> = stmt.query_map(&param_refs[..], |row| {
+        Ok(serde_json::json!({
+            "id": row.get::<_, i64>(0)?,
+            "name": row.get::<_, String>(1)?,
+            "department": row.get::<_, Option<String>>(2)?,
+            "branch_name": row.get::<_, Option<String>>(3)?,
+            "shift_start": row.get::<_, Option<String>>(4)?,
+        }))
+    }).map_err(|e| AppError::DatabaseError(e.to_string()))?.filter_map(|r| r.ok()).collect();
+
+    // 2. Get all punches in range
+    let punch_query = "
+        SELECT al.employee_id,
+               (CASE WHEN al.punch_method = 'Manual' OR al.device_id = 999 
+                     THEN date(al.timestamp)
+                     ELSE date(al.timestamp, 'localtime') END) as log_date,
+               MIN(CASE WHEN al.punch_method = 'Manual' OR al.device_id = 999 
+                        THEN strftime('%H:%M', al.timestamp)
+                        ELSE strftime('%H:%M', al.timestamp, 'localtime') END) as first_punch
+        FROM AttendanceLogs al
+        WHERE (CASE WHEN al.punch_method = 'Manual' OR al.device_id = 999 
+                    THEN date(al.timestamp)
+                    ELSE date(al.timestamp, 'localtime') END) BETWEEN ?1 AND ?2
+        GROUP BY al.employee_id, log_date
+    ";
+
+    let mut stmt2 = conn.prepare(punch_query).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let mut punch_data: std::collections::HashMap<i64, Vec<(String, String)>> = std::collections::HashMap::new();
+    
+    let mut rows = stmt2.query([&from_date, &to_date]).map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    while let Some(row) = rows.next().map_err(|e| AppError::DatabaseError(e.to_string()))? {
+        let eid: i64 = row.get(0)?;
+        let date: String = row.get(1)?;
+        let time: String = row.get(2)?;
+        punch_data.entry(eid).or_default().push((date, time));
+    }
+
+    // 3. Aggregate
+    // Note: This is a simple count. Real absent count would need to know working days.
+    // For now, we return lists of counts.
+    let mut summary_list = Vec::new();
+    for emp in employees {
+        let eid = emp["id"].as_i64().unwrap_or(0);
+        let emp_shift = emp["shift_start"].as_str().unwrap_or(&threshold);
+        let punches = punch_data.get(&eid);
+        let present_count = punches.map(|v| v.len()).unwrap_or(0);
+        let late_count = punches.map(|v| v.iter().filter(|(_, t)| t.as_str() > emp_shift).count()).unwrap_or(0);
+        
+        summary_list.push(serde_json::json!({
+            "id": eid,
+            "name": emp["name"],
+            "department": emp["department"],
+            "branch_name": emp["branch_name"],
+            "shift_start": emp_shift,
+            "days_present": present_count,
+            "days_late": late_count,
+        }));
+    }
+
+    Ok(serde_json::json!({
+        "from": from_date,
+        "to": to_date,
+        "summary": summary_list,
+    }))
+}
+
+
 /// GET DAILY ATTENDANCE REPORTS (Enhanced)
 #[tauri::command]
 pub async fn get_daily_reports(

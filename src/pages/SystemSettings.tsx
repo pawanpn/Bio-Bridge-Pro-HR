@@ -125,7 +125,7 @@ const FunctionalityControl: React.FC = () => {
   ];
 
   const [activeCat, setActiveCat] = useState('general');
-  const [configs, setConfigs] = useState<{key: string, value: string}[]>([]);
+  const [configs, setConfigs] = useState<{setting_key: string, setting_value: string}[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
@@ -272,30 +272,35 @@ const FunctionalityControl: React.FC = () => {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
               {configs.map(cfg => (
-                <div key={cfg.key} style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 20 }}>
+                <div key={cfg.setting_key} style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 20 }}>
                   <label style={{ ...labelStyle, display: 'block', marginBottom: 8, textTransform: 'capitalize' }}>
-                    {cfg.key.replace(/_/g, ' ')}
+                    {cfg.setting_key.replace(/_/g, ' ')}
                   </label>
                   
                   <div style={{ display: 'flex', gap: 12 }}>
                     <input
                       type="text"
-                      value={cfg.value || ''}
+                      value={cfg.setting_value || ''}
                       onChange={(e) => {
                         const newVal = e.target.value;
-                        setConfigs(prev => prev.map(c => c.key === cfg.key ? { ...c, value: newVal } : c));
+                        setConfigs(prev => prev.map(c => c.setting_key === cfg.setting_key ? { ...c, setting_value: newVal } : c));
                       }}
                       style={{ ...inputStyle, flex: 1 }}
                     />
                     <Button 
                       variant="accent" 
-                      onClick={() => handleSave(cfg.key, cfg.value)}
+                      onClick={() => handleSave(cfg.setting_key, cfg.setting_value)}
                       disabled={saving}
                       className="h-10"
                     >
                       Update
                     </Button>
                   </div>
+                  {cfg.setting_key === 'office_start_time' && (
+                    <p style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 6 }}>
+                      Global office start time (e.g. 09:15). Used to calculate late entries if no specific shift is assigned to an employee.
+                    </p>
+                  )}
                 </div>
               ))}
 
