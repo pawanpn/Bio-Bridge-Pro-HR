@@ -91,6 +91,8 @@ interface EmployeeForm {
   whatsapp_punch: boolean;
   supervisor_mobile: string;
   biometric_id?: number | string;
+  shift_start_time?: string;
+  shift_end_time?: string;
 }
 
 const emptyForm: EmployeeForm = {
@@ -151,6 +153,8 @@ const emptyForm: EmployeeForm = {
   whatsapp_punch: false,
   supervisor_mobile: '',
   biometric_id: '',
+  shift_start_time: '',
+  shift_end_time: '',
 };
 
 export const EmployeeManagement: React.FC = () => {
@@ -374,6 +378,8 @@ export const EmployeeManagement: React.FC = () => {
         whatsapp_punch: formData.whatsapp_punch,
         supervisor_mobile: formData.supervisor_mobile || undefined,
         biometric_id: formData.biometric_id ? parseInt(String(formData.biometric_id)) : undefined,
+        shift_start_time: formData.shift_start_time || undefined,
+        shift_end_time: formData.shift_end_time || undefined,
       };
 
       // Save using the crud commands (local SQLite first)
@@ -1219,14 +1225,52 @@ export const EmployeeManagement: React.FC = () => {
 
                     <div className="flex items-center justify-between p-4 bg-muted/10 rounded-lg border">
                       <div className="space-y-0.5">
-                        <Label className="text-sm font-bold">Outdoor Management *</Label>
-                        <p className="text-xs text-muted-foreground italic">Allows outdoor check-in/out permissions for field work management.</p>
+                        <Label className="text-sm font-bold">Outdoor Management</Label>
+                        <p className="text-[10px] text-muted-foreground italic">Allow attendance logs from mobile GPS outside office</p>
                       </div>
                       <Switch 
                         checked={formData.outdoor_management}
                         onCheckedChange={(val) => setFormData({ ...formData, outdoor_management: val })}
                       />
                     </div>
+
+                    {/* Shift Time Configuration */}
+                    <Card className="border-dashed bg-slate-50/50">
+                      <CardHeader className="pb-2 px-4 pt-4">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-primary" /> Shift Configuration
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label className="text-[10px] font-bold uppercase text-slate-500">Custom Shift Start</Label>
+                            <Input 
+                              type="time" 
+                              value={formData.shift_start_time} 
+                              onChange={(e) => setFormData({ ...formData, shift_start_time: e.target.value })} 
+                              className="bg-white h-9"
+                            />
+                            <p className="text-[9px] text-slate-400 italic">Leave empty to use global office time (09:15)</p>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-[10px] font-bold uppercase text-slate-500">Custom Shift End</Label>
+                            <Input 
+                              type="time" 
+                              value={formData.shift_end_time} 
+                              onChange={(e) => setFormData({ ...formData, shift_end_time: e.target.value })} 
+                              className="bg-white h-9"
+                            />
+                          </div>
+                        </div>
+                        <div className="bg-blue-50/50 border border-blue-100 rounded p-2 flex gap-2">
+                          <Info className="w-4 h-4 text-blue-500 shrink-0" />
+                          <p className="text-[10px] text-blue-700 leading-tight">
+                            If an employee is <strong>Regular</strong>, keep these empty. For <strong>Part-time</strong> or custom shifts, enter the specific start time to calculate late entries correctly.
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
 
                     <div className="space-y-2">
                        <Label className="text-xs font-bold uppercase text-muted-foreground">Workflow Role</Label>

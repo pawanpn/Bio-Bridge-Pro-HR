@@ -167,7 +167,8 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("verification_mode", "TEXT"), ("device_privilege", "TEXT"), ("device_password", "TEXT"),
         ("enable_holiday", "INTEGER DEFAULT 1"), ("outdoor_management", "INTEGER DEFAULT 0"),
         ("workflow_role", "TEXT"), ("app_role", "TEXT"),
-        ("deleted_at", "TEXT")
+        ("deleted_at", "TEXT"),
+        ("shift_start_time", "TEXT"), ("shift_end_time", "TEXT")
     ];
 
     for (col, col_type) in migrations {
@@ -656,6 +657,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("database", "auto_backup", "1"),
         ("database", "supabase_url", ""),
         ("database", "supabase_key", ""),
+        ("attendance", "office_start_time", "09:15"),
     ];
     for (cat, key, val) in default_configs {
         let _ = conn.execute(

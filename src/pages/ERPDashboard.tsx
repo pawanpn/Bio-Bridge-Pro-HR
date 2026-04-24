@@ -144,22 +144,25 @@ export const ERPDashboard: React.FC = () => {
   const navigate = useNavigate();
   const [stats, setStats] = useState<ERPStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isDeviceOnline, setIsDeviceOnline] = useState<boolean | null>(null);
   const [lastSync, setLastSync] = useState<string>('');
 
   useEffect(() => {
     // Load real data from local SQLite via Tauri commands
-    const loadStats = async () => {
-      setIsLoading(true);
+    const loadStats = async (silent = false) => {
+      // On first load show full loading state, on refresh update silently
+      if (!silent) setIsLoading(true);
+      else setIsRefreshing(true);
       try {
         // Fetch real data from local database
-        const [empResult, leaveResult, itemResult, projectResult, leadResult, assetResult] = await Promise.all([
+        const [empResult, leaveResult, itemResult, projectResult, leadResult, dashStats] = await Promise.all([
           invoke<any>('list_employees').catch(() => ({ data: [] })),
-          invoke<any>('crud::list_leave_requests').catch(() => ({ data: [] })),
-          invoke<any[]>('crud::list_items').catch(() => []),
-          invoke<any[]>('crud::list_projects').catch(() => []),
-          invoke<any[]>('crud::list_leads').catch(() => []),
-          invoke<any[]>('crud::list_assets').catch(() => []),
+          invoke<any>('list_leave_requests').catch(() => ({ data: [] })),
+          invoke<any[]>('list_items').catch(() => []),
+          invoke<any[]>('list_projects').catch(() => []),
+          invoke<any[]>('list_leads').catch(() => []),
+          invoke<any>('get_dashboard_stats').catch(() => null),
         ]);
 
         // Parse employees
@@ -168,18 +171,21 @@ export const ERPDashboard: React.FC = () => {
         const items = Array.isArray(itemResult) ? itemResult : [];
         const projects = Array.isArray(projectResult) ? projectResult : [];
         const leads = Array.isArray(leadResult) ? leadResult : [];
-        const assets = Array.isArray(assetResult) ? assetResult : [];
 
         const totalEmployees = employees.length;
         const activeEmployees = employees.filter((e: any) => e.employment_status === 'Active' || e.status === 'Active').length;
         const onLeaveEmployees = employees.filter((e: any) => e.employment_status === 'On Leave').length;
 
+        // Use REAL attendance data from dashboard_stats if available
+        const presentToday = dashStats?.presentToday ?? 0;
+        const absentToday = dashStats ? Math.max(0, totalEmployees - presentToday) : 0;
+
         const stats: ERPStats = {
           // HR Module - REAL DATA
           totalEmployees,
-          presentToday: Math.max(0, activeEmployees - onLeaveEmployees - Math.floor(activeEmployees * 0.12)), // Estimate
-          absentToday: Math.floor(activeEmployees * 0.12), // Estimate ~12% absent
-          lateToday: Math.floor(activeEmployees * 0.10), // Estimate ~10% late
+          presentToday,
+          absentToday,
+          lateToday: dashStats?.lateToday ?? 0,
           onLeave: onLeaveEmployees,
           pendingLeaveRequests: leaves.filter((l: any) => l.status === 'Pending').length,
           newHiresThisMonth: employees.filter((e: any) => {
@@ -188,10 +194,10 @@ export const ERPDashboard: React.FC = () => {
             return joinDate.getMonth() === now.getMonth() && joinDate.getFullYear() === now.getFullYear();
           }).length,
           resignationsThisMonth: employees.filter((e: any) => e.employment_status === 'Inactive').length,
-          attendanceRate: activeEmployees > 0 ? Math.round(((activeEmployees - Math.floor(activeEmployees * 0.12)) / activeEmployees) * 100) : 0,
+          attendanceRate: totalEmployees > 0 ? Math.round((presentToday / totalEmployees) * 100) : 0,
 
           // Payroll Module
-          monthlyPayroll: activeEmployees * 42000, // Estimate
+          monthlyPayroll: activeEmployees * 42000,
           pendingPayslips: Math.floor(activeEmployees * 0.1),
           totalDeductions: Math.floor(activeEmployees * 42000 * 0.1),
           totalAllowances: Math.floor(activeEmployees * 42000 * 0.2),
@@ -229,13 +235,14 @@ export const ERPDashboard: React.FC = () => {
         console.error('Failed to load stats:', error);
       } finally {
         setIsLoading(false);
+        setIsRefreshing(false);
       }
     };
 
-    loadStats();
+    loadStats(false); // First load: show spinner
 
-    // Refresh stats every 30 seconds
-    const interval = setInterval(loadStats, 30000);
+    // Refresh silently every 5 minutes (no blink)
+    const interval = setInterval(() => loadStats(true), 300000);
     return () => clearInterval(interval);
   }, []);
 
@@ -304,7 +311,8 @@ export const ERPDashboard: React.FC = () => {
           </div>
 
           {/* Last Sync */}
-          <div className="text-xs text-muted-foreground hidden md:block">
+          <div className="text-xs text-muted-foreground hidden md:flex items-center gap-1.5">
+            {isRefreshing && <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />}
             Last Sync: {lastSync}
           </div>
         </div>
