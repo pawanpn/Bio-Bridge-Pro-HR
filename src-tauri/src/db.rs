@@ -33,6 +33,8 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             contact_info TEXT,
             auth_key TEXT UNIQUE,
             license_expiry TEXT,
+            license_started_on TEXT,
+            payment_received_on TEXT,
             provider_name TEXT,
             provider_contact TEXT,
             payment_term_days INTEGER DEFAULT 30,
@@ -49,6 +51,8 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN payment_status TEXT DEFAULT 'Pending'", []);
     let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN provider_approved INTEGER DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN notes TEXT", []);
+    let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN license_started_on TEXT", []);
+    let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN payment_received_on TEXT", []);
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Branches (

@@ -3146,7 +3146,7 @@ pub async fn list_organizations(state: tauri::State<'_, AppState>) -> Result<Vec
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
     let mut stmt = conn
-        .prepare("SELECT id, name, address, contact_info, auth_key, license_expiry, provider_name, provider_contact, payment_term_days, payment_status, provider_approved, notes FROM Organizations ORDER BY name")
+        .prepare("SELECT id, name, address, contact_info, auth_key, license_expiry, license_started_on, payment_received_on, provider_name, provider_contact, payment_term_days, payment_status, provider_approved, notes FROM Organizations ORDER BY name")
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     let organizations = stmt
         .query_map([], |row| {
@@ -3157,12 +3157,14 @@ pub async fn list_organizations(state: tauri::State<'_, AppState>) -> Result<Vec
                 "contact_info": row.get::<_, Option<String>>(3)?,
                 "auth_key": row.get::<_, Option<String>>(4)?,
                 "license_expiry": row.get::<_, Option<String>>(5)?,
-                "provider_name": row.get::<_, Option<String>>(6)?,
-                "provider_contact": row.get::<_, Option<String>>(7)?,
-                "payment_term_days": row.get::<_, Option<i64>>(8)?,
-                "payment_status": row.get::<_, Option<String>>(9)?,
-                "provider_approved": row.get::<_, Option<i64>>(10)?.unwrap_or(0) != 0,
-                "notes": row.get::<_, Option<String>>(11)?,
+                "license_started_on": row.get::<_, Option<String>>(6)?,
+                "payment_received_on": row.get::<_, Option<String>>(7)?,
+                "provider_name": row.get::<_, Option<String>>(8)?,
+                "provider_contact": row.get::<_, Option<String>>(9)?,
+                "payment_term_days": row.get::<_, Option<i64>>(10)?,
+                "payment_status": row.get::<_, Option<String>>(11)?,
+                "provider_approved": row.get::<_, Option<i64>>(12)?.unwrap_or(0) != 0,
+                "notes": row.get::<_, Option<String>>(13)?,
             }))
         })
         .map_err(|e| AppError::DatabaseError(e.to_string()))?
@@ -3178,6 +3180,8 @@ pub async fn add_organization(
     contact_info: Option<String>,
     auth_key: Option<String>,
     license_expiry: Option<String>,
+    license_started_on: Option<String>,
+    payment_received_on: Option<String>,
     provider_name: Option<String>,
     provider_contact: Option<String>,
     payment_term_days: Option<i64>,
@@ -3190,13 +3194,15 @@ pub async fn add_organization(
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "INSERT INTO Organizations (name, address, contact_info, auth_key, license_expiry, provider_name, provider_contact, payment_term_days, payment_status, provider_approved, notes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO Organizations (name, address, contact_info, auth_key, license_expiry, license_started_on, payment_received_on, provider_name, provider_contact, payment_term_days, payment_status, provider_approved, notes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             name,
             address,
             contact_info,
             auth_key,
             license_expiry,
+            license_started_on,
+            payment_received_on,
             provider_name,
             provider_contact,
             payment_term_days,
@@ -3220,6 +3226,8 @@ pub async fn update_organization(
     contact_info: Option<String>,
     auth_key: Option<String>,
     license_expiry: Option<String>,
+    license_started_on: Option<String>,
+    payment_received_on: Option<String>,
     provider_name: Option<String>,
     provider_contact: Option<String>,
     payment_term_days: Option<i64>,
@@ -3232,13 +3240,15 @@ pub async fn update_organization(
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "UPDATE Organizations SET name = ?1, address = ?2, contact_info = ?3, auth_key = ?4, license_expiry = ?5, provider_name = ?6, provider_contact = ?7, payment_term_days = ?8, payment_status = ?9, provider_approved = ?10, notes = ?11 WHERE id = ?12",
+        "UPDATE Organizations SET name = ?1, address = ?2, contact_info = ?3, auth_key = ?4, license_expiry = ?5, license_started_on = ?6, payment_received_on = ?7, provider_name = ?8, provider_contact = ?9, payment_term_days = ?10, payment_status = ?11, provider_approved = ?12, notes = ?13 WHERE id = ?14",
         params![
             name,
             address,
             contact_info,
             auth_key,
             license_expiry,
+            license_started_on,
+            payment_received_on,
             provider_name,
             provider_contact,
             payment_term_days,
@@ -3250,6 +3260,82 @@ pub async fn update_organization(
     )?;
 
     Ok(serde_json::json!({"success": true}))
+}
+
+#[tauri::command]
+pub async fn list_provider_portal_organizations(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn
+        .prepare(
+            "
+            SELECT
+                o.id,
+                o.name,
+                o.address,
+                o.contact_info,
+                o.auth_key,
+                o.license_expiry,
+                o.license_started_on,
+                o.payment_received_on,
+                o.provider_name,
+                o.provider_contact,
+                o.payment_term_days,
+                o.payment_status,
+                o.provider_approved,
+                o.notes,
+                (SELECT COUNT(*) FROM Branches b WHERE b.org_id = o.id OR b.organization_id = o.id) AS branch_count,
+                (SELECT COUNT(*)
+                   FROM Employees e
+                   INNER JOIN Branches b ON e.branch_id = b.id
+                  WHERE b.org_id = o.id OR b.organization_id = o.id
+                    AND (e.status IS NULL OR e.status != 'deleted')
+                ) AS employee_count,
+                (SELECT COUNT(*)
+                   FROM Devices d
+                   INNER JOIN Branches b ON d.branch_id = b.id
+                  WHERE b.org_id = o.id OR b.organization_id = o.id
+                ) AS device_count,
+                (SELECT COUNT(*)
+                   FROM Gates g
+                   INNER JOIN Branches b ON g.branch_id = b.id
+                  WHERE b.org_id = o.id OR b.organization_id = o.id
+                ) AS gate_count
+            FROM Organizations o
+            ORDER BY o.name
+            "
+        )
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+
+    let organizations = stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, i64>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "address": row.get::<_, Option<String>>(2)?,
+                "contact_info": row.get::<_, Option<String>>(3)?,
+                "auth_key": row.get::<_, Option<String>>(4)?,
+                "license_expiry": row.get::<_, Option<String>>(5)?,
+                "license_started_on": row.get::<_, Option<String>>(6)?,
+                "payment_received_on": row.get::<_, Option<String>>(7)?,
+                "provider_name": row.get::<_, Option<String>>(8)?,
+                "provider_contact": row.get::<_, Option<String>>(9)?,
+                "payment_term_days": row.get::<_, Option<i64>>(10)?,
+                "payment_status": row.get::<_, Option<String>>(11)?,
+                "provider_approved": row.get::<_, Option<i64>>(12)?.unwrap_or(0) != 0,
+                "notes": row.get::<_, Option<String>>(13)?,
+                "branch_count": row.get::<_, i64>(14)?,
+                "employee_count": row.get::<_, i64>(15)?,
+                "device_count": row.get::<_, i64>(16)?,
+                "gate_count": row.get::<_, i64>(17)?,
+            }))
+        })
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(organizations)
 }
 
 #[tauri::command]

@@ -250,6 +250,39 @@ export const BranchGateDeviceManagement: React.FC = () => {
     setOrganizationPreview({ open: true, organization });
   };
 
+  const handleControlOrganization = async (
+    organization: Organization,
+    patch: Partial<Organization> & { license_expiry?: string | null }
+  ) => {
+    try {
+      await invoke('update_organization', {
+        id: organization.id,
+        name: organization.name,
+        address: organization.address || null,
+        contact_info: organization.contact_info || null,
+        auth_key: organization.auth_key || null,
+        license_expiry: patch.license_expiry ?? organization.license_expiry ?? null,
+        provider_name: patch.provider_name ?? organization.provider_name ?? null,
+        provider_contact: patch.provider_contact ?? organization.provider_contact ?? null,
+        payment_term_days: patch.payment_term_days ?? organization.payment_term_days ?? null,
+        payment_status: patch.payment_status ?? organization.payment_status ?? null,
+        provider_approved: patch.provider_approved ?? organization.provider_approved ?? false,
+        notes: patch.notes ?? organization.notes ?? null,
+      });
+      await loadData({ silent: true });
+      window.dispatchEvent(new CustomEvent('data-synced', { detail: { table: 'organizations' } }));
+      setOrganizationPreview(prev => prev.organization?.id === organization.id
+        ? { open: true, organization: null }
+        : prev
+      );
+      setOrganizationPreview({ open: false, organization: null });
+      setTimeout(() => setOrganizationPreview({ open: true, organization }), 0);
+    } catch (error) {
+      console.error('Failed to update organization control:', error);
+      alert('Failed to update organization: ' + error);
+    }
+  };
+
   const handleViewOrganizationBranches = (organization: Organization) => {
     setSelectedOrganizationId(organization.id);
     setSelectedBranchId(null);
@@ -729,6 +762,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
         onAddBranch={handleAddBranchForOrganization}
         onViewBranches={handleViewOrganizationBranches}
         onEditBranch={handleEditBranch}
+        onControlSave={handleControlOrganization}
       />
 
       <BranchDialog
@@ -1743,8 +1777,20 @@ const OrganizationPreviewDialog: React.FC<{
   onAddBranch: (organizationId: number) => void;
   onViewBranches: (organization: Organization) => void;
   onEditBranch: (branch: Branch) => void;
-}> = ({ open, organization, branches, onClose, onEdit, onAddBranch, onViewBranches, onEditBranch }) => {
+  onControlSave: (organization: Organization, patch: Partial<Organization> & { license_expiry?: string | null }) => void;
+}> = ({ open, organization, branches, onClose, onEdit, onAddBranch, onViewBranches, onEditBranch, onControlSave }) => {
   if (!organization) return null;
+  const [grantDays, setGrantDays] = useState(String(organization.payment_term_days ?? 30));
+
+  useEffect(() => {
+    setGrantDays(String(organization.payment_term_days ?? 30));
+  }, [organization.id, organization.payment_term_days, open]);
+
+  const addDays = (days: number) => {
+    const dt = new Date();
+    dt.setDate(dt.getDate() + days);
+    return dt.toISOString().split('T')[0];
+  };
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
@@ -1803,6 +1849,76 @@ const OrganizationPreviewDialog: React.FC<{
                 <p className="text-xs uppercase text-muted-foreground">Notes</p>
                 <p className="text-sm whitespace-pre-line">{organization.notes || '—'}</p>
               </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs uppercase text-amber-700 font-semibold">Control Panel</p>
+                    <p className="text-xs text-amber-700">Approve provider and set active permission duration.</p>
+                  </div>
+                  <Badge variant={organization.provider_approved ? 'default' : 'outline'}>
+                    {organization.provider_approved ? 'Approved' : 'Pending'}
+                  </Badge>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2">
+                  <div>
+                    <Label className="text-xs">Grant Days</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={grantDays}
+                      onChange={(e) => setGrantDays(e.target.value)}
+                      className="h-9"
+                    />
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <Button
+                      className="flex-1"
+                      onClick={() => {
+                        const days = Math.max(1, Number(grantDays) || 30);
+                        onControlSave(organization, {
+                          provider_approved: true,
+                          payment_status: 'Paid',
+                          payment_term_days: days,
+                          license_expiry: addDays(days),
+                        });
+                      }}
+                    >
+                      Approve + Activate
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      const days = Math.max(1, Number(grantDays) || 30);
+                      onControlSave(organization, {
+                        provider_approved: true,
+                        payment_status: organization.payment_status === 'Paid' ? 'Paid' : 'Partial',
+                        payment_term_days: days,
+                        license_expiry: addDays(days),
+                      });
+                    }}
+                  >
+                    Approve Provider
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      const days = Math.max(1, Number(grantDays) || 30);
+                      onControlSave(organization, {
+                        payment_term_days: days,
+                        payment_status: organization.payment_status || 'Pending',
+                        license_expiry: addDays(days),
+                      });
+                    }}
+                  >
+                    Set Period
+                  </Button>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -1843,6 +1959,20 @@ const OrganizationPreviewDialog: React.FC<{
         </div>
 
         <DialogFooter className="gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              const days = Math.max(1, Number(grantDays) || 30);
+              onControlSave(organization, {
+                provider_approved: false,
+                payment_status: 'Pending',
+                payment_term_days: days,
+                license_expiry: organization.license_expiry || null,
+              });
+            }}
+          >
+            Pause / Pending
+          </Button>
           <Button variant="outline" onClick={() => onViewBranches(organization)}>
             View Branches
           </Button>
