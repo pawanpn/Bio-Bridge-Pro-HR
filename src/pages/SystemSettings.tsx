@@ -1044,7 +1044,13 @@ const UserManagement: React.FC = () => {
               <select value={role} onChange={e => setRole(e.target.value)} style={inputStyle}>
                 <option value="SUPER_ADMIN">Super Admin (Full Access)</option>
                 <option value="ADMIN">Admin (Branch Limited)</option>
+                <option value="BRANCH_HEAD">Branch Head (Branch Control)</option>
+                <option value="MANAGER">Manager (Team/Department)</option>
+                <option value="SUPERVISOR">Supervisor (Operational)</option>
+                <option value="HR">HR (People Ops)</option>
+                <option value="EMPLOYEE">Employee (Self Service)</option>
                 <option value="OPERATOR">Operator (Read Only/Branch)</option>
+                <option value="VIEWER">Viewer (Read Only)</option>
               </select>
             </div>
             {role !== 'SUPER_ADMIN' && (

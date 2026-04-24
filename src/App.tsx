@@ -17,6 +17,7 @@ import { PayrollManagement } from './pages/PayrollManagement';
 import { FinanceManagement } from './pages/FinanceManagement';
 import { PermissionManagement } from './components/PermissionManagement';
 import { PermissionGuard } from './components/PermissionGuard';
+import { ModuleGuard } from './components/ModuleGuard';
 import { EmployeeHierarchyTree } from './components/EmployeeHierarchyTree';
 import { InventoryManagement } from './pages/InventoryManagement';
 import { ProjectsManagement } from './pages/ProjectsManagement';
@@ -62,34 +63,36 @@ function AppContent() {
       <Route path="/" element={<MainLayout />}>
         <Route path="dashboard" element={<ERPDashboard />} />
         <Route path="employee/:employeeId" element={<EmployeeDetail />} />
-        <Route path="employees" element={<EmployeeManagement />} />
-        <Route path="employee-hierarchy" element={<EmployeeHierarchyTree />} />
+        <Route path="employees" element={<ModuleGuard requiredModule="employees"><EmployeeManagement /></ModuleGuard>} />
+        <Route path="employee-hierarchy" element={<ModuleGuard requiredModule="employees"><EmployeeHierarchyTree /></ModuleGuard>} />
         <Route
           path="leave-management"
           element={
-            isSuperAdmin ? (
-              <LeaveManagement />
-            ) : (
-              <PermissionGuard requiredPermission={['view_leaves', 'apply_leave', 'approve_leave']} showAccessDenied>
+            <ModuleGuard requiredModule="leave">
+              {isSuperAdmin ? (
                 <LeaveManagement />
-              </PermissionGuard>
-            )
+              ) : (
+                <PermissionGuard requiredPermission={['view_leaves', 'apply_leave', 'approve_leave']} showAccessDenied>
+                  <LeaveManagement />
+                </PermissionGuard>
+              )}
+            </ModuleGuard>
           }
         />
-        <Route path="attendance" element={<AttendanceManagement />} />
-        <Route path="payroll" element={<PayrollManagement />} />
-        <Route path="finance" element={<FinanceManagement />} />
-        <Route path="organization" element={<BranchGateDeviceManagement />} />
-        <Route path="device-settings" element={<DeviceSettings />} />
-        <Route path="notifications" element={<NotificationSystem />} />
-        <Route path="system-settings" element={<DynamicSystemSettings />} />
-        <Route path="system-tools" element={<SystemTools />} />
-        <Route path="permissions" element={<PermissionManagement />} />
-        <Route path="reports" element={<Reports />} />
-        <Route path="inventory" element={<InventoryManagement />} />
-        <Route path="projects" element={<ProjectsManagement />} />
-        <Route path="crm" element={<CRMManagement />} />
-        <Route path="assets" element={<AssetsManagement />} />
+        <Route path="attendance" element={<ModuleGuard requiredModule="attendance"><AttendanceManagement /></ModuleGuard>} />
+        <Route path="payroll" element={<ModuleGuard requiredModule="payroll"><PayrollManagement /></ModuleGuard>} />
+        <Route path="finance" element={<ModuleGuard requiredModule="finance"><FinanceManagement /></ModuleGuard>} />
+        <Route path="organization" element={<ModuleGuard requiredModule="organization"><BranchGateDeviceManagement /></ModuleGuard>} />
+        <Route path="device-settings" element={<ModuleGuard requiredModule="organization"><DeviceSettings /></ModuleGuard>} />
+        <Route path="notifications" element={<ModuleGuard requiredModule="notifications"><NotificationSystem /></ModuleGuard>} />
+        <Route path="system-settings" element={<ModuleGuard requiredModule="system-settings"><DynamicSystemSettings /></ModuleGuard>} />
+        <Route path="system-tools" element={<ModuleGuard requiredModule="system-tools"><SystemTools /></ModuleGuard>} />
+        <Route path="permissions" element={<ModuleGuard requiredModule="permissions"><PermissionManagement /></ModuleGuard>} />
+        <Route path="reports" element={<ModuleGuard requiredModule="reports"><Reports /></ModuleGuard>} />
+        <Route path="inventory" element={<ModuleGuard requiredModule="inventory"><InventoryManagement /></ModuleGuard>} />
+        <Route path="projects" element={<ModuleGuard requiredModule="projects"><ProjectsManagement /></ModuleGuard>} />
+        <Route path="crm" element={<ModuleGuard requiredModule="crm"><CRMManagement /></ModuleGuard>} />
+        <Route path="assets" element={<ModuleGuard requiredModule="assets"><AssetsManagement /></ModuleGuard>} />
         <Route path="cloud-settings" element={<Navigate to="/system-settings" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

@@ -44,8 +44,10 @@ interface PermissionModule {
 const ROLE_TYPES = [
   { code: 'SUPER_ADMIN', name: 'Super Admin', description: 'Full system access', level: 10 },
   { code: 'ADMIN', name: 'Admin', description: 'Administrative access', level: 8 },
+  { code: 'BRANCH_HEAD', name: 'Branch Head', description: 'Branch-level control', level: 7 },
   { code: 'MANAGER', name: 'Manager', description: 'Department manager', level: 6 },
   { code: 'SUPERVISOR', name: 'Supervisor', description: 'Team supervisor', level: 4 },
+  { code: 'HR', name: 'HR', description: 'People operations', level: 5 },
   { code: 'EMPLOYEE', name: 'Employee', description: 'Regular employee', level: 2 },
   { code: 'OPERATOR', name: 'Operator', description: 'Attendance operator', level: 3 },
   { code: 'VIEWER', name: 'Viewer', description: 'Read-only access', level: 1 }
@@ -213,9 +215,19 @@ export const PermissionManagement: React.FC = () => {
             .filter((p: any) => !['delete_employees', 'manage_settings'].includes(p.permission))
             .map((p: any) => p.id);
           break;
+        case 'BRANCH_HEAD':
+          permsToAssign = allPerms
+            .filter((p: any) => ['view_employees', 'create_employees', 'edit_employees', 'view_attendance', 'approve_attendance', 'view_leaves', 'approve_leave', 'view_reports', 'export_reports'].includes(p.permission))
+            .map((p: any) => p.id);
+          break;
         case 'MANAGER':
           permsToAssign = allPerms
             .filter((p: any) => ['view_employees', 'view_attendance', 'approve_attendance', 'view_leaves', 'view_payroll', 'view_reports', 'export_reports'].includes(p.permission))
+            .map((p: any) => p.id);
+          break;
+        case 'HR':
+          permsToAssign = allPerms
+            .filter((p: any) => ['view_employees', 'create_employees', 'edit_employees', 'view_attendance', 'approve_attendance', 'view_leaves', 'approve_leave', 'view_reports', 'export_reports'].includes(p.permission))
             .map((p: any) => p.id);
           break;
         case 'EMPLOYEE':

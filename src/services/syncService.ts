@@ -1,5 +1,6 @@
 import { supabase } from '@/config/supabase';
 import { invoke } from '@tauri-apps/api/core';
+import { hasBranchAccess } from './dataScope';
 
 export type SyncOperation = 'INSERT' | 'UPDATE' | 'DELETE';
 
@@ -226,6 +227,11 @@ class SyncService {
 
   // Sync employee to Supabase - uses UPSERT to prevent duplicates
   private async syncEmployee(item: SyncQueueItem, payload: any): Promise<void> {
+    if (!hasBranchAccess(payload?.branch_id)) {
+      console.warn(`Skipping employee sync outside branch scope: ${payload?.branch_id}`);
+      return;
+    }
+
     switch (item.operation) {
       case 'INSERT':
         // Use upsert instead of insert to prevent duplicate key errors
@@ -251,6 +257,11 @@ class SyncService {
 
   // Sync attendance to Supabase - uses upsert to prevent duplicate punches
   private async syncAttendance(_item: SyncQueueItem, payload: any): Promise<void> {
+    if (!hasBranchAccess(payload?.branch_id)) {
+      console.warn(`Skipping attendance sync outside branch scope: ${payload?.branch_id}`);
+      return;
+    }
+
     await supabase
       .from('attendance_logs')
       .upsert(payload, { 
@@ -261,6 +272,11 @@ class SyncService {
 
   // Sync leave request to Supabase - uses upsert
   private async syncLeaveRequest(item: SyncQueueItem, payload: any): Promise<void> {
+    if (!hasBranchAccess(payload?.branch_id)) {
+      console.warn(`Skipping leave sync outside branch scope: ${payload?.branch_id}`);
+      return;
+    }
+
     switch (item.operation) {
       case 'INSERT':
         await supabase.from('leave_requests').upsert(payload, {
@@ -292,6 +308,10 @@ class SyncService {
           try {
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
               const cloudData = payload.new;
+              if (!hasBranchAccess(cloudData?.branch_id)) {
+                console.log('↪️ Ignoring employee change outside branch scope');
+                return;
+              }
               const cloudUpdatedAt = cloudData?.updated_at || cloudData?.created_at;
               
               // Fetch local record to compare timestamps
@@ -320,6 +340,10 @@ class SyncService {
                 });
               }
             } else if (payload.eventType === 'DELETE') {
+              if (!hasBranchAccess(payload.old?.branch_id)) {
+                console.log('↪️ Ignoring employee delete outside branch scope');
+                return;
+              }
               // CONFLICT RESOLUTION: Cloud delete wins (cloud is master)
               console.log('🗑️ Cloud deleted employee, removing locally...');
               await invoke('delete_employee_by_id', {
@@ -345,6 +369,10 @@ class SyncService {
           
           // Attendance is append-only, no conflict possible - just insert
           try {
+            if (!hasBranchAccess(payload.new?.branch_id)) {
+              console.log('↪️ Ignoring attendance insert outside branch scope');
+              return;
+            }
             await invoke('insert_attendance_from_cloud', {
               attendanceData: JSON.stringify(payload.new),
             });
@@ -368,10 +396,18 @@ class SyncService {
           // CONFLICT RESOLUTION: Cloud is master for leave requests
           try {
             if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+              if (!hasBranchAccess(payload.new?.branch_id)) {
+                console.log('↪️ Ignoring leave update outside branch scope');
+                return;
+              }
               await invoke('upsert_leave_from_cloud', {
                 leaveData: JSON.stringify(payload.new),
               });
             } else if (payload.eventType === 'DELETE') {
+              if (!hasBranchAccess(payload.old?.branch_id)) {
+                console.log('↪️ Ignoring leave delete outside branch scope');
+                return;
+              }
               await invoke('delete_leave_by_id', {
                 leaveId: payload.old?.id,
               });

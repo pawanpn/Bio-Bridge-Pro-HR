@@ -27,6 +27,84 @@ fn generate_uuid_v4() -> String {
     )
 }
 
+pub fn ensure_attendance_employee_exists(
+    conn: &Connection,
+    employee_id: i64,
+    display_name: Option<&str>,
+    branch_id: Option<i64>,
+) -> Result<i64, AppError> {
+    let employee_code = employee_id.to_string();
+    let fallback_name = display_name
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| format!("User {}", employee_id));
+
+    let existing_id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM Employees WHERE biometric_id = ?1 OR employee_code = ?2",
+            params![employee_id, employee_code],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| AppError::DatabaseError(format!("Employee lookup failed: {}", e)))?;
+
+    if let Some(existing_id) = existing_id {
+        conn.execute(
+            "UPDATE Employees
+             SET name = CASE WHEN name IS NULL OR TRIM(name) = '' OR name LIKE 'User %' THEN ?1 ELSE name END,
+                 first_name = CASE WHEN first_name IS NULL OR TRIM(first_name) = '' OR first_name LIKE 'User %' THEN ?2 ELSE first_name END,
+                 last_name = CASE WHEN last_name IS NULL OR TRIM(last_name) = '' THEN '' ELSE last_name END,
+                 biometric_id = COALESCE(biometric_id, ?3),
+                 device_user_id = COALESCE(device_user_id, ?3),
+                 branch_id = COALESCE(branch_id, ?4),
+                 status = CASE WHEN status = 'deleted' THEN 'active' ELSE status END,
+                 employment_status = CASE WHEN LOWER(COALESCE(employment_status, 'active')) IN ('inactive', 'terminated', 'resigned', 'retired') THEN 'Active' ELSE employment_status END,
+                 sync_status = CASE WHEN sync_status = 'placeholder' THEN 'active' ELSE sync_status END,
+                 deleted_at = NULL,
+                 updated_at = datetime('now')
+             WHERE id = ?5",
+            params![
+                fallback_name,
+                fallback_name,
+                employee_id,
+                branch_id,
+                existing_id
+            ],
+        )
+        .map_err(|e| AppError::DatabaseError(format!("Employee refresh failed: {}", e)))?;
+
+        return Ok(existing_id);
+    }
+
+    let name_parts: Vec<&str> = fallback_name.split_whitespace().collect();
+    let first_name = name_parts.first().copied().unwrap_or(&fallback_name).to_string();
+    let last_name = if name_parts.len() > 1 {
+        name_parts[1..].join(" ")
+    } else {
+        String::new()
+    };
+
+    conn.execute(
+        "INSERT INTO Employees (
+            employee_uuid, name, first_name, last_name, employee_code, biometric_id,
+            device_user_id, branch_id, employment_status, status, app_role, sync_status, last_modified, created_at, updated_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'Active', 'active', 'employee', 'placeholder', datetime('now'), datetime('now'), datetime('now'))",
+        params![
+            generate_uuid_v4(),
+            fallback_name,
+            first_name,
+            last_name,
+            employee_code,
+            employee_id,
+            employee_id,
+            branch_id.unwrap_or(1),
+        ],
+    )
+    .map_err(|e| AppError::DatabaseError(format!("Failed to create attendance employee: {}", e)))?;
+
+    Ok(conn.last_insert_rowid())
+}
+
 // ============================================================================
 // INVENTORY CRUD OPERATIONS
 // ============================================================================
@@ -1819,11 +1897,13 @@ pub async fn create_manual_attendance(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
+    let employee_row_id = ensure_attendance_employee_exists(conn, employee_id, None, Some(1))?;
+
     conn.execute(
         "INSERT INTO AttendanceLogs (employee_id, timestamp, punch_type, punch_method, branch_id, gate_id, device_id, is_synced)
          VALUES (?1, ?2, ?3, ?4, 1, 1, NULL, 0)",
         params![
-            employee_id,
+            employee_row_id,
             punch_time,
             sanitize_input(&punch_type),
             sanitize_input(&punch_method),

@@ -357,33 +357,92 @@ fn store_records_locally(
     let mut stored = 0;
 
     for record in records {
-        if let Some(id) = record.get("id").and_then(|v| v.as_i64()) {
-            match table_name.to_lowercase().as_str() {
-                "employees" => {
-                    let first_name = record.get("first_name").and_then(|v| v.as_str()).unwrap_or("");
-                    let last_name = record.get("last_name").and_then(|v| v.as_str()).unwrap_or("");
-                    let employee_code = record.get("employee_code").and_then(|v| v.as_str()).unwrap_or("");
-                    let status = record.get("status").and_then(|v| v.as_str()).unwrap_or("Active");
-                    let name = format!("{} {}", first_name, last_name);
-                    let dept_id = record.get("department_id").and_then(|v| v.as_i64()).unwrap_or(1);
-                    let branch_id = record.get("branch_id").and_then(|v| v.as_i64()).unwrap_or(1);
+        let table = table_name.to_lowercase();
+        match table.as_str() {
+            "employees" => {
+                let first_name = record.get("first_name").and_then(|v| v.as_str()).unwrap_or("");
+                let last_name = record.get("last_name").and_then(|v| v.as_str()).unwrap_or("");
+                let employee_code = record.get("employee_code").and_then(|v| v.as_str()).unwrap_or("");
+                let status = record.get("status").and_then(|v| v.as_str()).unwrap_or("Active");
+                let name = record
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| format!("{} {}", first_name, last_name).trim().to_string());
+                let dept_id = record.get("department_id").and_then(|v| v.as_i64()).unwrap_or(1);
+                let branch_id = record.get("branch_id").and_then(|v| v.as_i64()).unwrap_or(1);
+                let numeric_id = record.get("id").and_then(|v| v.as_i64());
 
+                if let Some(id) = numeric_id {
                     conn.execute(
                         "INSERT OR REPLACE INTO Employees (
-                            id, name, first_name, last_name, employee_code, 
+                            id, name, first_name, last_name, employee_code,
                             employment_status, status, department_id, branch_id,
                             updated_at
                         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))",
                         rusqlite::params![
-                            id, name, first_name, last_name, employee_code, 
+                            id, name, first_name, last_name, employee_code,
                             status, status, dept_id, branch_id
                         ],
                     ).ok();
-                    stored += 1;
-                },
-                _ => {
-                    // Generic fallback for other tables if they have a 'data' column
-                    // Removed unused json_str
+                } else if !employee_code.is_empty() {
+                    let existing_id: Option<i64> = conn
+                        .query_row(
+                            "SELECT id FROM Employees WHERE employee_code = ?1",
+                            rusqlite::params![employee_code],
+                            |row| row.get(0),
+                        )
+                        .ok();
+
+                    if let Some(existing_id) = existing_id {
+                        conn.execute(
+                            "UPDATE Employees
+                             SET name = ?1,
+                                 first_name = ?2,
+                                 last_name = ?3,
+                                 employment_status = ?4,
+                                 status = ?5,
+                                 department_id = ?6,
+                                 branch_id = ?7,
+                                 updated_at = datetime('now')
+                             WHERE id = ?8",
+                            rusqlite::params![
+                                name,
+                                first_name,
+                                last_name,
+                                status,
+                                status,
+                                dept_id,
+                                branch_id,
+                                existing_id
+                            ],
+                        ).ok();
+                    } else {
+                        conn.execute(
+                            "INSERT INTO Employees (
+                                name, first_name, last_name, employee_code,
+                                employment_status, status, department_id, branch_id,
+                                updated_at
+                            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'))",
+                            rusqlite::params![
+                                name,
+                                first_name,
+                                last_name,
+                                employee_code,
+                                status,
+                                status,
+                                dept_id,
+                                branch_id
+                            ],
+                        ).ok();
+                    }
+                }
+                stored += 1;
+            }
+            _ => {
+                if let Some(id) = record.get("id").and_then(|v| v.as_i64()) {
+                    // Generic fallback for other tables if they have a numeric id.
                     let _ = conn.execute(
                         &format!("INSERT OR REPLACE INTO {} (id, updated_at) VALUES (?1, datetime('now'))", table_name),
                         rusqlite::params![id],

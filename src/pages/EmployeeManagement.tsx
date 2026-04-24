@@ -338,12 +338,20 @@ export const EmployeeManagement: React.FC = () => {
       reader.readAsDataURL(file);
     });
 
+  const getEmployeeStatus = (emp: any) =>
+    String(emp?.employment_status || emp?.status || 'Active').trim();
+
   // Filter employees
   const filteredEmployees = employees.filter(emp => {
     const name = emp.full_name || `${emp.first_name || ''} ${emp.middle_name || ''} ${emp.last_name || ''}`.trim();
     const matchesSearch = name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          emp.employee_code?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || emp.status === statusFilter;
+    const employeeStatus = getEmployeeStatus(emp).toLowerCase();
+    const selectedStatus = statusFilter.toLowerCase();
+    const matchesStatus =
+      statusFilter === 'all' ||
+      employeeStatus === selectedStatus ||
+      (!employeeStatus && selectedStatus === 'active');
     return matchesSearch && matchesStatus;
   });
 
@@ -792,7 +800,7 @@ export const EmployeeManagement: React.FC = () => {
             <div>
               <p className="text-sm text-muted-foreground">Active</p>
               <p className="text-2xl font-bold text-green-600">
-                {employees.filter(e => e.status === 'Active' || !e.status).length}
+                {employees.filter(e => getEmployeeStatus(e).toLowerCase() === 'active').length}
               </p>
             </div>
             <Users className="w-8 h-8 text-green-600" />
@@ -803,7 +811,7 @@ export const EmployeeManagement: React.FC = () => {
             <div>
               <p className="text-sm text-muted-foreground">On Leave</p>
               <p className="text-2xl font-bold text-orange-600">
-                {employees.filter(e => e.status === 'On Leave').length}
+                {employees.filter(e => getEmployeeStatus(e).toLowerCase() === 'on leave').length}
               </p>
             </div>
             <Calendar className="w-8 h-8 text-orange-600" />
@@ -814,7 +822,10 @@ export const EmployeeManagement: React.FC = () => {
             <div>
               <p className="text-sm text-muted-foreground">Inactive</p>
               <p className="text-2xl font-bold text-red-600">
-                {employees.filter(e => e.status === 'Inactive').length}
+                {employees.filter(e => {
+                  const status = getEmployeeStatus(e).toLowerCase();
+                  return ['inactive', 'terminated', 'resigned', 'retired'].includes(status);
+                }).length}
               </p>
             </div>
             <Users className="w-8 h-8 text-red-600" />
@@ -912,8 +923,8 @@ export const EmployeeManagement: React.FC = () => {
                     <TableCell className="text-muted-foreground">{emp.department || '—'}</TableCell>
                     <TableCell className="text-muted-foreground">{emp.branch_name || '—'}</TableCell>
                     <TableCell>
-                      <Badge variant={emp.employment_status === 'Active' || !emp.employment_status ? 'default' : 'secondary'}>
-                        {emp.employment_status || 'Active'}
+                      <Badge variant={getEmployeeStatus(emp).toLowerCase() === 'active' ? 'default' : 'secondary'}>
+                        {getEmployeeStatus(emp)}
                       </Badge>
                     </TableCell>
                     {viewMode === 'deleted' && (

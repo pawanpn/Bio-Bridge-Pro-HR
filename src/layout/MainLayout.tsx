@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { usePermission } from '../hooks/usePermission';
 import { syncService } from '../services/syncService';
 import { AppConfig } from '../config/appConfig';
+import { canAccessModule, getAccessibleBranchIds, isSuperAdmin, normalizeRole } from '../config/accessPolicy';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -44,7 +45,9 @@ export const MainLayout: React.FC = () => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const { hasAnyPermission, loading: permissionLoading } = usePermission(user?.id);
-  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const role = normalizeRole(user?.role);
+  const isSuperAdminUser = isSuperAdmin(user?.role);
+  const accessibleBranchIds = getAccessibleBranchIds(user);
   const [calendarMode, setCalendarMode] = useState(() => {
     try {
       return localStorage.getItem('calendarMode') || 'BS';
@@ -132,13 +135,15 @@ export const MainLayout: React.FC = () => {
   useEffect(() => {
     invoke<any[]>('list_branches').then(setBranches).catch(console.error);
 
-    // Set initial branch if user is branch-locked
-    if (user?.branch_id && !isSuperAdmin) {
+    // Set initial branch from assigned branch scope
+    if (!isSuperAdminUser && accessibleBranchIds.length > 0) {
+      setSelectedBranch(accessibleBranchIds[0]);
+    } else if (user?.branch_id && !isSuperAdminUser) {
       setSelectedBranch(user.branch_id);
-    } else if (isSuperAdmin) {
+    } else if (isSuperAdminUser) {
       setSelectedBranch('all');
     }
-  }, [user, isSuperAdmin]);
+  }, [user, isSuperAdminUser, accessibleBranchIds]);
 
   const toggleCalendar = () => {
     const nextMode = calendarMode === 'BS' ? 'AD' : 'BS';
@@ -205,8 +210,11 @@ export const MainLayout: React.FC = () => {
     }
   }, [navigate, breadcrumbHistory]);
 
-  const isOperator = user?.role === 'OPERATOR';
+  const isOperator = role === 'OPERATOR';
   const canAccessLeave = user?.role === 'SUPER_ADMIN' || (!permissionLoading && hasAnyPermission(['view_leaves', 'apply_leave', 'approve_leave']));
+  const visibleBranches = isSuperAdminUser
+    ? branches
+    : branches.filter(branch => accessibleBranchIds.includes(String(branch.id)));
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
@@ -263,7 +271,7 @@ export const MainLayout: React.FC = () => {
             <div className="px-3 pt-2 pb-0.5 text-[10px] font-semibold text-white/40 uppercase tracking-wider">
               Human Resources
             </div>
-            {!isOperator && (
+            {canAccessModule(role, 'employees') && (
               <SidebarItem
                 icon={<Users size={16} />}
                 label="Employees"
@@ -271,7 +279,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Employees', '/employees')}
               />
             )}
-            {canAccessLeave && !isOperator && (
+            {canAccessLeave && canAccessModule(role, 'leave') && (
               <SidebarItem
                 icon={<CalendarCheck size={16} />}
                 label="Leave Management"
@@ -279,7 +287,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Leave', '/leave-management')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'attendance') && (
               <SidebarItem
                 icon={<ClipboardCheck size={16} />}
                 label="Attendance"
@@ -287,7 +295,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Attendance', '/attendance')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'payroll') && (
               <SidebarItem
                 icon={<DollarSign size={16} />}
                 label="Payroll"
@@ -300,7 +308,7 @@ export const MainLayout: React.FC = () => {
             <div className="px-3 pt-2 pb-0.5 text-[10px] font-semibold text-white/40 uppercase tracking-wider">
               Finance
             </div>
-            {!isOperator && (
+            {canAccessModule(role, 'finance') && (
               <SidebarItem
                 icon={<TrendingUp size={16} />}
                 label="Finance & Accounts"
@@ -308,7 +316,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Finance', '/finance')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'reports') && (
               <SidebarItem
                 icon={<FileText size={16} />}
                 label="Reports"
@@ -321,7 +329,7 @@ export const MainLayout: React.FC = () => {
             <div className="px-3 pt-2 pb-0.5 text-[10px] font-semibold text-white/40 uppercase tracking-wider">
               Operations
             </div>
-            {!isOperator && (
+            {canAccessModule(role, 'inventory') && (
               <SidebarItem
                 icon={<Package size={16} />}
                 label="Inventory"
@@ -329,7 +337,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Inventory', '/inventory')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'projects') && (
               <SidebarItem
                 icon={<Briefcase size={16} />}
                 label="Projects"
@@ -337,7 +345,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Projects', '/projects')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'crm') && (
               <SidebarItem
                 icon={<Users2 size={16} />}
                 label="CRM"
@@ -345,7 +353,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('CRM', '/crm')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'assets') && (
               <SidebarItem
                 icon={<Building2 size={16} />}
                 label="Assets"
@@ -358,7 +366,7 @@ export const MainLayout: React.FC = () => {
             <div className="px-3 pt-2 pb-0.5 text-[10px] font-semibold text-white/40 uppercase tracking-wider">
               Administration
             </div>
-            {!isOperator && (
+            {canAccessModule(role, 'organization') && (
               <SidebarItem
                 icon={<Monitor size={16} />}
                 label="Organization"
@@ -366,7 +374,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Devices', '/organization')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'permissions') && (
               <SidebarItem
                 icon={<Shield size={16} />}
                 label="Roles & Permissions"
@@ -385,7 +393,7 @@ export const MainLayout: React.FC = () => {
 
         {/* Footer - Fixed at Bottom */}
         <div className="flex-shrink-0 py-1 border-t border-white/10 space-y-0">
-          {!isOperator && (
+          {(canAccessModule(role, 'system-tools') || canAccessModule(role, 'system-settings')) && (
             <>
               <SidebarItem
                 icon={<Database size={16} />}
@@ -487,12 +495,12 @@ export const MainLayout: React.FC = () => {
             {/* Branch Selector */}
             <select
               value={selectedBranch}
-              disabled={!!user?.branch_id && !isSuperAdmin}
+              disabled={!isSuperAdminUser && visibleBranches.length <= 1}
               onChange={(e) => setSelectedBranch(e.target.value)}
               className="hidden md:block h-9 px-2 rounded-md border border-input bg-background text-xs lg:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value="all">Global (All Branches)</option>
-              {branches.map(b => (
+              {visibleBranches.map(b => (
                 <option key={b.id} value={b.id}>{b.name}</option>
               ))}
             </select>

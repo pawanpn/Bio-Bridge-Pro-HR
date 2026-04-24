@@ -485,39 +485,41 @@ pub async fn sync_device_logs(
 
         // 3. CAPTURE LOGS: Link to correct local IDs and queue for cloud
         for log in &logs {
-            let local_id: Option<i64> = conn
-                .query_row(
-                    "SELECT id FROM Employees WHERE biometric_id = ?1",
-                    params![log.employee_id],
-                    |r| r.get(0),
-                )
-                .ok();
+            let display_name = device_users
+                .iter()
+                .find(|u| u.employee_id == log.employee_id)
+                .map(|u| u.name.as_str());
+            let employee_row_id = crate::crud::ensure_attendance_employee_exists(
+                conn,
+                log.employee_id as i64,
+                display_name,
+                Some(target_branch_id),
+            )?;
 
-            if let Some(eid) = local_id {
-                let res = conn.execute(
-                    "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, device_id, branch_id, gate_id, punch_method)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![eid, log.timestamp, log.device_id, target_branch_id, target_gate_id, log.punch_method],
-                );
+            let res = conn.execute(
+                "INSERT OR IGNORE INTO AttendanceLogs (employee_id, device_user_id, timestamp, device_id, branch_id, gate_id, punch_method)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![employee_row_id, log.employee_id as i64, log.timestamp, log.device_id, target_branch_id, target_gate_id, log.punch_method],
+            );
 
-                if let Ok(affected) = res {
-                    if affected > 0 {
-                        let log_id = conn.last_insert_rowid();
-                        // Queue for Supabase Sync
-                        let _ = crate::sync_service::_queue_for_sync(
-                            conn,
+            if let Ok(affected) = res {
+                if affected > 0 {
+                    let log_id = conn.last_insert_rowid();
+                    // Queue for Supabase Sync
+                    let _ = crate::sync_service::_queue_for_sync(
+                        conn,
                             "AttendanceLogs",
                             "INSERT",
                             &log_id.to_string(),
                             &serde_json::json!({
-                                "employee_id": eid,
+                                "employee_id": employee_row_id,
+                                "device_user_id": log.employee_id,
                                 "timestamp": log.timestamp,
                                 "device_id": log.device_id,
                                 "punch_method": log.punch_method
                             }),
                             "MEDIUM",
-                        );
-                    }
+                    );
                 }
             }
         }
@@ -548,6 +550,161 @@ pub async fn sync_device_logs(
     });
 
     Ok(serde_json::json!(ui_logs))
+}
+
+#[tauri::command]
+pub async fn fetch_attendance_from_device(
+    ip: String,
+    port: u16,
+    device_id: i32,
+    brand: String,
+    target_branch_id: i64,
+    target_gate_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    sync_device_logs(
+        ip,
+        port,
+        device_id,
+        brand,
+        target_branch_id,
+        target_gate_id,
+        state,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn get_unmapped_logs(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.device_user_id, e.name, e.employee_code, e.branch_id, b.name as branch_name,
+                COUNT(al.id) as log_count, MAX(al.timestamp) as last_seen, e.sync_status
+         FROM Employees e
+         LEFT JOIN AttendanceLogs al ON al.employee_id = e.id
+         LEFT JOIN Branches b ON e.branch_id = b.id
+         WHERE e.device_user_id IS NOT NULL
+           AND (e.sync_status = 'placeholder' OR e.name LIKE 'Unknown ID %' OR e.name LIKE 'User %')
+         GROUP BY e.id, e.device_user_id, e.name, e.employee_code, e.branch_id, b.name, e.sync_status
+         ORDER BY last_seen DESC, e.id DESC",
+    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(json!({
+                "id": row.get::<_, i64>(0)?,
+                "device_user_id": row.get::<_, Option<i64>>(1)?,
+                "name": row.get::<_, String>(2)?,
+                "employee_code": row.get::<_, Option<String>>(3)?,
+                "branch_id": row.get::<_, Option<i64>>(4)?,
+                "branch_name": row.get::<_, Option<String>>(5)?,
+                "log_count": row.get::<_, i64>(6)?,
+                "last_seen": row.get::<_, Option<String>>(7)?,
+                "sync_status": row.get::<_, Option<String>>(8)?,
+            }))
+        })
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
+
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[tauri::command]
+pub async fn assign_name_to_id(
+    device_user_id: i64,
+    name: String,
+    employee_id: Option<i64>,
+    branch_id: Option<i64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let clean_name = name.trim().to_string();
+    let final_name = if clean_name.is_empty() {
+        format!("Employee {}", device_user_id)
+    } else {
+        clean_name
+    };
+    let branch = branch_id.unwrap_or(1);
+
+    let placeholder_employee_id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM Employees WHERE device_user_id = ?1 AND (sync_status = 'placeholder' OR name LIKE 'Unknown ID %' OR name LIKE 'User %') ORDER BY id DESC LIMIT 1",
+            params![device_user_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| AppError::DatabaseError(format!("Lookup failed: {}", e)))?;
+
+    let resolved_employee_id = if let Some(target_id) = employee_id {
+        conn.execute(
+            "UPDATE Employees
+             SET device_user_id = ?1,
+                 name = CASE WHEN name IS NULL OR TRIM(name) = '' OR name LIKE 'User %' OR name LIKE 'Unknown ID %' THEN ?2 ELSE name END,
+                 sync_status = 'active',
+                 branch_id = COALESCE(branch_id, ?3),
+                 updated_at = datetime('now')
+             WHERE id = ?4",
+            params![device_user_id, final_name, branch, target_id],
+        ).map_err(|e| AppError::DatabaseError(format!("Employee update failed: {}", e)))?;
+
+        if let Some(placeholder_id) = placeholder_employee_id {
+            if placeholder_id != target_id {
+                conn.execute(
+                    "UPDATE AttendanceLogs SET employee_id = ?1 WHERE employee_id = ?2",
+                    params![target_id, placeholder_id],
+                ).ok();
+                conn.execute("DELETE FROM Employees WHERE id = ?1", params![placeholder_id]).ok();
+            }
+        }
+        target_id
+    } else if let Some(placeholder_id) = placeholder_employee_id {
+        conn.execute(
+            "UPDATE Employees
+             SET name = ?1,
+                 sync_status = 'active',
+                 branch_id = COALESCE(branch_id, ?2),
+                 updated_at = datetime('now')
+             WHERE id = ?3",
+            params![final_name, branch, placeholder_id],
+        ).map_err(|e| AppError::DatabaseError(format!("Employee rename failed: {}", e)))?;
+        placeholder_id
+    } else {
+        let employee_uuid = generate_uuid_v4();
+        conn.execute(
+            "INSERT INTO Employees (
+                employee_uuid, name, first_name, last_name, employee_code, biometric_id, device_user_id,
+                branch_id, employment_status, status, app_role, sync_status, last_modified, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'Active', 'active', 'employee', 'active', datetime('now'), datetime('now'), datetime('now'))",
+            params![
+                employee_uuid,
+                final_name.clone(),
+                final_name.clone(),
+                "",
+                device_user_id.to_string(),
+                device_user_id,
+                device_user_id,
+                branch,
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Employee create failed: {}", e)))?;
+        conn.last_insert_rowid()
+    };
+
+    Ok(json!({
+        "success": true,
+        "employee_id": resolved_employee_id,
+        "device_user_id": device_user_id,
+        "name": final_name,
+        "branch_id": branch,
+    }))
 }
 
 #[tauri::command]
@@ -822,10 +979,12 @@ pub async fn add_manual_attendance(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
+    let employee_row_id = crate::crud::ensure_attendance_employee_exists(conn, employee_id, None, Some(1))?;
+
     conn.execute(
-        "INSERT INTO AttendanceLogs (employee_id, timestamp, punch_method, branch_id, gate_id, device_id)
-         VALUES (?1, ?2, ?3, 1, 1, 999)",
-        params![employee_id, timestamp, punch_method],
+        "INSERT INTO AttendanceLogs (employee_id, device_user_id, timestamp, punch_method, branch_id, gate_id, device_id)
+         VALUES (?1, NULL, ?2, ?3, 1, 1, 999)",
+        params![employee_row_id, timestamp, punch_method],
     )
     .map_err(|e| AppError::DatabaseError(format!("Failed to add manual log: {}", e)))?;
 
@@ -858,10 +1017,11 @@ pub async fn import_csv_attendance(
 
             match emp_id {
                 Ok(id) => {
+                    let employee_row_id = crate::crud::ensure_attendance_employee_exists(conn, id, None, Some(1))?;
                     let res = conn.execute(
-                        "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, punch_method, branch_id, gate_id, device_id)
-                         VALUES (?1, ?2, ?3, 1, 1, 999)",
-                        params![id, timestamp, method],
+                        "INSERT OR IGNORE INTO AttendanceLogs (employee_id, device_user_id, timestamp, punch_method, branch_id, gate_id, device_id)
+                         VALUES (?1, NULL, ?2, ?3, 1, 1, 999)",
+                        params![employee_row_id, timestamp, method],
                     );
                     match res {
                         Ok(1) => imported += 1,

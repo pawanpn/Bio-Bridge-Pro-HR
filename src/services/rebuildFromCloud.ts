@@ -1,5 +1,6 @@
 import { supabase } from '@/config/supabase';
 import { invoke } from '@tauri-apps/api/core';
+import { applyBranchScope, applyOrganizationScope } from './dataScope';
 
 export interface RebuildStats {
   employees: number;
@@ -78,10 +79,9 @@ async function rebuildEmployees(): Promise<number> {
   const pageSize = 100;
 
   while (true) {
-    const { data, error } = await supabase
-      .from('employees')
-      .select('*')
-      .range(page * pageSize, (page + 1) * pageSize - 1);
+    let query: any = supabase.from('employees').select('*');
+    query = applyBranchScope(query, 'branch_id');
+    const { data, error } = await query.range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (error || !data || data.length === 0) break;
 
@@ -109,10 +109,9 @@ async function rebuildAttendance(): Promise<number> {
   const pageSize = 100;
 
   while (true) {
-    const { data, error } = await supabase
-      .from('attendance_logs')
-      .select('*')
-      .range(page * pageSize, (page + 1) * pageSize - 1);
+    let query: any = supabase.from('attendance_logs').select('*');
+    query = applyBranchScope(query, 'branch_id');
+    const { data, error } = await query.range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (error || !data || data.length === 0) break;
 
@@ -140,10 +139,9 @@ async function rebuildLeaveRequests(): Promise<number> {
   const pageSize = 100;
 
   while (true) {
-    const { data, error } = await supabase
-      .from('leave_requests')
-      .select('*')
-      .range(page * pageSize, (page + 1) * pageSize - 1);
+    let query: any = supabase.from('leave_requests').select('*');
+    query = applyBranchScope(query, 'branch_id');
+    const { data, error } = await query.range(page * pageSize, (page + 1) * pageSize - 1);
 
     if (error || !data || data.length === 0) break;
 
@@ -186,7 +184,9 @@ async function rebuildItems(): Promise<number> {
 }
 
 async function rebuildBranches(): Promise<number> {
-  const { data, error } = await supabase.from('branches').select('*');
+  let query: any = supabase.from('branches').select('*');
+  query = applyOrganizationScope(query, 'organization_id');
+  const { data, error } = await query;
   
   if (error || !data) return 0;
 
@@ -206,7 +206,9 @@ async function rebuildBranches(): Promise<number> {
 }
 
 async function rebuildGates(): Promise<number> {
-  const { data, error } = await supabase.from('gates').select('*');
+  let query: any = supabase.from('gates').select('*');
+  query = applyBranchScope(query, 'branch_id');
+  const { data, error } = await query;
   
   if (error || !data) return 0;
 
@@ -226,7 +228,9 @@ async function rebuildGates(): Promise<number> {
 }
 
 async function rebuildDevices(): Promise<number> {
-  const { data, error } = await supabase.from('devices').select('*');
+  let query: any = supabase.from('devices').select('*');
+  query = applyBranchScope(query, 'branch_id');
+  const { data, error } = await query;
   
   if (error || !data) return 0;
 

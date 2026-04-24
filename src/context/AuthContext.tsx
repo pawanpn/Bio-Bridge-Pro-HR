@@ -1,14 +1,16 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/config/supabase';
 import { User as SupabaseUser } from '@supabase/supabase-js';
+import { AppRole, normalizeRole } from '@/config/accessPolicy';
 
 interface User {
   id: string;
   username: string;
   email: string;
   full_name?: string;
-  role: 'SUPER_ADMIN' | 'ADMIN' | 'MANAGER' | 'SUPERVISOR' | 'EMPLOYEE' | 'OPERATOR' | 'VIEWER';
+  role: AppRole;
   branch_id?: string;
+  branch_ids?: string[];
   department_id?: string;
   designation_id?: string;
   organization_id?: string;
@@ -114,13 +116,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
+      const { data: branchAccessData } = await supabase
+        .from('user_branch_access')
+        .select('branch_id')
+        .eq('user_id', userProfile.id);
+
+      const userBranchIds = (branchAccessData || [])
+        .map((row: any) => row.branch_id)
+        .filter(Boolean);
+
       const userData: User = {
         id: userProfile.id,
         username: userProfile.username,
         email: userProfile.email,
         full_name: userProfile.full_name,
-        role: forceSuperAdminView ? 'SUPER_ADMIN' : (userProfile.role || 'EMPLOYEE'),
+        role: forceSuperAdminView ? 'SUPER_ADMIN' : normalizeRole(userProfile.role),
         branch_id: userProfile.branch_id,
+        branch_ids: userBranchIds,
         department_id: userProfile.department_id,
         designation_id: userProfile.designation_id,
         organization_id: userProfile.organization_id,

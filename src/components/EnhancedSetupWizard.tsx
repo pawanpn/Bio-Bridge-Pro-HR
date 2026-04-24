@@ -404,9 +404,9 @@ export const EnhancedSetupWizard: React.FC = () => {
     if (insertedPermissions) {
       const rolePermissions: Array<{role: string, permission_id: string, organization_id: string}> = [];
       
-      // Define role codes (matching your schema: SUPER_ADMIN, ADMIN, MANAGER, EMPLOYEE, OPERATOR)
+      // Define role codes (matching your schema: SUPER_ADMIN, ADMIN, BRANCH_HEAD, MANAGER, HR, EMPLOYEE, OPERATOR, VIEWER)
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const roles = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'SUPERVISOR', 'EMPLOYEE', 'OPERATOR', 'VIEWER'];
+      const roles = ['SUPER_ADMIN', 'ADMIN', 'BRANCH_HEAD', 'MANAGER', 'SUPERVISOR', 'HR', 'EMPLOYEE', 'OPERATOR', 'VIEWER'];
 
       // SUPER_ADMIN - all permissions
       insertedPermissions.forEach((perm: any) => {
@@ -418,6 +418,13 @@ export const EnhancedSetupWizard: React.FC = () => {
         .filter((p: any) => !['delete_employees', 'manage_settings'].includes(p.permission))
         .forEach((perm: any) => {
           rolePermissions.push({ role: 'ADMIN', permission_id: perm.id, organization_id: orgId });
+        });
+
+      // BRANCH_HEAD - branch-wide operations
+      insertedPermissions
+        .filter((p: any) => ['view_employees', 'create_employees', 'edit_employees', 'view_attendance', 'approve_attendance', 'view_leaves', 'approve_leave', 'view_reports', 'export_reports'].includes(p.permission))
+        .forEach((perm: any) => {
+          rolePermissions.push({ role: 'BRANCH_HEAD', permission_id: perm.id, organization_id: orgId });
         });
 
       // MANAGER - department level
@@ -432,6 +439,13 @@ export const EnhancedSetupWizard: React.FC = () => {
         .filter((p: any) => ['view_employees', 'view_attendance', 'view_leaves', 'view_reports'].includes(p.permission))
         .forEach((perm: any) => {
           rolePermissions.push({ role: 'SUPERVISOR', permission_id: perm.id, organization_id: orgId });
+        });
+
+      // HR - people operations
+      insertedPermissions
+        .filter((p: any) => ['view_employees', 'create_employees', 'edit_employees', 'view_attendance', 'approve_attendance', 'view_leaves', 'approve_leave', 'view_reports', 'export_reports'].includes(p.permission))
+        .forEach((perm: any) => {
+          rolePermissions.push({ role: 'HR', permission_id: perm.id, organization_id: orgId });
         });
 
       // EMPLOYEE - basic
