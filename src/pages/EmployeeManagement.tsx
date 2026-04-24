@@ -276,7 +276,14 @@ export const EmployeeManagement: React.FC = () => {
   };
 
   const handleAddEmployee = () => {
-    setFormData(emptyForm);
+    // Auto-calculate the next sequential Employee ID (BB-00XX) 
+    const maxId = employees.reduce((max, emp) => Math.max(max, parseInt(emp.id) || 0), 0);
+    const nextCode = `BB-${String(maxId + 1).padStart(4, '0')}`;
+    
+    setFormData({
+      ...emptyForm,
+      employee_code: nextCode
+    });
     setFormStep(1);
     setFormStatus('');
     setFormDialog({ open: true, editing: null });
@@ -1407,7 +1414,8 @@ export const EmployeeManagement: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-xl font-bold">{viewDialog.employee.name}</h3>
-                  <p className="text-muted-foreground">{viewDialog.employee.employee_code || `#${viewDialog.employee.id}`}</p>
+                  <p className="text-muted-foreground font-medium text-primary">Employee ID: {viewDialog.employee.employee_code || `#${viewDialog.employee.id}`}</p>
+                  <p className="text-xs text-muted-foreground font-mono mt-1">Attendance Device ID: {viewDialog.employee.biometric_id || 'Not Assigned'}</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
