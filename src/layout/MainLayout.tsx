@@ -44,6 +44,7 @@ export const MainLayout: React.FC = () => {
   const location = useLocation();
   const { user, logout } = useAuth();
   const { hasAnyPermission, loading: permissionLoading } = usePermission(user?.id);
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   const [calendarMode, setCalendarMode] = useState(() => {
     try {
       return localStorage.getItem('calendarMode') || 'BS';
@@ -132,10 +133,12 @@ export const MainLayout: React.FC = () => {
     invoke<any[]>('list_branches').then(setBranches).catch(console.error);
 
     // Set initial branch if user is branch-locked
-    if (user?.branch_id) {
+    if (user?.branch_id && !isSuperAdmin) {
       setSelectedBranch(user.branch_id);
+    } else if (isSuperAdmin) {
+      setSelectedBranch('all');
     }
-  }, [user]);
+  }, [user, isSuperAdmin]);
 
   const toggleCalendar = () => {
     const nextMode = calendarMode === 'BS' ? 'AD' : 'BS';
@@ -484,7 +487,7 @@ export const MainLayout: React.FC = () => {
             {/* Branch Selector */}
             <select
               value={selectedBranch}
-              disabled={!!user?.branch_id}
+              disabled={!!user?.branch_id && !isSuperAdmin}
               onChange={(e) => setSelectedBranch(e.target.value)}
               className="hidden md:block h-9 px-2 rounded-md border border-input bg-background text-xs lg:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >

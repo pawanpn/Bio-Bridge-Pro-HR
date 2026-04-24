@@ -460,6 +460,7 @@ pub async fn create_employee(
         .employee_uuid
         .clone()
         .unwrap_or_else(generate_uuid_v4);
+    let employee_uuid_value = Some(employee_uuid.clone());
     let sync_status = request
         .sync_status
         .clone()
@@ -525,8 +526,8 @@ pub async fn create_employee(
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
             ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
             ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44,
-            ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53, ?54, ?55, ?56, ?57,
-            'active', ?58, ?59, ?60, datetime('now'), datetime('now')
+            ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53, ?54, ?55, ?56, ?57, ?58,
+            'active', ?59, ?60, ?61, datetime('now'), datetime('now')
         )",
         params![
             &employee_uuid,
@@ -599,7 +600,7 @@ pub async fn create_employee(
     // Prepare sync payload with ALL fields
     let sync_payload = serde_json::json!({
         "id": employee_id,
-        "employee_uuid": employee_uuid,
+        "employee_uuid": employee_uuid_value,
         "employee_code": employee_code,
         "first_name": first_name,
         "middle_name": request.middle_name,
@@ -939,6 +940,8 @@ pub async fn update_employee(
     let mut updates = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
+    let employee_uuid_value = request.employee_uuid.clone();
+
     if let Some(ref employee_uuid) = request.employee_uuid {
         updates.push("employee_uuid = ?");
         values.push(Box::new(sanitize_input(employee_uuid)));
@@ -1232,7 +1235,7 @@ pub async fn update_employee(
     // Push to sync queue
     let sync_payload = serde_json::json!({
         "id": employee_id,
-        "employee_uuid": request.employee_uuid,
+        "employee_uuid": employee_uuid_value,
         "first_name": request.first_name,
         "last_name": request.last_name,
         "department_id": request.department_id,

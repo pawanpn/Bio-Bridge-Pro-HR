@@ -161,6 +161,7 @@ const emptyForm: EmployeeForm = {
 
 export const EmployeeManagement: React.FC = () => {
   const { user, resetPassword } = useAuth();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
   
   // State
   const [employees, setEmployees] = useState<any[]>([]);
@@ -240,36 +241,75 @@ export const EmployeeManagement: React.FC = () => {
     setLoading(true);
     try {
       console.log('[EmployeeManagement] Loading data...');
-      const [empResult, branchData, deviceData, deptData, desigData] = await Promise.all([
-        invoke<any>('list_employees', { statusFilter: viewMode === 'deleted' ? 'deleted' : 'active' }),
+      const employeeStatusFilter = viewMode === 'deleted'
+        ? 'deleted'
+        : isSuperAdmin
+          ? 'all'
+          : 'active';
+
+      const [empResult, branchResult, deviceResult, deptResult, desigResult] = await Promise.allSettled([
+        invoke<any>('list_employees', { statusFilter: employeeStatusFilter }),
         invoke<any[]>('list_branches'),
         invoke<any[]>('list_all_devices'),
         invoke<any[]>('list_departments'),
         invoke<any[]>('list_designations'),
       ]);
-      
-      console.log('[EmployeeManagement] Raw branch data:', branchData);
-      console.log('[EmployeeManagement] Raw device data:', deviceData);
-      console.log('[EmployeeManagement] Branch data type:', typeof branchData, Array.isArray(branchData));
-      console.log('[EmployeeManagement] Device data type:', typeof deviceData, Array.isArray(deviceData));
-      
-      // Handle both flat array and wrapped {success, data, count} format
-      const empData = Array.isArray(empResult) ? empResult : (empResult as any)?.data || [];
-      const branches = Array.isArray(branchData) ? branchData : [];
-      const devices = Array.isArray(deviceData) ? deviceData : [];
-      
-      console.log('[EmployeeManagement] Setting employees:', empData.length);
+
+      if (empResult.status === 'fulfilled') {
+        const empData = Array.isArray(empResult.value)
+          ? empResult.value
+          : empResult.value?.data || [];
+
+        console.log('[EmployeeManagement] Setting employees:', empData.length);
+        setEmployees(empData);
+
+        if (empResult.value?.debug) {
+          setDebugInfo(empResult.value.debug);
+        }
+
+      } else {
+        console.error('[EmployeeManagement] Failed to load employees:', empResult.reason);
+        setEmployees([]);
+        setDebugInfo(null);
+      }
+
+      const branches = branchResult.status === 'fulfilled' && Array.isArray(branchResult.value)
+        ? branchResult.value
+        : [];
+      const devices = deviceResult.status === 'fulfilled' && Array.isArray(deviceResult.value)
+        ? deviceResult.value
+        : [];
+      const departments = deptResult.status === 'fulfilled' && Array.isArray(deptResult.value)
+        ? deptResult.value
+        : [];
+      const designations = desigResult.status === 'fulfilled' && Array.isArray(desigResult.value)
+        ? desigResult.value
+        : [];
+
+      if (branchResult.status === 'rejected') {
+        console.error('[EmployeeManagement] Failed to load branches:', branchResult.reason);
+      }
+      if (deviceResult.status === 'rejected') {
+        console.error('[EmployeeManagement] Failed to load devices:', deviceResult.reason);
+      }
+      if (deptResult.status === 'rejected') {
+        console.error('[EmployeeManagement] Failed to load departments:', deptResult.reason);
+      }
+      if (desigResult.status === 'rejected') {
+        console.error('[EmployeeManagement] Failed to load designations:', desigResult.reason);
+      }
+
       console.log('[EmployeeManagement] Setting branches:', branches.length, branches);
       console.log('[EmployeeManagement] Setting devices:', devices.length, devices);
-      
-      setEmployees(empData);
-      setBranches(branches);
+
+      const fallbackBranches = empResult.status === 'fulfilled'
+        ? deriveBranchesFromEmployees(Array.isArray(empResult.value) ? empResult.value : empResult.value?.data || [])
+        : [];
+
+      setBranches(branches.length > 0 ? branches : fallbackBranches);
       setDevices(devices);
-      setDepartments(Array.isArray(deptData) ? deptData : []);
-      setDesignations(Array.isArray(desigData) ? desigData : []);
-      if ((empResult as any)?.debug) {
-        setDebugInfo((empResult as any).debug);
-      }
+      setDepartments(departments);
+      setDesignations(designations);
     } catch (error) {
       console.error('Failed to load data:', error);
       setEmployees([]);
@@ -314,6 +354,20 @@ export const EmployeeManagement: React.FC = () => {
   const filteredDesignations = formData.branch_id 
     ? designations.filter(d => !d.branch_id || d.branch_id.toString() === formData.branch_id?.toString())
     : designations;
+
+  const deriveBranchesFromEmployees = (empRows: any[]) => {
+    const branchMap = new Map<number, { id: number; name: string }>();
+
+    empRows.forEach((emp: any) => {
+      const branchId = Number(emp.branch_id);
+      const branchName = emp.branch_name || emp.branch?.name;
+      if (branchId && branchName && !branchMap.has(branchId)) {
+        branchMap.set(branchId, { id: branchId, name: branchName });
+      }
+    });
+
+    return Array.from(branchMap.values());
+  };
 
   // Form handlers
   const handleNextStep = () => {

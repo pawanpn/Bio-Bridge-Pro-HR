@@ -25,6 +25,24 @@ fn generate_uuid_v4() -> String {
     )
 }
 
+fn read_json_str<'a>(value: &'a Value, keys: &[&str], default: &'a str) -> String {
+    for key in keys {
+        if let Some(val) = value.get(*key).and_then(|v| v.as_str()) {
+            return val.to_string();
+        }
+    }
+    default.to_string()
+}
+
+fn read_json_i64(value: &Value, keys: &[&str], default: i64) -> i64 {
+    for key in keys {
+        if let Some(val) = value.get(*key).and_then(|v| v.as_i64()) {
+            return val;
+        }
+    }
+    default
+}
+
 #[tauri::command]
 pub async fn list_all_devices(
     branch_id: Option<i64>,
@@ -40,7 +58,8 @@ pub async fn list_all_devices(
 
     let mut query = String::from(
         "SELECT d.id, d.name, d.brand, d.ip_address, d.port, d.comm_key, d.machine_number, d.is_default, d.status,
-                b.name as branch_name, g.name as gate_name, d.branch_id, d.gate_id
+                b.name as branch_name, g.name as gate_name, d.branch_id, d.gate_id,
+                d.device_uuid, d.sync_status, d.last_modified, d.server_id
          FROM Devices d
          LEFT JOIN Branches b ON d.branch_id = b.id
          LEFT JOIN Gates g ON d.gate_id = g.id"
@@ -71,6 +90,10 @@ pub async fn list_all_devices(
                 "gate_name": row.get::<_, Option<String>>(10)?,
                 "branch_id": row.get::<_, Option<i64>>(11)?,
                 "gate_id": row.get::<_, Option<i64>>(12)?,
+                "device_uuid": row.get::<_, Option<String>>(13)?,
+                "sync_status": row.get::<_, Option<String>>(14)?,
+                "last_modified": row.get::<_, Option<String>>(15)?,
+                "server_id": row.get::<_, Option<String>>(16)?,
             }))
         })
         .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
@@ -275,10 +298,8 @@ pub async fn add_device(device: Value, state: tauri::State<'_, AppState>) -> Res
     let conn = db_guard
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    let device_uuid = device["device_uuid"]
-        .as_str()
-        .map(|s| s.to_string())
-        .unwrap_or_else(generate_uuid_v4);
+    let device_uuid = read_json_str(&device, &["device_uuid", "deviceUuid"], "");
+    let device_uuid = if device_uuid.is_empty() { generate_uuid_v4() } else { device_uuid };
     let last_modified = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
@@ -286,14 +307,14 @@ pub async fn add_device(device: Value, state: tauri::State<'_, AppState>) -> Res
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'offline', 'pending', ?10)",
         params![
             device_uuid,
-            device["name"].as_str().unwrap_or("New Device"),
-            device["brand"].as_str().unwrap_or("ZKTeco"),
-            device["ip"].as_str().unwrap_or(""),
-            device["port"].as_i64().unwrap_or(4370) as i32,
-            device["comm_key"].as_i64().unwrap_or(0) as i32,
-            device["machine_number"].as_i64().unwrap_or(1) as i32,
-            device["branch_id"].as_i64(),
-            device["gate_id"].as_i64(),
+            read_json_str(&device, &["name"], "New Device"),
+            read_json_str(&device, &["brand"], "ZKTeco"),
+            read_json_str(&device, &["ip", "ip_address"], ""),
+            read_json_i64(&device, &["port"], 4370) as i32,
+            read_json_i64(&device, &["comm_key", "commKey"], 0) as i32,
+            read_json_i64(&device, &["machine_number", "machineNumber"], 1) as i32,
+            read_json_i64(&device, &["branch_id", "branchId"], 1),
+            read_json_i64(&device, &["gate_id", "gateId"], 1),
             last_modified,
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to add device: {}", e)))?;
@@ -323,14 +344,14 @@ pub async fn update_device(
     conn.execute(
         "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, machine_number=?6, branch_id=?7, gate_id=?8, sync_status='modified', last_modified=?9 WHERE id=?10",
         params![
-            device["name"].as_str().unwrap_or(""),
-            device["brand"].as_str().unwrap_or("ZKTeco"),
-            device["ip"].as_str().unwrap_or(""),
-            device["port"].as_i64().unwrap_or(4370) as i32,
-            device["comm_key"].as_i64().unwrap_or(0) as i32,
-            device["machine_number"].as_i64().unwrap_or(1) as i32,
-            device["branch_id"].as_i64(),
-            device["gate_id"].as_i64(),
+            read_json_str(&device, &["name"], ""),
+            read_json_str(&device, &["brand"], "ZKTeco"),
+            read_json_str(&device, &["ip", "ip_address"], ""),
+            read_json_i64(&device, &["port"], 4370) as i32,
+            read_json_i64(&device, &["comm_key", "commKey"], 0) as i32,
+            read_json_i64(&device, &["machine_number", "machineNumber"], 1) as i32,
+            read_json_i64(&device, &["branch_id", "branchId"], 1),
+            read_json_i64(&device, &["gate_id", "gateId"], 1),
             chrono::Utc::now().to_rfc3339(),
             id
         ],
