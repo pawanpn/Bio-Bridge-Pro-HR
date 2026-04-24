@@ -215,7 +215,7 @@ export const PermissionManagement: React.FC = () => {
           break;
         case 'MANAGER':
           permsToAssign = allPerms
-            .filter((p: any) => ['view_employees', 'view_attendance', 'approve_attendance', 'view_leaves', 'approve_leave', 'view_payroll', 'view_reports', 'export_reports'].includes(p.permission))
+            .filter((p: any) => ['view_employees', 'view_attendance', 'approve_attendance', 'view_leaves', 'view_payroll', 'view_reports', 'export_reports'].includes(p.permission))
             .map((p: any) => p.id);
           break;
         case 'EMPLOYEE':

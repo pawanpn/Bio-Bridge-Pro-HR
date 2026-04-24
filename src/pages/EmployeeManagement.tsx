@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
 import { Switch } from '@/components/ui/switch';
@@ -183,12 +183,25 @@ export const EmployeeManagement: React.FC = () => {
   const [selectedBranchId, setSelectedBranchId] = useState<string>('');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<any>(null);
+  const [employeeDocuments, setEmployeeDocuments] = useState<any[]>([]);
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentForm, setDocumentForm] = useState({
+    doc_type: 'ID Card',
+    valid_until: '',
+    email_alert: false,
+    alert_before_days: 30,
+  });
+  const [documentUploading, setDocumentUploading] = useState(false);
+  const [documentStatus, setDocumentStatus] = useState('');
 
   // Form state
   const [formData, setFormData] = useState<EmployeeForm>(emptyForm);
   const [formStep, setFormStep] = useState(1);
   const [formStatus, setFormStatus] = useState('');
   const [debugInfo, setDebugInfo] = useState<any>(null);
+  const profilePhotoInputRef = useRef<HTMLInputElement>(null);
+  const bioPhotoInputRef = useRef<HTMLInputElement>(null);
+  const employeeDocumentInputRef = useRef<HTMLInputElement>(null);
 
   // Load data
   useEffect(() => {
@@ -202,6 +215,24 @@ export const EmployeeManagement: React.FC = () => {
       window.removeEventListener('data-synced', handleDataSynced);
     };
   }, [viewMode]);
+
+  useEffect(() => {
+    if (formDialog.open && formDialog.editing?.id) {
+      loadEmployeeDocuments(formDialog.editing.id);
+      setDocumentStatus('');
+      setDocumentFile(null);
+      setDocumentForm({
+        doc_type: 'ID Card',
+        valid_until: '',
+        email_alert: false,
+        alert_before_days: 30,
+      });
+    } else {
+      setEmployeeDocuments([]);
+      setDocumentFile(null);
+      setDocumentStatus('');
+    }
+  }, [formDialog.open, formDialog.editing?.id]);
 
   const loadData = async () => {
     setLoading(true);
@@ -246,6 +277,24 @@ export const EmployeeManagement: React.FC = () => {
       setLoading(false);
     }
   };
+
+  const loadEmployeeDocuments = async (employeeId: number) => {
+    try {
+      const docs = await invoke<any[]>('list_employee_documents', { employeeId });
+      setEmployeeDocuments(Array.isArray(docs) ? docs : []);
+    } catch (error) {
+      console.error('Failed to load employee documents:', error);
+      setEmployeeDocuments([]);
+    }
+  };
+
+  const fileToDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
 
   // Filter employees
   const filteredEmployees = employees.filter(emp => {
@@ -300,6 +349,15 @@ export const EmployeeManagement: React.FC = () => {
     });
     setFormStep(1);
     setFormStatus('');
+    setEmployeeDocuments([]);
+    setDocumentFile(null);
+    setDocumentStatus('');
+    setDocumentForm({
+      doc_type: 'ID Card',
+      valid_until: '',
+      email_alert: false,
+      alert_before_days: 30,
+    });
     setFormDialog({ open: true, editing: null });
   };
 
@@ -337,17 +395,19 @@ export const EmployeeManagement: React.FC = () => {
         citizenship_number: formData.citizenship_number || undefined,
         pan_number: formData.pan_number || undefined,
         branch_id: formData.branch_id ? String(formData.branch_id) : undefined,
-        department_id: formData.department_id || undefined,
-        designation_id: formData.designation_id || undefined,
+        department_id: formData.department_id ? String(formData.department_id) : undefined,
+        designation_id: formData.designation_id ? String(formData.designation_id) : undefined,
         employment_type: formData.employment_type || undefined,
         employment_status: formData.employment_status || 'Active',
         date_of_joining: formData.date_of_joining || undefined,
-        reporting_manager_id: formData.reporting_manager_id || undefined,
+        reporting_manager_id: formData.reporting_manager_id ? String(formData.reporting_manager_id) : undefined,
         bank_name: formData.bank_name || undefined,
         account_number: formData.account_number || undefined,
+        emergency_contact_name: formData.emergency_contact_name || undefined,
+        emergency_contact_phone: formData.emergency_contact_phone || undefined,
         emergency_contact_relation: formData.emergency_contact_relation || undefined,
-        area_id: formData.area_id || undefined,
-        location_id: formData.location_id || undefined,
+        area_id: formData.area_id ? String(formData.area_id) : undefined,
+        location_id: formData.location_id ? String(formData.location_id) : undefined,
         photo: formData.photo || undefined,
         enable_self_service: formData.enable_self_service,
         enable_mobile_access: formData.enable_mobile_access,
@@ -362,8 +422,8 @@ export const EmployeeManagement: React.FC = () => {
         postcode: formData.postcode || undefined,
         passport_no: formData.passport_no || undefined,
         nationality: formData.nationality || undefined,
-        verification_mode: formData.verification_mode || undefined,
-        device_privilege: formData.device_privilege || undefined,
+        verification_mode: formData.verification_mode ? String(formData.verification_mode) : undefined,
+        device_privilege: formData.device_privilege ? String(formData.device_privilege) : undefined,
         device_password: formData.device_password || undefined,
         card_no: formData.card_no || undefined,
         bio_photo: formData.bio_photo || undefined,
@@ -455,6 +515,84 @@ export const EmployeeManagement: React.FC = () => {
       setFormStatus('❌ Pull failed: ' + (error?.message || error));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleProfilePhotoUpload = async (file?: File) => {
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    setFormData(prev => ({ ...prev, photo: dataUrl }));
+  };
+
+  const handleBioPhotoUpload = async (file?: File) => {
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    setFormData(prev => ({ ...prev, bio_photo: dataUrl }));
+  };
+
+  const handleUploadEmployeeDocument = async () => {
+    if (!formDialog.editing?.id) {
+      setDocumentStatus('Save the employee first before uploading documents.');
+      return;
+    }
+
+    if (!documentFile) {
+      setDocumentStatus('Select a document file first.');
+      return;
+    }
+
+    setDocumentUploading(true);
+    setDocumentStatus('Uploading document...');
+
+    try {
+      const fileBytes = Array.from(new Uint8Array(await documentFile.arrayBuffer()));
+      await invoke('upload_employee_document', {
+        employeeId: formDialog.editing.id,
+        docType: documentForm.doc_type,
+        fileName: documentFile.name,
+        fileBytes,
+        validUntil: documentForm.valid_until || null,
+        emailAlert: documentForm.email_alert,
+        alertBeforeDays: documentForm.alert_before_days,
+      });
+
+      setDocumentFile(null);
+      setDocumentStatus('Document uploaded successfully.');
+      await loadEmployeeDocuments(formDialog.editing.id);
+    } catch (error: any) {
+      setDocumentStatus('Failed to upload document: ' + (error?.message || error));
+    } finally {
+      setDocumentUploading(false);
+    }
+  };
+
+  const handlePreviewEmployeeDocument = async (doc: any) => {
+    try {
+      const previewKey = doc.cloudId || doc.name;
+      const bytes = await invoke<number[]>('get_document_preview', { docName: previewKey });
+      const blob = new Blob([new Uint8Array(bytes)], {
+        type: (doc.name || '').toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream',
+      });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, '_blank');
+      if (!win) {
+        alert('Popup blocked. Please allow popups to preview the document.');
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (error: any) {
+      alert('Could not preview document: ' + (error?.message || error));
+    }
+  };
+
+  const handleDeleteEmployeeDocument = async (doc: any) => {
+    if (!confirm(`Delete ${doc.name}?`)) return;
+    try {
+      await invoke('delete_employee_document', { documentId: doc.id });
+      if (formDialog.editing?.id) {
+        await loadEmployeeDocuments(formDialog.editing.id);
+      }
+    } catch (error: any) {
+      alert('Failed to delete document: ' + (error?.message || error));
     }
   };
 
@@ -851,9 +989,29 @@ export const EmployeeManagement: React.FC = () => {
                       <h3 className="text-lg font-semibold">Profile</h3>
                       <p className="text-sm text-muted-foreground">Basic identity and employment assignment</p>
                     </div>
-                    <div className="w-24 h-24 rounded-full border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors">
-                      <Upload className="w-6 h-6 text-muted-foreground mb-1" />
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold">Photo</span>
+                    <div
+                      className="relative w-24 h-24 rounded-full border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors overflow-hidden"
+                      onClick={() => profilePhotoInputRef.current?.click()}
+                    >
+                      {formData.photo ? (
+                        <img src={formData.photo} alt="Employee photo" className="w-full h-full object-cover" />
+                      ) : (
+                        <>
+                          <Upload className="w-6 h-6 text-muted-foreground mb-1" />
+                          <span className="text-[10px] text-muted-foreground uppercase font-bold">Photo</span>
+                        </>
+                      )}
+                      <input
+                        ref={profilePhotoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          await handleProfilePhotoUpload(file);
+                          e.target.value = '';
+                        }}
+                      />
                     </div>
                   </div>
                   
@@ -1098,9 +1256,29 @@ export const EmployeeManagement: React.FC = () => {
                       <h3 className="text-lg font-semibold">Device Settings</h3>
                       <p className="text-sm text-muted-foreground">Hardware authentication configuration</p>
                     </div>
-                    <div className="w-24 h-24 rounded-full border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors">
-                      <Upload className="w-6 h-6 text-muted-foreground mb-1" />
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold text-center">Bio-photo</span>
+                    <div
+                      className="relative w-24 h-24 rounded-full border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors overflow-hidden"
+                      onClick={() => bioPhotoInputRef.current?.click()}
+                    >
+                      {formData.bio_photo ? (
+                        <img src={formData.bio_photo} alt="Bio photo" className="w-full h-full object-cover" />
+                      ) : (
+                        <>
+                          <Upload className="w-6 h-6 text-muted-foreground mb-1" />
+                          <span className="text-[10px] text-muted-foreground uppercase font-bold text-center">Bio-photo</span>
+                        </>
+                      )}
+                      <input
+                        ref={bioPhotoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          await handleBioPhotoUpload(file);
+                          e.target.value = '';
+                        }}
+                      />
                     </div>
                   </div>
                   
@@ -1294,15 +1472,96 @@ export const EmployeeManagement: React.FC = () => {
                 <div className="space-y-8 animate-in fade-in duration-300">
                   <div className="flex justify-between items-center border-b pb-4">
                     <h3 className="text-lg font-semibold">Document Setting</h3>
-                    <Button size="sm" className="bg-primary h-8 px-3">
+                    <Button
+                      size="sm"
+                      className="bg-primary h-8 px-3"
+                      onClick={() => employeeDocumentInputRef.current?.click()}
+                      disabled={!formDialog.editing?.id || documentUploading}
+                    >
                       <Plus className="w-4 h-4 mr-1" /> Add Document
                     </Button>
                   </div>
-                  
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 rounded-lg border bg-muted/20">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Document Type</Label>
+                      <select
+                        value={documentForm.doc_type}
+                        onChange={(e) => setDocumentForm(prev => ({ ...prev, doc_type: e.target.value }))}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                        disabled={!formDialog.editing?.id || documentUploading}
+                      >
+                        <option value="ID Card">ID Card</option>
+                        <option value="Contract">Contract</option>
+                        <option value="Appointment Letter">Appointment Letter</option>
+                        <option value="Citizenship">Citizenship</option>
+                        <option value="Passport">Passport</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">File</Label>
+                      <Input
+                        ref={employeeDocumentInputRef}
+                        type="file"
+                        disabled={!formDialog.editing?.id || documentUploading}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          setDocumentFile(file);
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Valid Up To</Label>
+                      <Input
+                        type="date"
+                        value={documentForm.valid_until}
+                        onChange={(e) => setDocumentForm(prev => ({ ...prev, valid_until: e.target.value }))}
+                        disabled={!formDialog.editing?.id || documentUploading}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Alert Before Days</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={documentForm.alert_before_days}
+                        onChange={(e) => setDocumentForm(prev => ({ ...prev, alert_before_days: parseInt(e.target.value || '0') }))}
+                        disabled={!formDialog.editing?.id || documentUploading}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
+                      <div>
+                        <Label className="text-sm font-semibold">Email Alert</Label>
+                        <p className="text-xs text-muted-foreground">Notify before the document expires.</p>
+                      </div>
+                      <Switch
+                        checked={documentForm.email_alert}
+                        onCheckedChange={(val) => setDocumentForm(prev => ({ ...prev, email_alert: val }))}
+                        disabled={!formDialog.editing?.id || documentUploading}
+                      />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        onClick={handleUploadEmployeeDocument}
+                        disabled={!formDialog.editing?.id || !documentFile || documentUploading}
+                        className="w-full"
+                      >
+                        {documentUploading ? 'Uploading...' : 'Upload Document'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {documentStatus && (
+                    <div className="text-sm rounded-md border bg-muted/20 px-4 py-3">
+                      {documentStatus}
+                    </div>
+                  )}
+
                   <Table className="border rounded-md">
                     <TableHeader className="bg-muted/50">
                       <TableRow>
-                        <TableHead className="w-[40%] text-xs font-bold">Document</TableHead>
+                        <TableHead className="w-[30%] text-xs font-bold">Document</TableHead>
                         <TableHead className="text-xs font-bold">Valid Up To</TableHead>
                         <TableHead className="text-xs font-bold text-center">Email Alert</TableHead>
                         <TableHead className="text-xs font-bold">Alert Before</TableHead>
@@ -1310,11 +1569,41 @@ export const EmployeeManagement: React.FC = () => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      <TableRow>
-                        <TableCell colSpan={5} className="h-48 text-center text-muted-foreground italic">
-                           No documents uploaded for this employee
-                        </TableCell>
-                      </TableRow>
+                      {employeeDocuments.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="h-48 text-center text-muted-foreground italic">
+                            No documents uploaded for this employee
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        employeeDocuments.map((doc) => (
+                          <TableRow key={doc.id}>
+                            <TableCell>
+                              <div className="flex flex-col">
+                                <span className="font-medium">{doc.type || 'Document'}</span>
+                                <span className="text-xs text-muted-foreground">{doc.name}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>{doc.valid_until || '—'}</TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant={doc.email_alert ? 'default' : 'secondary'}>
+                                {doc.email_alert ? 'On' : 'Off'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{doc.alert_before_days ?? 0} days</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <Button variant="ghost" size="icon" onClick={() => handlePreviewEmployeeDocument(doc)}>
+                                  <Eye className="w-4 h-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleDeleteEmployeeDocument(doc)}>
+                                  <Trash2 className="w-4 h-4 text-destructive" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
                     </TableBody>
                   </Table>
                 </div>

@@ -422,7 +422,7 @@ export const EnhancedSetupWizard: React.FC = () => {
 
       // MANAGER - department level
       insertedPermissions
-        .filter((p: any) => ['view_employees', 'view_attendance', 'approve_attendance', 'view_leaves', 'approve_leave', 'view_payroll', 'view_reports', 'export_reports'].includes(p.permission))
+        .filter((p: any) => ['view_employees', 'view_attendance', 'approve_attendance', 'view_leaves', 'view_payroll', 'view_reports', 'export_reports'].includes(p.permission))
         .forEach((perm: any) => {
           rolePermissions.push({ role: 'MANAGER', permission_id: perm.id, organization_id: orgId });
         });

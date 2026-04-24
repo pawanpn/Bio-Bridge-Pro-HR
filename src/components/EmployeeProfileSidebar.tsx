@@ -195,7 +195,7 @@ export const EmployeeProfileSidebar: React.FC<Props> = ({ employee, onClose }) =
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={() => handlePreview(doc.name)} style={actionBtnStyle} title="Preview"><Eye size={14} /></button>
+                        <button onClick={() => handlePreview(doc.cloudId || doc.name)} style={actionBtnStyle} title="Preview"><Eye size={14} /></button>
                         <button style={actionBtnStyle} title="Cloud Sync OK"><CheckCircle size={14} color="#10b981" /></button>
                       </div>
                     </div>

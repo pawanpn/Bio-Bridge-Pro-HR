@@ -1,8 +1,16 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  Check, X as XIcon, Plus, Trash2,
-  Clock, AlertCircle, Filter, CalendarDays
+  Check,
+  X as XIcon,
+  Plus,
+  Trash2,
+  Clock,
+  AlertCircle,
+  Filter,
+  CalendarDays,
+  UserRound,
+  ShieldCheck,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,6 +33,8 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { useAuth } from '@/context/AuthContext';
+import { usePermission } from '@/hooks/usePermission';
 
 interface LeaveRequest {
   id: number;
@@ -33,9 +43,13 @@ interface LeaveRequest {
   leaveType: string;
   startDate: string;
   endDate: string;
+  totalDays?: number;
   status: string;
-  reason: string;
-  approvedBy: string;
+  reason?: string | null;
+  approvedBy?: string | null;
+  approvedAt?: string | null;
+  rejectionReason?: string | null;
+  appliedAt?: string | null;
 }
 
 interface LeaveStats {
@@ -44,51 +58,121 @@ interface LeaveStats {
   currentlyOnLeave: number;
 }
 
+interface EmployeeOption {
+  id: number;
+  employee_code?: string;
+  name: string;
+  department?: string;
+}
+
+const DEFAULT_LEAVE_TYPES = [
+  'Sick Leave',
+  'Casual Leave',
+  'Earned Leave',
+  'Maternity Leave',
+  'Paternity Leave',
+];
+
 const leaveTypeIcons: Record<string, string> = {
   'Sick Leave': '🤒',
   'Casual Leave': '🏖️',
-  'Paid Leave': '💰',
+  'Earned Leave': '💼',
   'Maternity Leave': '👶',
-  'Paternity Leave': '👨‍',
+  'Paternity Leave': '👨‍👶',
   'Emergency Leave': '🚨',
 };
 
+const normalizeStatus = (value: string) => value.trim().toLowerCase();
+
+const formatDate = (dateStr: string) => {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+};
+
 export const LeaveManagement: React.FC = () => {
+  const { user } = useAuth();
+  const { hasAnyPermission, loading: permissionLoading } = usePermission(user?.id);
+
+  const canViewLeaves = hasAnyPermission(['view_leaves', 'apply_leave', 'approve_leave']);
+  const canApplyLeave = hasAnyPermission(['apply_leave']);
+  const canApproveLeave = hasAnyPermission(['approve_leave']);
+  const isHrAdmin = ['SUPER_ADMIN', 'ADMIN'].includes(user?.role || '');
+
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [stats, setStats] = useState<LeaveStats>({ pending: 0, approvedToday: 0, currentlyOnLeave: 0 });
-  const [leaveTypes, setLeaveTypes] = useState<string[]>([]);
-  const [employees, setEmployees] = useState<{ id: number; name: string }[]>([]);
+  const [leaveTypes, setLeaveTypes] = useState<string[]>(DEFAULT_LEAVE_TYPES);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [currentEmployeeId, setCurrentEmployeeId] = useState<number | null>(null);
   const [filterStatus, setFilterStatus] = useState('all');
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [processing, setProcessing] = useState<number | null>(null);
   const [formData, setFormData] = useState({
     employeeId: '',
-    leaveType: 'Casual Leave',
+    leaveType: DEFAULT_LEAVE_TYPES[1],
     startDate: '',
     endDate: '',
     reason: '',
   });
-  const [processing, setProcessing] = useState<number | null>(null);
+
+  const isAuthorized = useMemo(() => canViewLeaves || canApplyLeave || canApproveLeave, [canViewLeaves, canApplyLeave, canApproveLeave]);
 
   const fetchData = useCallback(async () => {
+    if (!isAuthorized || permissionLoading) return;
+
     setLoading(true);
     try {
-      const [leavesData, statsData, typesData, empsData] = await Promise.all([
-        invoke<LeaveRequest[]>('list_leave_requests', { status: filterStatus }),
+      const [statsData, typesData, empsData] = await Promise.all([
         invoke<LeaveStats>('get_leave_stats'),
         invoke<string[]>('get_leave_types'),
-        invoke<{ id: number; name: string }[]>('list_employees'),
+        invoke<EmployeeOption[]>('list_employees_for_select'),
       ]);
-      setLeaves(leavesData || []);
+
       setStats(statsData);
-      setLeaveTypes(typesData);
-      setEmployees(empsData);
+      setLeaveTypes(typesData?.length ? typesData : DEFAULT_LEAVE_TYPES);
+      setEmployees(empsData || []);
+
+      const matchingEmployee = empsData?.find((employee) => {
+        const userKey = (user?.username || '').trim().toLowerCase();
+        const employeeCode = (employee.employee_code || '').trim().toLowerCase();
+        const employeeName = (employee.name || '').trim().toLowerCase();
+        return userKey && (employeeCode === userKey || employeeName === userKey);
+      }) || null;
+
+      const resolvedEmployeeId = matchingEmployee?.id ?? null;
+      setCurrentEmployeeId(resolvedEmployeeId);
+
+      const canSeeEveryone = canApproveLeave || isHrAdmin;
+      const leaveResponse = await invoke<any>('list_leave_requests', {
+        employeeId: canSeeEveryone ? undefined : resolvedEmployeeId ?? undefined,
+        status: filterStatus === 'all' ? undefined : filterStatus,
+        currentUserRole: user?.role,
+      });
+
+      const rows = Array.isArray(leaveResponse) ? leaveResponse : (leaveResponse?.data || []);
+      setLeaves(rows);
+
+      if (!canSeeEveryone && resolvedEmployeeId && !formData.employeeId) {
+        setFormData((prev) => ({ ...prev, employeeId: String(resolvedEmployeeId) }));
+      }
     } catch (e) {
       console.error('Failed to load leave data:', e);
     } finally {
       setLoading(false);
     }
-  }, [filterStatus]);
+  }, [
+    canApproveLeave,
+    canApplyLeave,
+    filterStatus,
+    formData.employeeId,
+    isAuthorized,
+    isHrAdmin,
+    permissionLoading,
+    user?.role,
+    user?.username,
+  ]);
 
   useEffect(() => {
     fetchData();
@@ -97,92 +181,171 @@ export const LeaveManagement: React.FC = () => {
     return () => window.removeEventListener('data-synced', handleDataSynced);
   }, [fetchData]);
 
+  useEffect(() => {
+    if (currentEmployeeId && !canApproveLeave) {
+      setFormData((prev) => ({ ...prev, employeeId: String(currentEmployeeId) }));
+    }
+  }, [canApproveLeave, currentEmployeeId]);
+
+  const getStatusBadge = (status: string) => {
+    const normalized = normalizeStatus(status);
+    const variantMap: Record<string, 'default' | 'success' | 'destructive' | 'warning'> = {
+      pending: 'warning',
+      approved: 'success',
+      rejected: 'destructive',
+    };
+
+    return (
+      <Badge variant={variantMap[normalized] || 'default'} className="capitalize">
+        {normalized}
+      </Badge>
+    );
+  };
+
+  const getLeaveTypeIcon = (type: string) => leaveTypeIcons[type] || '📄';
+
+  const refreshAfterAction = async () => {
+    await fetchData();
+  };
+
   const handleAddLeave = async () => {
-    if (!formData.employeeId || !formData.startDate || !formData.endDate) {
+    const employeeId = parseInt(formData.employeeId, 10);
+
+    if (Number.isNaN(employeeId) || !formData.startDate || !formData.endDate) {
       alert('Please fill in all required fields');
       return;
     }
+
+    if (!canApplyLeave && !canApproveLeave) {
+      alert("You don't have permission to apply leave.");
+      return;
+    }
+
+    if (!canApproveLeave && currentEmployeeId && employeeId !== currentEmployeeId) {
+      alert('You can only apply leave for your own employee record.');
+      return;
+    }
+
     try {
-      await invoke('add_leave_request', {
-        employeeId: parseInt(formData.employeeId),
+      await invoke('create_leave_request', {
+        employeeId,
         leaveType: formData.leaveType,
         startDate: formData.startDate,
         endDate: formData.endDate,
         reason: formData.reason || null,
+        appliedBy: user?.username || user?.email || null,
       });
+
       setShowForm(false);
-      setFormData({ employeeId: '', leaveType: 'Casual Leave', startDate: '', endDate: '', reason: '' });
-      fetchData();
+      setFormData({
+        employeeId: currentEmployeeId ? String(currentEmployeeId) : '',
+        leaveType: leaveTypes[0] || DEFAULT_LEAVE_TYPES[1],
+        startDate: '',
+        endDate: '',
+        reason: '',
+      });
+      await refreshAfterAction();
     } catch (e) {
       alert('Failed to add leave request: ' + e);
     }
   };
 
-  const handleStatusUpdate = async (leaveId: number, status: string) => {
+  const handleStatusUpdate = async (leaveId: number, status: 'approved' | 'rejected') => {
+    if (!canApproveLeave) {
+      alert('Only HR admin can approve or reject leave requests.');
+      return;
+    }
+
+    const rejectionReason = status === 'rejected' ? prompt('Enter rejection reason (optional):') || null : null;
+
     setProcessing(leaveId);
     try {
       await invoke('update_leave_status', {
-        leaveId,
+        leaveRequestId: leaveId,
         status,
-        approvedBy: status === 'approved' ? 'Admin' : null,
+        approvedBy: status === 'approved' ? (user?.username || user?.full_name || user?.email || 'HR Admin') : null,
+        rejectionReason,
+        actorRole: user?.role,
       });
-      fetchData();
+      await refreshAfterAction();
     } catch (e) {
-      alert('Failed to update: ' + e);
+      alert('Failed to update leave status: ' + e);
     } finally {
       setProcessing(null);
     }
   };
 
   const handleDelete = async (leaveId: number) => {
+    const leave = leaves.find((item) => item.id === leaveId);
+    const isOwnLeave = leave?.employeeId === currentEmployeeId;
+    const isAdminDelete = canApproveLeave || isHrAdmin;
+
+    if (!isAdminDelete && !isOwnLeave) {
+      alert('You can only delete your own pending leave request.');
+      return;
+    }
+
     if (!confirm('Are you sure you want to delete this leave request?')) return;
+
     try {
-      await invoke('delete_leave_request', { leaveId });
-      fetchData();
+      await invoke('delete_leave_request', {
+        leaveRequestId: leaveId,
+        actorRole: user?.role,
+        actorEmployeeId: currentEmployeeId,
+      });
+      await refreshAfterAction();
     } catch (e) {
-      alert('Failed to delete: ' + e);
+      alert('Failed to delete leave request: ' + e);
     }
   };
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  };
-
-  const getStatusBadge = (status: string) => {
-    const variantMap: Record<string, 'default' | 'success' | 'destructive' | 'warning'> = {
-      pending: 'warning',
-      approved: 'success',
-      rejected: 'destructive',
-    };
+  if (permissionLoading) {
     return (
-      <Badge variant={variantMap[status] || 'default'} className="capitalize">
-        {status}
-      </Badge>
+      <div className="p-6 flex items-center justify-center min-h-[50vh]">
+        <div className="text-sm text-muted-foreground">Loading permissions...</div>
+      </div>
     );
-  };
+  }
 
-  const getLeaveTypeIcon = (type: string) => {
-    return leaveTypeIcons[type] || '\ud83d\udcc4';
-  };
+  if (!isAuthorized) {
+    return (
+      <div className="p-6">
+        <Card>
+          <CardContent className="p-8 text-center space-y-3">
+            <ShieldCheck className="mx-auto h-10 w-10 text-muted-foreground" />
+            <h2 className="text-lg font-semibold">Leave module access denied</h2>
+            <p className="text-sm text-muted-foreground">
+              Your role does not have leave permissions configured.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight">Leave Management</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Manage employee leave requests, approvals, and records
+          <p className="text-sm text-muted-foreground">
+            Employees can apply for their own leave. Only HR admin can approve or reject requests.
           </p>
         </div>
-        <Button onClick={() => setShowForm(!showForm)}>
-          <Plus className="h-4 w-4" /> New Leave Request
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Badge variant="outline" className="gap-1">
+            <UserRound className="h-3.5 w-3.5" />
+            {user?.role || 'UNKNOWN'}
+          </Badge>
+          <Button
+            onClick={() => setShowForm(true)}
+            disabled={!canApplyLeave && !canApproveLeave}
+          >
+            <Plus className="h-4 w-4" /> New Leave Request
+          </Button>
+        </div>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Card>
           <CardContent className="p-6 flex items-center gap-4">
@@ -219,7 +382,184 @@ export const LeaveManagement: React.FC = () => {
         </Card>
       </div>
 
-      {/* New Leave Form Dialog */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <Filter className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium text-muted-foreground">Filter by:</span>
+              <div className="flex gap-2 flex-wrap">
+                {['all', 'pending', 'approved', 'rejected'].map((status) => (
+                  <Button
+                    key={status}
+                    variant={filterStatus === status ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setFilterStatus(status)}
+                    className="text-xs capitalize"
+                  >
+                    {status}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            <span className="text-sm text-muted-foreground">
+              {leaves.length} request{leaves.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        {loading ? (
+          <CardContent className="flex flex-col items-center justify-center py-16 gap-3">
+            <div className="text-4xl">⏳</div>
+            <p className="text-sm text-muted-foreground">Loading leave requests...</p>
+          </CardContent>
+        ) : leaves.length === 0 ? (
+          <CardContent className="flex flex-col items-center justify-center py-16 gap-2">
+            <div className="text-4xl">📋</div>
+            <h3 className="text-lg font-semibold">No Leave Requests</h3>
+            <p className="text-sm text-muted-foreground">
+              {filterStatus !== 'all' ? 'No requests with this filter.' : 'Click "New Leave Request" to get started.'}
+            </p>
+          </CardContent>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Employee</TableHead>
+                <TableHead>Leave Period</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Approved By</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {leaves.map((leave) => {
+                const normalizedStatus = normalizeStatus(leave.status);
+                const isOwnRequest = currentEmployeeId === leave.employeeId;
+                const canManageRow = canApproveLeave || isHrAdmin || (canApplyLeave && isOwnRequest);
+
+                return (
+                  <TableRow
+                    key={leave.id}
+                    className={normalizedStatus === 'pending' ? 'bg-yellow-500/5' : ''}
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm">
+                          {leave.employeeName.charAt(0)}
+                        </div>
+                        <div>
+                          <div className="font-medium">{leave.employeeName}</div>
+                          <div className="text-xs text-muted-foreground">ID #{leave.employeeId}</div>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="font-medium">{formatDate(leave.startDate)}</div>
+                      <div className="text-xs text-muted-foreground">
+                        to {formatDate(leave.endDate)}
+                        {leave.totalDays ? ` • ${leave.totalDays} day(s)` : ''}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <span>{getLeaveTypeIcon(leave.leaveType)}</span>
+                        <span className="text-sm">{leave.leaveType}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>{getStatusBadge(leave.status)}</TableCell>
+                    <TableCell className={leave.approvedBy ? '' : 'text-muted-foreground'}>
+                      <div>{leave.approvedBy || '—'}</div>
+                      {leave.rejectionReason && (
+                        <div className="text-xs text-muted-foreground mt-1">
+                          Rejected: {leave.rejectionReason}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        {normalizedStatus === 'pending' && canApproveLeave && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-green-600 border-green-600/30 hover:bg-green-600/10 h-8 w-8 p-0"
+                              onClick={() => handleStatusUpdate(leave.id, 'approved')}
+                              disabled={processing === leave.id}
+                              title="Approve"
+                            >
+                              <Check className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-red-600 border-red-600/30 hover:bg-red-600/10 h-8 w-8 p-0"
+                              onClick={() => handleStatusUpdate(leave.id, 'rejected')}
+                              disabled={processing === leave.id}
+                              title="Reject"
+                            >
+                              <XIcon className="h-4 w-4" />
+                            </Button>
+                          </>
+                        )}
+                        {canManageRow && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600 border-red-600/30 hover:bg-red-600/10 h-8 w-8 p-0"
+                            onClick={() => handleDelete(leave.id)}
+                            disabled={processing === leave.id}
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </Card>
+
+      {leaves.filter((leave) => leave.reason).length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-muted-foreground" /> Leave Reasons
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {leaves
+                .filter((leave) => leave.reason)
+                .map((leave) => {
+                  const borderColorMap: Record<string, string> = {
+                    pending: 'border-yellow-500',
+                    approved: 'border-green-500',
+                    rejected: 'border-red-500',
+                  };
+
+                  return (
+                    <div
+                      key={leave.id}
+                      className={`flex gap-3 p-4 rounded-lg bg-muted border-l-4 ${borderColorMap[normalizeStatus(leave.status)] || 'border-muted-foreground'}`}
+                    >
+                      <div className="font-semibold text-sm min-w-[120px]">{leave.employeeName}</div>
+                      <div className="text-sm text-muted-foreground flex-1">{leave.reason}</div>
+                    </div>
+                  );
+                })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Dialog open={showForm} onOpenChange={setShowForm}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -228,19 +568,28 @@ export const LeaveManagement: React.FC = () => {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="employee">Employee *</Label>
                 <Select
                   id="employee"
                   value={formData.employeeId}
+                  disabled={!canApproveLeave && !!currentEmployeeId}
                   onChange={(e) => setFormData({ ...formData, employeeId: e.target.value })}
                 >
                   <option value="">Select Employee</option>
-                  {employees.map(emp => (
-                    <option key={emp.id} value={emp.id}>{emp.name}</option>
+                  {employees.map((employee) => (
+                    <option key={employee.id} value={employee.id}>
+                      {employee.name}
+                      {employee.employee_code ? ` (${employee.employee_code})` : ''}
+                    </option>
                   ))}
                 </Select>
+                {!canApproveLeave && (
+                  <p className="text-xs text-muted-foreground">
+                    Self-service leave is locked to your employee account.
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="leaveType">Leave Type *</Label>
@@ -249,13 +598,15 @@ export const LeaveManagement: React.FC = () => {
                   value={formData.leaveType}
                   onChange={(e) => setFormData({ ...formData, leaveType: e.target.value })}
                 >
-                  {leaveTypes.map(type => (
-                    <option key={type} value={type}>{type}</option>
+                  {(leaveTypes.length ? leaveTypes : DEFAULT_LEAVE_TYPES).map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
                   ))}
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="startDate">Start Date *</Label>
                 <Input
@@ -295,168 +646,6 @@ export const LeaveManagement: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Filter Bar */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div className="flex items-center gap-3 flex-wrap">
-              <Filter className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-medium text-muted-foreground">Filter by:</span>
-              <div className="flex gap-2">
-                {['all', 'pending', 'approved', 'rejected'].map(s => (
-                  <Button
-                    key={s}
-                    variant={filterStatus === s ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setFilterStatus(s)}
-                    className="text-xs capitalize"
-                  >
-                    {s}
-                  </Button>
-                ))}
-              </div>
-            </div>
-            <span className="text-sm text-muted-foreground">
-              {leaves.length} request{leaves.length !== 1 ? 's' : ''}
-            </span>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Leave Requests Table */}
-      <Card>
-        {loading ? (
-          <CardContent className="flex flex-col items-center justify-center py-16 gap-3">
-            <div className="text-4xl">\u23f3</div>
-            <p className="text-sm text-muted-foreground">Loading leave requests...</p>
-          </CardContent>
-        ) : leaves.length === 0 ? (
-          <CardContent className="flex flex-col items-center justify-center py-16 gap-2">
-            <div className="text-4xl">\ud83d\udccb</div>
-            <h3 className="text-lg font-semibold">No Leave Requests</h3>
-            <p className="text-sm text-muted-foreground">
-              {filterStatus !== 'all' ? 'No requests with this filter.' : 'Click "New Leave Request" to get started.'}
-            </p>
-          </CardContent>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Employee</TableHead>
-                <TableHead>Leave Period</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Approved By</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {leaves.map((leave) => (
-                <TableRow
-                  key={leave.id}
-                  className={leave.status === 'pending' ? 'bg-yellow-500/5' : ''}
-                >
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <div className="h-9 w-9 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm">
-                        {leave.employeeName.charAt(0)}
-                      </div>
-                      <div>
-                        <div className="font-medium">{leave.employeeName}</div>
-                        <div className="text-xs text-muted-foreground">ID #{leave.employeeId}</div>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium">{formatDate(leave.startDate)}</div>
-                    <div className="text-xs text-muted-foreground">to {formatDate(leave.endDate)}</div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <span>{getLeaveTypeIcon(leave.leaveType)}</span>
-                      <span className="text-sm">{leave.leaveType.replace(' Leave', '')}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>{getStatusBadge(leave.status)}</TableCell>
-                  <TableCell className={leave.approvedBy ? '' : 'text-muted-foreground'}>
-                    {leave.approvedBy || '\u2014'}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
-                      {leave.status === 'pending' && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-green-600 border-green-600/30 hover:bg-green-600/10 h-8 w-8 p-0"
-                            onClick={() => handleStatusUpdate(leave.id, 'approved')}
-                            disabled={processing === leave.id}
-                            title="Approve"
-                          >
-                            <Check className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-red-600 border-red-600/30 hover:bg-red-600/10 h-8 w-8 p-0"
-                            onClick={() => handleStatusUpdate(leave.id, 'rejected')}
-                            disabled={processing === leave.id}
-                            title="Reject"
-                          >
-                            <XIcon className="h-4 w-4" />
-                          </Button>
-                        </>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-red-600 border-red-600/30 hover:bg-red-600/10 h-8 w-8 p-0"
-                        onClick={() => handleDelete(leave.id)}
-                        disabled={processing === leave.id}
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
-
-      {/* Leave Reasons Section */}
-      {leaves.filter(l => l.reason).length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <AlertCircle className="h-4 w-4 text-muted-foreground" /> Leave Reasons
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {leaves.filter(l => l.reason).map(l => {
-                const statusColorMap: Record<string, string> = {
-                  pending: 'border-yellow-500',
-                  approved: 'border-green-500',
-                  rejected: 'border-red-500',
-                };
-                return (
-                  <div
-                    key={l.id}
-                    className={`flex gap-3 p-4 rounded-lg bg-muted border-l-4 ${statusColorMap[l.status] || 'border-muted-foreground'}`}
-                  >
-                    <div className="font-semibold text-sm min-w-[120px]">{l.employeeName}</div>
-                    <div className="text-sm text-muted-foreground flex-1">{l.reason}</div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 };

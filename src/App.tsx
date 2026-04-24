@@ -16,6 +16,7 @@ import { EmployeeManagement } from './pages/EmployeeManagement';
 import { PayrollManagement } from './pages/PayrollManagement';
 import { FinanceManagement } from './pages/FinanceManagement';
 import { PermissionManagement } from './components/PermissionManagement';
+import { PermissionGuard } from './components/PermissionGuard';
 import { EmployeeHierarchyTree } from './components/EmployeeHierarchyTree';
 import { InventoryManagement } from './pages/InventoryManagement';
 import { ProjectsManagement } from './pages/ProjectsManagement';
@@ -55,7 +56,14 @@ function AppContent() {
         <Route path="employee/:employeeId" element={<EmployeeDetail />} />
         <Route path="employees" element={<EmployeeManagement />} />
         <Route path="employee-hierarchy" element={<EmployeeHierarchyTree />} />
-        <Route path="leave-management" element={<LeaveManagement />} />
+        <Route
+          path="leave-management"
+          element={
+            <PermissionGuard requiredPermission={['view_leaves', 'apply_leave', 'approve_leave']} showAccessDenied>
+              <LeaveManagement />
+            </PermissionGuard>
+          }
+        />
         <Route path="attendance" element={<AttendanceManagement />} />
         <Route path="payroll" element={<PayrollManagement />} />
         <Route path="finance" element={<FinanceManagement />} />

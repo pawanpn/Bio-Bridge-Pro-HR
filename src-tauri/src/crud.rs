@@ -345,6 +345,8 @@ pub struct CreateEmployeeRequest {
     pub whatsapp_punch: Option<bool>,
     pub supervisor_mobile: Option<String>,
     pub biometric_id: Option<i32>,
+    pub shift_start_time: Option<String>,
+    pub shift_end_time: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -406,6 +408,8 @@ pub struct UpdateEmployeeRequest {
     pub whatsapp_punch: Option<bool>,
     pub supervisor_mobile: Option<String>,
     pub biometric_id: Option<i32>,
+    pub shift_start_time: Option<String>,
+    pub shift_end_time: Option<String>,
 }
 
 /// CREATE: Add new employee
@@ -479,12 +483,13 @@ pub async fn create_employee(
             bio_photo, enable_attendance, enable_holiday, outdoor_management,
             workflow_role, mobile_punch, app_role, whatsapp_alert,
             whatsapp_exception, whatsapp_punch, supervisor_mobile, biometric_id,
+            shift_start_time, shift_end_time,
             status, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
             ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
             ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44,
-            ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53, ?54, ?55,
+            ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53, ?54, ?55, ?56, ?57,
             'active', datetime('now'), datetime('now')
         )",
         params![
@@ -543,6 +548,8 @@ pub async fn create_employee(
             &(request.whatsapp_punch.unwrap_or(false) as i32),
             &request.supervisor_mobile,
             &request.biometric_id,
+            &request.shift_start_time,
+            &request.shift_end_time,
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to create employee: {}", e)))?;
 
@@ -572,6 +579,8 @@ pub async fn create_employee(
         "card_no": request.card_no,
         "mobile_punch": request.mobile_punch,
         "app_role": request.app_role,
+        "shift_start_time": request.shift_start_time,
+        "shift_end_time": request.shift_end_time,
         "status": "active"
     });
 
@@ -631,7 +640,7 @@ pub async fn get_employee(
                 e.nationality, e.verification_mode, e.device_privilege, e.device_password, e.card_no,
                 e.bio_photo, e.enable_attendance, e.enable_holiday, e.outdoor_management, e.workflow_role,
                 e.mobile_punch, e.app_role, e.whatsapp_alert, e.whatsapp_exception, e.whatsapp_punch,
-                e.supervisor_mobile, e.biometric_id
+                e.supervisor_mobile, e.biometric_id, e.shift_start_time, e.shift_end_time
         FROM Employees e
         LEFT JOIN Departments d ON e.department_id = d.id
         LEFT JOIN Designations des ON e.designation_id = des.id
@@ -699,6 +708,8 @@ pub async fn get_employee(
             "whatsapp_exception": row.get::<_, Option<i32>>(48)?.unwrap_or(0) != 0,
             "whatsapp_punch": row.get::<_, Option<i32>>(49)?.unwrap_or(0) != 0,
             "supervisor_mobile": row.get::<_, Option<String>>(50)?,
+            "shift_start_time": row.get::<_, Option<String>>(51)?,
+            "shift_end_time": row.get::<_, Option<String>>(52)?,
         }))
     }).optional()
     .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
@@ -742,7 +753,7 @@ pub async fn list_employees(
                 e.gender, e.date_of_joining, e.employment_type, e.employment_status,
                 e.department_id, e.designation_id, e.branch_id, e.status, e.name,
                 d.name as dept_name, des.name as desig_name, b.name as branch_name,
-                e.deleted_at, e.biometric_id
+                datetime(e.deleted_at, 'localtime'), e.biometric_id, e.shift_start_time, e.shift_end_time
         FROM Employees e
         LEFT JOIN Departments d ON e.department_id = d.id
         LEFT JOIN Designations des ON e.designation_id = des.id
@@ -813,6 +824,8 @@ pub async fn list_employees(
                 "branch_name": row.get::<_, Option<String>>(16)?,
                 "deleted_at": row.get::<_, Option<String>>(17)?,
                 "biometric_id": row.get::<_, Option<i32>>(18)?,
+                "shift_start_time": row.get::<_, Option<String>>(19)?,
+                "shift_end_time": row.get::<_, Option<String>>(20)?,
             }))
         })
         .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
@@ -1081,6 +1094,14 @@ pub async fn update_employee(
         updates.push("biometric_id = ?");
         values.push(Box::new(biometric_id));
     }
+    if let Some(ref shift_start_time) = request.shift_start_time {
+        updates.push("shift_start_time = ?");
+        values.push(Box::new(sanitize_input(&shift_start_time)));
+    }
+    if let Some(ref shift_end_time) = request.shift_end_time {
+        updates.push("shift_end_time = ?");
+        values.push(Box::new(sanitize_input(&shift_end_time)));
+    }
 
     // Dynamic Full Name Regeneration
     let first = request.first_name.clone().or_else(|| _old_values.as_ref().and_then(|v| v["first_name"].as_str().map(|s| s.to_string()))).unwrap_or_default();
@@ -1128,6 +1149,8 @@ pub async fn update_employee(
         "employment_status": request.employment_status,
         "biometric_id": request.biometric_id,
         "mobile_punch": request.mobile_punch,
+        "shift_start_time": request.shift_start_time,
+        "shift_end_time": request.shift_end_time,
         "updated_at": chrono::Utc::now().to_rfc3339()
     });
     let _ = crate::sync_service::_queue_for_sync(
@@ -1210,13 +1233,35 @@ pub async fn restore_employee(
 // LEAVE MANAGEMENT CRUD
 // ============================================================================
 
+const DEFAULT_LEAVE_TYPES: [&str; 5] = [
+    "Sick Leave",
+    "Casual Leave",
+    "Earned Leave",
+    "Maternity Leave",
+    "Paternity Leave",
+];
+
+fn normalize_leave_status(status: &str) -> String {
+    match status.trim().to_lowercase().as_str() {
+        "approved" => "approved".to_string(),
+        "rejected" => "rejected".to_string(),
+        "pending" => "pending".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn is_leave_admin_role(role: Option<&str>) -> bool {
+    matches!(role.map(|r| r.trim().to_uppercase()).as_deref(), Some("SUPER_ADMIN") | Some("ADMIN"))
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CreateLeaveRequest {
     pub employee_id: i64,
-    pub leave_type_id: i64,
+    pub leave_type: String,
     pub start_date: String,
     pub end_date: String,
     pub reason: Option<String>,
+    pub applied_by: Option<String>,
 }
 
 /// CREATE: Submit leave request
@@ -1240,15 +1285,22 @@ pub async fn create_leave_request(
         ));
     }
 
+    if request.end_date < request.start_date {
+        return Err(AppError::ValidationError(
+            "End date cannot be earlier than start date".into(),
+        ));
+    }
+
     conn.execute(
-        "INSERT INTO LeaveRequests (employee_id, leave_type_id, start_date, end_date, reason, status, applied_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'Pending', datetime('now'))",
+        "INSERT INTO LeaveRequests (employee_id, leave_type, start_date, end_date, reason, status, applied_by, applied_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, datetime('now'), datetime('now'))",
         params![
             request.employee_id,
-            request.leave_type_id,
+            sanitize_input(&request.leave_type),
             request.start_date,
             request.end_date,
-            request.reason.as_ref().map(|s| sanitize_input(s))
+            request.reason.as_ref().map(|s| sanitize_input(s)),
+            request.applied_by.as_ref().map(|s| sanitize_input(s))
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to create leave request: {}", e)))?;
 
@@ -1258,7 +1310,7 @@ pub async fn create_leave_request(
         None,
         "CREATE",
         &format!(
-            "Leave request submitted for employee #{}",
+        "Leave request submitted for employee #{}",
             request.employee_id
         ),
     )?;
@@ -1269,11 +1321,36 @@ pub async fn create_leave_request(
     }))
 }
 
+#[tauri::command]
+pub async fn add_leave_request(
+    employee_id: i64,
+    leave_type: String,
+    start_date: String,
+    end_date: String,
+    reason: Option<String>,
+    applied_by: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    create_leave_request(
+        CreateLeaveRequest {
+            employee_id,
+            leave_type,
+            start_date,
+            end_date,
+            reason,
+            applied_by,
+        },
+        state,
+    )
+    .await
+}
+
 /// READ: Get leave requests
 #[tauri::command]
 pub async fn list_leave_requests(
     employee_id: Option<i64>,
     status: Option<String>,
+    current_user_role: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -1286,11 +1363,12 @@ pub async fn list_leave_requests(
 
     let mut query = String::from(
         "SELECT lr.id, lr.employee_id, e.first_name, e.last_name,
-                lt.name as leave_type, lr.start_date, lr.end_date,
-                lr.total_days, lr.reason, lr.status, lr.applied_at
+                COALESCE(lr.leave_type, 'Casual Leave') as leave_type, lr.start_date, lr.end_date,
+                julianday(lr.end_date) - julianday(lr.start_date) + 1 as total_days,
+                lr.reason, LOWER(COALESCE(lr.status, 'pending')) as status,
+                lr.applied_at, lr.approved_by, lr.approved_at, lr.rejection_reason
         FROM LeaveRequests lr
         JOIN Employees e ON lr.employee_id = e.id
-        LEFT JOIN LeaveTypes lt ON lr.leave_type_id = lt.id
         WHERE 1=1",
     );
 
@@ -1298,10 +1376,16 @@ pub async fn list_leave_requests(
         query.push_str(&format!(" AND lr.employee_id = {}", eid));
     }
     if let Some(st) = status {
-        query.push_str(&format!(" AND lr.status = '{}'", sanitize_input(&st)));
+        query.push_str(&format!(" AND LOWER(COALESCE(lr.status, 'pending')) = '{}'", sanitize_input(&st.to_lowercase())));
     }
 
-    query.push_str(" ORDER BY lr.applied_at DESC");
+    if let Some(role) = current_user_role {
+        if !is_leave_admin_role(Some(role.as_str())) {
+            query.push_str(&format!(" AND lr.employee_id = {}", employee_id.unwrap_or(-1)));
+        }
+    }
+
+    query.push_str(" ORDER BY datetime(COALESCE(lr.applied_at, lr.created_at, datetime('now'))) DESC, lr.id DESC");
 
     let mut stmt = conn
         .prepare(&query)
@@ -1313,13 +1397,16 @@ pub async fn list_leave_requests(
                 "id": row.get::<_, i64>(0)?,
                 "employee_id": row.get::<_, i64>(1)?,
                 "employee_name": format!("{} {}", row.get::<_, String>(2)?, row.get::<_, String>(3)?),
-                "leave_type": row.get::<_, Option<String>>(4)?,
+                "leave_type": row.get::<_, Option<String>>(4)?.unwrap_or_else(|| "Casual Leave".to_string()),
                 "start_date": row.get::<_, String>(5)?,
                 "end_date": row.get::<_, String>(6)?,
                 "total_days": row.get::<_, f64>(7)?,
                 "reason": row.get::<_, Option<String>>(8)?,
                 "status": row.get::<_, String>(9)?,
-                "applied_at": row.get::<_, String>(10)?,
+                "applied_at": row.get::<_, Option<String>>(10)?.unwrap_or_default(),
+                "approved_by": row.get::<_, Option<String>>(11)?,
+                "approved_at": row.get::<_, Option<String>>(12)?,
+                "rejection_reason": row.get::<_, Option<String>>(13)?,
             }))
         })
         .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
@@ -1340,6 +1427,7 @@ pub async fn update_leave_status(
     status: String,
     approved_by: Option<String>,
     rejection_reason: Option<String>,
+    actor_role: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -1350,11 +1438,22 @@ pub async fn update_leave_status(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let status_sanitized = sanitize_input(&status);
+    if !is_leave_admin_role(actor_role.as_deref()) {
+        return Err(AppError::PermissionDenied(
+            "Only HR admin or system admin can approve or reject leave requests".into(),
+        ));
+    }
+
+    let status_sanitized = normalize_leave_status(&status);
+    if !matches!(status_sanitized.as_str(), "approved" | "rejected") {
+        return Err(AppError::ValidationError(
+            "Leave status must be approved or rejected".into(),
+        ));
+    }
 
     conn.execute(
         "UPDATE LeaveRequests 
-         SET status = ?1, approved_by = ?2, approved_at = datetime('now'), rejection_reason = ?3
+         SET status = ?1, approved_by = ?2, approved_at = datetime('now'), rejection_reason = ?3, updated_at = datetime('now')
          WHERE id = ?4",
         params![
             status_sanitized,
@@ -1376,6 +1475,140 @@ pub async fn update_leave_status(
     Ok(serde_json::json!({
         "success": true,
         "message": format!("Leave request {}", status_sanitized)
+    }))
+}
+
+#[tauri::command]
+pub async fn delete_leave_request(
+    leave_request_id: i64,
+    actor_role: Option<String>,
+    actor_employee_id: Option<i64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let leave = conn
+        .query_row(
+            "SELECT employee_id, LOWER(COALESCE(status, 'pending')) FROM LeaveRequests WHERE id = ?1",
+            params![leave_request_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .map_err(|_| AppError::NotFound("Leave request not found".into()))?;
+
+    let is_admin = is_leave_admin_role(actor_role.as_deref());
+    let can_self_delete = actor_employee_id.is_some() && actor_employee_id == Some(leave.0) && leave.1 == "pending";
+
+    if !is_admin && !can_self_delete {
+        return Err(AppError::PermissionDenied(
+            "You can only delete your own pending leave request".into(),
+        ));
+    }
+
+    conn.execute(
+        "UPDATE LeaveRequests SET deleted_at = datetime('now'), updated_at = datetime('now') WHERE id = ?1",
+        params![leave_request_id],
+    )
+    .map_err(|e| AppError::DatabaseError(format!("Delete failed: {}", e)))?;
+
+    log_audit(
+        conn,
+        "LeaveRequests",
+        Some(leave_request_id.to_string()),
+        "DELETE",
+        &format!("Leave request #{} deleted", leave_request_id),
+    )?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Leave request deleted successfully"
+    }))
+}
+
+#[tauri::command]
+pub async fn get_leave_types(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<String>, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut leave_types: Vec<String> = Vec::new();
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT leave_type
+             FROM LeaveRequests
+             WHERE leave_type IS NOT NULL AND TRIM(leave_type) != '' AND deleted_at IS NULL
+             ORDER BY leave_type ASC",
+        )
+        .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
+
+    for row in rows {
+        if let Ok(item) = row {
+            leave_types.push(item);
+        }
+    }
+
+    if leave_types.is_empty() {
+        leave_types.extend(DEFAULT_LEAVE_TYPES.iter().map(|s| s.to_string()));
+    }
+
+    Ok(leave_types)
+}
+
+#[tauri::command]
+pub async fn get_leave_stats(
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let pending: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM LeaveRequests WHERE LOWER(COALESCE(status, 'pending')) = 'pending' AND deleted_at IS NULL",
+        [],
+        |row| row.get(0),
+    )?;
+
+    let approved_today: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM LeaveRequests
+         WHERE LOWER(COALESCE(status, 'pending')) = 'approved'
+           AND date(COALESCE(approved_at, applied_at, created_at)) = date('now')
+           AND deleted_at IS NULL",
+        [],
+        |row| row.get(0),
+    )?;
+
+    let currently_on_leave: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM LeaveRequests
+         WHERE LOWER(COALESCE(status, 'pending')) = 'approved'
+           AND date('now') BETWEEN date(start_date) AND date(end_date)
+           AND deleted_at IS NULL",
+        [],
+        |row| row.get(0),
+    )?;
+
+    Ok(serde_json::json!({
+        "pending": pending,
+        "approvedToday": approved_today,
+        "currentlyOnLeave": currently_on_leave
     }))
 }
 
@@ -1443,7 +1676,10 @@ pub async fn get_attendance_logs(
 
     let mut query = String::from(
         "SELECT al.id, al.employee_id, e.name,
-                al.timestamp, al.log_type, al.punch_method, al.is_synced, e.branch_id
+                (CASE WHEN al.punch_method = 'Manual' OR al.device_id = 999 
+                      THEN datetime(al.timestamp)
+                      ELSE datetime(al.timestamp, 'localtime') END) as timestamp, 
+                al.log_type, al.punch_method, al.is_synced, e.branch_id
         FROM AttendanceLogs al
         LEFT JOIN Employees e ON al.employee_id = e.id
         WHERE 1=1",

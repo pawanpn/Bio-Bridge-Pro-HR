@@ -125,7 +125,7 @@ const FunctionalityControl: React.FC = () => {
   ];
 
   const [activeCat, setActiveCat] = useState('general');
-  const [configs, setConfigs] = useState<{setting_key: string, setting_value: string}[]>([]);
+  const [configs, setConfigs] = useState<{setting_key: string, setting_value: string, key?: string, value?: string}[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState('');
@@ -239,8 +239,8 @@ const FunctionalityControl: React.FC = () => {
                     variant="ghost" 
                     size="sm"
                     onClick={async () => {
-                        const url = configs.find(c => c.key === 'supabase_url')?.value;
-                        const key = configs.find(c => c.key === 'supabase_key')?.value;
+                        const url = configs.find(c => (c.key || c.setting_key) === 'supabase_url')?.value || configs.find(c => (c.key || c.setting_key) === 'supabase_url')?.setting_value;
+                        const key = configs.find(c => (c.key || c.setting_key) === 'supabase_key')?.value || configs.find(c => (c.key || c.setting_key) === 'supabase_key')?.setting_value;
                         if (!url || !key) { setStatus('❌ Config missing'); return; }
                         setStatus('⌛ Testing...');
                         try {

@@ -5,6 +5,7 @@ import { AttendanceConsole } from '../components/AttendanceConsole';
 import { ConnectivityBadge } from '../components/ConnectivityBadge';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { useAuth } from '../context/AuthContext';
+import { usePermission } from '../hooks/usePermission';
 import { syncService } from '../services/syncService';
 import { AppConfig } from '../config/appConfig';
 import { Button } from '@/components/ui/button';
@@ -43,6 +44,7 @@ export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const { hasAnyPermission, loading: permissionLoading } = usePermission(user?.id);
   const [calendarMode, setCalendarMode] = useState(localStorage.getItem('calendarMode') || 'BS');
   const [activeTab, setActiveTab] = useState('Overview');
   const [branches, setBranches] = useState<{id: number, name: string}[]>([]);
@@ -185,6 +187,7 @@ export const MainLayout: React.FC = () => {
   }, [navigate, breadcrumbHistory]);
 
   const isOperator = user?.role === 'OPERATOR';
+  const canAccessLeave = !permissionLoading && hasAnyPermission(['view_leaves', 'apply_leave', 'approve_leave']);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
@@ -249,7 +252,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Employees', '/employees')}
               />
             )}
-            {!isOperator && (
+            {canAccessLeave && !isOperator && (
               <SidebarItem
                 icon={<CalendarCheck size={16} />}
                 label="Leave Management"

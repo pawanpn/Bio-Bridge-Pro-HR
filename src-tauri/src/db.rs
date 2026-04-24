@@ -233,9 +233,18 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         "CREATE TABLE IF NOT EXISTS LeaveRequests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             employee_id INTEGER NOT NULL,
+            leave_type TEXT DEFAULT 'Casual Leave',
             start_date TEXT NOT NULL,
             end_date TEXT NOT NULL,
+            reason TEXT,
             status TEXT DEFAULT 'pending',
+            applied_by TEXT,
+            applied_at TEXT DEFAULT (datetime('now')),
+            approved_by TEXT,
+            approved_at TEXT,
+            rejection_reason TEXT,
+            updated_at TEXT DEFAULT (datetime('now')),
+            deleted_at TEXT,
             FOREIGN KEY(employee_id) REFERENCES Employees(id)
         )",
         [],
@@ -469,12 +478,18 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     );
 
     // Migration for LeaveRequests table
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN leave_type TEXT DEFAULT 'Casual Leave'", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN reason TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN applied_by TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN applied_at TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN approved_at TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN rejection_reason TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN updated_at TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN deleted_at TEXT", []);
     let _ = conn.execute(
-        "ALTER TABLE LeaveRequests ADD COLUMN leave_type TEXT DEFAULT 'Casual Leave'",
+        "UPDATE LeaveRequests SET status = LOWER(status) WHERE status IS NOT NULL",
         [],
     );
-    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN reason TEXT", []);
-    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN approved_by TEXT", []);
 
     // Migration for EmployeeDocuments table (ensure it exists)
     let _ = conn.execute(
@@ -484,11 +499,18 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             doc_type TEXT,
             doc_name TEXT,
             cloud_file_id TEXT,
+            valid_until TEXT,
+            email_alert INTEGER DEFAULT 0,
+            alert_before_days INTEGER DEFAULT 0,
             upload_date TEXT,
             FOREIGN KEY(employee_id) REFERENCES Employees(id)
         )",
         [],
     );
+
+    let _ = conn.execute("ALTER TABLE EmployeeDocuments ADD COLUMN valid_until TEXT", []);
+    let _ = conn.execute("ALTER TABLE EmployeeDocuments ADD COLUMN email_alert INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE EmployeeDocuments ADD COLUMN alert_before_days INTEGER DEFAULT 0", []);
 
     // Multi-branch access table: allows ADMIN users to access multiple branches
     let _ = conn.execute(

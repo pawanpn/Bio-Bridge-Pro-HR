@@ -1,10 +1,13 @@
 use crate::errors::AppError;
-use crate::hardware::{sync_device, test_device, push_user_info, pull_user_biometric};
+use crate::hardware::{get_all_user_info, sync_device, test_device, push_user_info, pull_user_biometric};
 use crate::models::DeviceBrand;
 use crate::sync_service;
 use crate::AppState;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
+use std::fs;
+use std::path::PathBuf;
+use tauri::Manager;
 
 #[tauri::command]
 pub async fn list_all_devices(
@@ -59,6 +62,145 @@ pub async fn list_all_devices(
         .collect();
 
     Ok(devices)
+}
+
+fn sanitize_filename_component(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '-' | '_' => c,
+            _ => '_',
+        })
+        .collect()
+}
+
+fn employee_documents_root(app_handle: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Unknown(format!("Unable to resolve app data directory: {}", e)))?;
+    let docs_dir = app_dir.join("Employee_Documents");
+    fs::create_dir_all(&docs_dir)
+        .map_err(|e| AppError::DatabaseError(format!("Failed to create document folder: {}", e)))?;
+    Ok(docs_dir)
+}
+
+#[tauri::command]
+pub async fn import_device_employees(
+    device_id: i64,
+    branch_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let (ip, port, comm_key, machine_number, brand) = {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        let (ip, port, comm_key, machine_number, brand_str) = conn.query_row(
+            "SELECT ip_address, port, comm_key, machine_number, brand FROM Devices WHERE id = ?1",
+            params![device_id],
+            |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i32>(1)? as u16,
+                r.get::<_, i32>(2)?,
+                r.get::<_, i32>(3)?,
+                r.get::<_, String>(4)?,
+            )),
+        ).map_err(|e| AppError::DatabaseError(format!("Device not found: {}", e)))?;
+
+        let brand = match brand_str.as_str() {
+            "ZKTeco" => DeviceBrand::ZKTeco,
+            "Hikvision" => DeviceBrand::Hikvision,
+            _ => DeviceBrand::Unknown,
+        };
+
+        (ip, port, comm_key, machine_number, brand)
+    };
+
+    let users = get_all_user_info(&ip, port, comm_key, machine_number, brand).await?;
+
+    let mut imported = 0i64;
+    let mut updated = 0i64;
+    let mut skipped = 0i64;
+    let mut error_details: Vec<String> = Vec::new();
+
+    {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        for user in users {
+            let code = user.employee_id.to_string();
+            let existing_id: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM Employees WHERE biometric_id = ?1 OR employee_code = ?2",
+                    params![user.employee_id, code],
+                    |r| r.get(0),
+                )
+                .ok();
+
+            if let Some(emp_id) = existing_id {
+                let mut changed = false;
+                if let Err(e) = conn.execute(
+                    "UPDATE Employees SET name = CASE WHEN name LIKE 'User %' OR name = '' THEN ?1 ELSE name END,
+                     first_name = CASE WHEN first_name IS NULL OR first_name = '' THEN ?1 ELSE first_name END,
+                     biometric_id = ?2,
+                     branch_id = COALESCE(branch_id, ?3),
+                     updated_at = datetime('now')
+                     WHERE id = ?4",
+                    params![user.name, user.employee_id, branch_id, emp_id],
+                ) {
+                    error_details.push(format!("Update failed for {}: {}", user.employee_id, e));
+                } else {
+                    changed = true;
+                }
+
+                if changed {
+                    updated += 1;
+                } else {
+                    skipped += 1;
+                }
+                continue;
+            }
+
+            let res = conn.execute(
+                "INSERT INTO Employees (name, first_name, employee_code, biometric_id, branch_id, employment_status, status, app_role)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'Active', 'active', 'employee')",
+                params![user.name, user.name, code, user.employee_id, branch_id],
+            );
+
+            match res {
+                Ok(_) => {
+                    imported += 1;
+                    let new_id = conn.last_insert_rowid();
+                    let _ = sync_service::_queue_for_sync(
+                        conn,
+                        "employees",
+                        "INSERT",
+                        &new_id.to_string(),
+                        &json!({
+                            "name": user.name,
+                            "employee_code": user.employee_id.to_string(),
+                            "biometric_id": user.employee_id,
+                            "branch_id": branch_id
+                        }),
+                        "HIGH",
+                    );
+                }
+                Err(e) => {
+                    skipped += 1;
+                    error_details.push(format!("Insert failed for {}: {}", user.employee_id, e));
+                }
+            }
+        }
+    }
+
+    Ok(json!({
+        "success": true,
+        "imported": imported,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": error_details.len(),
+        "error_details": error_details
+    }))
 }
 
 #[tauri::command]
@@ -430,20 +572,189 @@ pub async fn list_employees_for_select(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let mut stmt =
-        conn.prepare("SELECT id, name, department FROM Employees WHERE status != 'deleted'")?;
+    let mut stmt = conn.prepare(
+        "SELECT id, employee_code, name, department, first_name, last_name
+         FROM Employees
+         WHERE status != 'deleted'",
+    )?;
     let employees: Vec<Value> = stmt
         .query_map([], |row| {
+            let first_name = row.get::<_, Option<String>>(4)?.unwrap_or_default();
+            let last_name = row.get::<_, Option<String>>(5)?.unwrap_or_default();
+            let display_name = if !first_name.is_empty() || !last_name.is_empty() {
+                format!("{} {}", first_name, last_name).trim().to_string()
+            } else {
+                row.get::<_, String>(2)?
+            };
             Ok(json!({
                 "id": row.get::<_, i64>(0)?,
-                "name": row.get::<_, String>(1)?,
-                "department": row.get::<_, Option<String>>(2).unwrap_or(Some("N/A".to_string()))
+                "employee_code": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                "name": display_name,
+                "department": row.get::<_, Option<String>>(3)?.unwrap_or(Some("N/A".to_string()))
             }))
         })?
         .filter_map(|r| r.ok())
         .collect();
 
     Ok(employees)
+}
+
+#[tauri::command]
+pub async fn list_employee_documents(
+    employee_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, employee_id, doc_type, doc_name, cloud_file_id, valid_until, email_alert, alert_before_days, upload_date
+         FROM EmployeeDocuments
+         WHERE employee_id = ?1
+         ORDER BY datetime(upload_date) DESC, id DESC",
+    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+
+    let docs: Vec<Value> = stmt
+        .query_map(params![employee_id], |row| {
+            Ok(json!({
+                "id": row.get::<_, i64>(0)?,
+                "employee_id": row.get::<_, i64>(1)?,
+                "type": row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "Document".to_string()),
+                "name": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                "cloudId": row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                "valid_until": row.get::<_, Option<String>>(5)?,
+                "email_alert": row.get::<_, Option<i32>>(6)?.unwrap_or(0) != 0,
+                "alert_before_days": row.get::<_, Option<i32>>(7)?.unwrap_or(0),
+                "date": row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+            }))
+        })
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(docs)
+}
+
+#[tauri::command]
+pub async fn upload_employee_document(
+    employee_id: i64,
+    doc_type: String,
+    file_name: String,
+    file_bytes: Vec<u8>,
+    valid_until: Option<String>,
+    email_alert: Option<bool>,
+    alert_before_days: Option<i32>,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let employee_exists: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM Employees WHERE id = ?1 AND (status IS NULL OR status != 'deleted')",
+            params![employee_id],
+            |r| r.get(0),
+        )
+        .ok();
+
+    if employee_exists.is_none() {
+        return Err(AppError::NotFound("Employee not found".into()));
+    }
+
+    let docs_root = employee_documents_root(&app_handle)?;
+    let employee_dir = docs_root.join(format!("employee_{}", employee_id));
+    fs::create_dir_all(&employee_dir)
+        .map_err(|e| AppError::DatabaseError(format!("Failed to create employee document folder: {}", e)))?;
+
+    let stored_name = format!(
+        "emp{}_{}_{}",
+        employee_id,
+        chrono::Utc::now().timestamp_millis(),
+        sanitize_filename_component(&file_name)
+    );
+    let file_path = employee_dir.join(&stored_name);
+
+    fs::write(&file_path, &file_bytes)
+        .map_err(|e| AppError::DatabaseError(format!("Failed to save document: {}", e)))?;
+
+    conn.execute(
+        "INSERT INTO EmployeeDocuments (employee_id, doc_type, doc_name, cloud_file_id, valid_until, email_alert, alert_before_days, upload_date)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))",
+        params![
+            employee_id,
+            doc_type,
+            file_name,
+            stored_name,
+            valid_until,
+            email_alert.unwrap_or(false) as i32,
+            alert_before_days.unwrap_or(0),
+        ],
+    ).map_err(|e| AppError::DatabaseError(format!("Failed to record document: {}", e)))?;
+
+    Ok(json!({
+        "success": true,
+        "message": "Document uploaded successfully"
+    }))
+}
+
+#[tauri::command]
+pub async fn get_document_preview(
+    doc_name: String,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<u8>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let doc_row: Option<(i64, String)> = conn
+        .query_row(
+            "SELECT employee_id, COALESCE(cloud_file_id, doc_name) FROM EmployeeDocuments WHERE cloud_file_id = ?1 OR doc_name = ?1 ORDER BY id DESC LIMIT 1",
+            params![doc_name],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
+
+    let (employee_id, stored_name) = doc_row.ok_or_else(|| AppError::NotFound("Document not found".into()))?;
+    let docs_root = employee_documents_root(&app_handle)?;
+    let file_path = docs_root.join(format!("employee_{}", employee_id)).join(stored_name);
+
+    fs::read(&file_path).map_err(|e| AppError::DatabaseError(format!("Failed to read document: {}", e)))
+}
+
+#[tauri::command]
+pub async fn delete_employee_document(
+    document_id: i64,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let doc: Option<(i64, Option<String>)> = conn
+        .query_row(
+            "SELECT employee_id, cloud_file_id FROM EmployeeDocuments WHERE id = ?1",
+            params![document_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
+
+    let (employee_id, stored_name) = doc.ok_or_else(|| AppError::NotFound("Document not found".into()))?;
+    let docs_root = employee_documents_root(&app_handle)?;
+    if let Some(name) = stored_name {
+        let file_path = docs_root.join(format!("employee_{}", employee_id)).join(name);
+        let _ = fs::remove_file(file_path);
+    }
+
+    conn.execute("DELETE FROM EmployeeDocuments WHERE id = ?1", params![document_id])
+        .map_err(|e| AppError::DatabaseError(format!("Failed to delete document: {}", e)))?;
+
+    Ok(json!({
+        "success": true,
+        "message": "Document deleted successfully"
+    }))
 }
 
 #[tauri::command]
