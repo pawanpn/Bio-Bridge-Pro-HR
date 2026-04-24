@@ -6,7 +6,7 @@ import {
   Users, UserPlus, Search, Filter, Download, Upload,
   Edit2, Trash2, Eye, FileText, Calendar, MapPin, Phone, Mail,
   HardDrive, Loader2, AlertCircle, CheckCircle, Info,
-  Settings, User, Shield, Clock, FileStack, Smartphone, Fingerprint, MessageSquare, Plus, X
+  Settings, User, Shield, Clock, FileStack, Smartphone, Fingerprint, MessageSquare, Plus, X, Key
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -21,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { OrgSetupDialog } from '../components/OrgSetupDialog';
 import {
   Dialog,
   DialogContent,
@@ -153,7 +154,7 @@ const emptyForm: EmployeeForm = {
 };
 
 export const EmployeeManagement: React.FC = () => {
-  const { user } = useAuth();
+  const { user, resetPassword } = useAuth();
   
   // State
   const [employees, setEmployees] = useState<any[]>([]);
@@ -163,13 +164,14 @@ export const EmployeeManagement: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [viewMode, setViewMode] = useState<'active' | 'deleted'>('active');
+  const [viewMode, setViewMode] = useState<'directory' | 'setup' | 'deleted'>('directory');
   
   // Dialogs
   const [formDialog, setFormDialog] = useState({ open: false, editing: null as any });
   const [viewDialog, setViewDialog] = useState({ open: false, employee: null as any });
   const [deleteDialog, setDeleteDialog] = useState({ open: false, employee: null as any });
   const [importDialog, setImportDialog] = useState({ open: false });
+  const [orgSetupOpen, setOrgSetupOpen] = useState(false);
   
   // Import state
   const [devices, setDevices] = useState<any[]>([]);
@@ -202,7 +204,7 @@ export const EmployeeManagement: React.FC = () => {
     try {
       console.log('[EmployeeManagement] Loading data...');
       const [empResult, branchData, deviceData, deptData, desigData] = await Promise.all([
-        invoke<any>('list_employees', { statusFilter: viewMode }),
+        invoke<any>('list_employees', { statusFilter: viewMode === 'deleted' ? 'deleted' : 'active' }),
         invoke<any[]>('list_branches'),
         invoke<any[]>('list_all_devices'),
         invoke<any[]>('list_departments'),
@@ -249,6 +251,14 @@ export const EmployeeManagement: React.FC = () => {
     const matchesStatus = statusFilter === 'all' || emp.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
+
+  const filteredDepartments = formData.branch_id 
+    ? departments.filter(d => !d.branch_id || d.branch_id.toString() === formData.branch_id?.toString())
+    : departments;
+
+  const filteredDesignations = formData.branch_id 
+    ? designations.filter(d => !d.branch_id || d.branch_id.toString() === formData.branch_id?.toString())
+    : designations;
 
   // Form handlers
   const handleNextStep = () => {
@@ -541,20 +551,26 @@ export const EmployeeManagement: React.FC = () => {
             Manage employee master data, personal details, and employment information
           </p>
         </div>
-        <div className="flex gap-3">
-          <Button variant="outline" onClick={handleImportFromDevice}>
-            <HardDrive className="w-4 h-4 mr-2" />
-            Import from Device
-          </Button>
-          <Button variant="outline" onClick={exportToCSV}>
-            <Download className="w-4 h-4 mr-2" />
-            Export CSV
-          </Button>
-          <Button onClick={handleAddEmployee}>
-            <UserPlus className="w-4 h-4 mr-2" />
-            Add Employee
-          </Button>
-        </div>
+        {viewMode === 'setup' && (
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setOrgSetupOpen(true)}>
+              <Settings className="w-4 h-4 mr-2" />
+              Org Structure
+            </Button>
+            <Button variant="outline" onClick={handleImportFromDevice}>
+              <HardDrive className="w-4 h-4 mr-2" />
+              Import from Device
+            </Button>
+            <Button variant="outline" onClick={exportToCSV}>
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </Button>
+            <Button onClick={handleAddEmployee}>
+              <UserPlus className="w-4 h-4 mr-2" />
+              Add Employee
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Stats Cards */}
@@ -609,19 +625,26 @@ export const EmployeeManagement: React.FC = () => {
           <div className="flex gap-4 items-center">
             <div className="flex gap-2 bg-muted/50 p-1 rounded-lg border border-border/50 mr-2">
               <Button 
-                variant={viewMode === 'active' ? 'default' : 'outline'} 
-                onClick={() => setViewMode('active')}
+                variant={viewMode === 'directory' ? 'default' : 'ghost'} 
+                onClick={() => setViewMode('directory')}
                 className="rounded-md"
               >
-                Active
+                Directory
               </Button>
               <Button 
-                variant={viewMode === 'deleted' ? 'destructive' : 'outline'} 
+                variant={viewMode === 'setup' ? 'secondary' : 'ghost'} 
+                onClick={() => setViewMode('setup')}
+                className="rounded-md gap-2"
+              >
+                Setup
+              </Button>
+              <Button 
+                variant={viewMode === 'deleted' ? 'destructive' : 'ghost'} 
                 onClick={() => setViewMode('deleted')}
                 className="rounded-md gap-2"
               >
                 <Trash2 className="w-4 h-4" />
-                Deleted Portal
+                Archive
               </Button>
             </div>
             <div className="flex-1 relative">
@@ -703,8 +726,17 @@ export const EmployeeManagement: React.FC = () => {
                         <Button variant="ghost" size="icon" onClick={() => setViewDialog({ open: true, employee: emp })}>
                           <Eye className="w-4 h-4" />
                         </Button>
-                        {viewMode === 'active' ? (
+                        {viewMode === 'setup' && (
                           <>
+                            <Button variant="ghost" size="icon" title="Reset Password" onClick={async () => {
+                              if(confirm('Send password reset email to this employee?')) {
+                                const res = await resetPassword(emp.employee_code || emp.email);
+                                if(res.success) alert('Password reset link sent to the employee.');
+                                else alert('Failed to send reset link: ' + res.error);
+                              }
+                            }}>
+                              <Key className="w-4 h-4 text-orange-500" />
+                            </Button>
                             <Button variant="ghost" size="icon" onClick={() => handleEditEmployee(emp)}>
                               <Edit2 className="w-4 h-4" />
                             </Button>
@@ -712,7 +744,8 @@ export const EmployeeManagement: React.FC = () => {
                               <Trash2 className="w-4 h-4 text-destructive" />
                             </Button>
                           </>
-                        ) : (
+                        )}
+                        {viewMode === 'deleted' && (
                           <Button 
                             variant="ghost" 
                             size="icon" 
@@ -885,6 +918,9 @@ export const EmployeeManagement: React.FC = () => {
                         ))}
                       </select>
                     </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-6 w-full">
                     <div className="space-y-2">
                       <Label htmlFor="department" className="text-sm font-semibold">Department *</Label>
                       <select
@@ -894,23 +930,9 @@ export const EmployeeManagement: React.FC = () => {
                         className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
                       >
                         <option value="">Select Department</option>
-                        {departments.map(d => (
+                        {filteredDepartments.map(d => (
                           <option key={d.id} value={d.id}>{d.name}</option>
                         ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="area" className="text-sm font-semibold">Area *</Label>
-                      <select
-                        id="area"
-                        value={formData.area_id}
-                        onChange={(e) => setFormData({ ...formData, area_id: e.target.value })}
-                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
-                      >
-                        <option value="">Select Area</option>
-                        <option value="Headquarters">Headquarters</option>
-                        <option value="Branch A">Branch A</option>
-                        <option value="Branch B">Branch B</option>
                       </select>
                     </div>
                     <div className="space-y-2">
@@ -922,22 +944,8 @@ export const EmployeeManagement: React.FC = () => {
                         className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
                       >
                         <option value="">Select Position</option>
-                        {designations.map(d => (
+                        {filteredDesignations.map(d => (
                           <option key={d.id} value={d.id}>{d.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="location" className="text-sm font-semibold">Location</Label>
-                      <select
-                        id="location"
-                        value={formData.location_id}
-                        onChange={(e) => setFormData({ ...formData, location_id: e.target.value })}
-                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
-                      >
-                        <option value="">Select Location</option>
-                        {branches.map(b => (
-                          <option key={b.id} value={b.id}>{b.name}</option>
                         ))}
                       </select>
                     </div>
@@ -1647,6 +1655,15 @@ export const EmployeeManagement: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      <OrgSetupDialog 
+         open={orgSetupOpen} 
+         onOpenChange={setOrgSetupOpen}
+         branches={branches}
+         departments={departments}
+         designations={designations}
+         onRefresh={loadData}
+      />
     </div>
   );
 };

@@ -133,9 +133,11 @@ pub fn run() {
             crud::get_dashboard_stats,
             crud::list_branches,
             crud::list_departments,
-            crud::list_designations,
             crud::create_department,
+            crud::delete_department,
+            crud::list_designations,
             crud::create_designation,
+            crud::delete_designation,
             // From sync_service.rs (Cloud Sync)
             sync_service::initialize_supabase_sync,
             sync_service::sync_to_supabase,
