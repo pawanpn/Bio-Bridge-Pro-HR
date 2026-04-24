@@ -151,12 +151,14 @@ export const BranchGateDeviceManagement: React.FC = () => {
   };
 
   const handleDeleteBranch = async () => {
+    const branchId = deleteDialog.id;
+    setDeleteDialog({ open: false, type: '', id: 0, name: '' });
     try {
-      await invoke('delete_branch', { id: deleteDialog.id });
-      setDeleteDialog({ open: false, type: '', id: 0, name: '' });
-      loadData();
+      await invoke('delete_branch', { id: branchId });
+      await loadData();
     } catch (error) {
       console.error('Failed to delete branch:', error);
+      alert('Delete failed: ' + error);
     }
   };
 
@@ -170,12 +172,14 @@ export const BranchGateDeviceManagement: React.FC = () => {
   };
 
   const handleDeleteGate = async () => {
+    const gateId = deleteDialog.id;
+    setDeleteDialog({ open: false, type: '', id: 0, name: '' });
     try {
-      await invoke('delete_gate', { id: deleteDialog.id });
-      setDeleteDialog({ open: false, type: '', id: 0, name: '' });
-      loadData();
+      await invoke('delete_gate', { id: gateId });
+      await loadData();
     } catch (error) {
       console.error('Failed to delete gate:', error);
+      alert('Delete failed: ' + error);
     }
   };
 
@@ -189,12 +193,14 @@ export const BranchGateDeviceManagement: React.FC = () => {
   };
 
   const handleDeleteDevice = async () => {
+    const deviceId = deleteDialog.id;
+    setDeleteDialog({ open: false, type: '', id: 0, name: '' });
     try {
-      await invoke('delete_device', { id: deleteDialog.id });
-      setDeleteDialog({ open: false, type: '', id: 0, name: '' });
-      loadData();
+      await invoke('delete_device', { id: deviceId });
+      await loadData();
     } catch (error) {
       console.error('Failed to delete device:', error);
+      alert('Delete failed: ' + error);
     }
   };
 
@@ -407,8 +413,9 @@ export const BranchGateDeviceManagement: React.FC = () => {
 
       {activeTab === 'gates' && (
         <GatesTab
-          gates={gates}
-          branchName={branches.find(b => b.id === selectedBranchId)?.name || ''}
+          gates={selectedBranchId ? gates.filter(g => g.branch_id === selectedBranchId) : gates}
+          branches={branches}
+          branchName={selectedBranchId ? (branches.find(b => b.id === selectedBranchId)?.name || '') : 'All Branches'}
           onAdd={handleAddGate}
           onEdit={handleEditGate}
           onDelete={(id, name) => setDeleteDialog({ open: true, type: 'gate', id, name })}
@@ -635,13 +642,14 @@ const BranchesTab: React.FC<{
 
 const GatesTab: React.FC<{
   gates: Gate[];
+  branches: any[];
   branchName: string;
   onAdd: () => void;
   onEdit: (gate: Gate) => void;
   onDelete: (id: number, name: string) => void;
   onSelect: (id: number) => void;
   loading: boolean;
-}> = ({ gates, branchName, onAdd, onEdit, onDelete, onSelect, loading }) => (
+}> = ({ gates, branches, branchName, onAdd, onEdit, onDelete, onSelect, loading }) => (
   <div>
     <div className="flex justify-between items-center mb-4">
       <h2 className="text-xl font-semibold">
@@ -676,25 +684,28 @@ const GatesTab: React.FC<{
                 </TableCell>
               </TableRow>
             ) : (
-              gates.map(gate => (
-                <TableRow key={gate.id} className="cursor-pointer hover:bg-muted/50" onClick={() => onSelect(gate.id)}>
-                  <TableCell className="font-medium">{gate.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{branchName}</TableCell>
-                  <TableCell>
-                    <Badge variant="secondary">{gate.device_count || 0}</Badge>
-                  </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <div className="flex gap-2">
-                      <Button variant="ghost" size="icon" onClick={() => onEdit(gate)}>
-                        <Edit2 className="w-4 h-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => onDelete(gate.id, gate.name)}>
-                        <Trash2 className="w-4 h-4 text-destructive" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
+              gates.map(gate => {
+                const gateBranchName = branches.find((b: any) => b.id === gate.branch_id)?.name || branchName;
+                return (
+                  <TableRow key={gate.id} className="cursor-pointer hover:bg-muted/50" onClick={() => onSelect(gate.id)}>
+                    <TableCell className="font-medium">{gate.name}</TableCell>
+                    <TableCell className="text-muted-foreground">{gateBranchName}</TableCell>
+                    <TableCell>
+                      <Badge variant="secondary">{gate.device_count || 0}</Badge>
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <div className="flex gap-2">
+                        <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); onEdit(gate); }}>
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); onDelete(gate.id, gate.name); }}>
+                          <Trash2 className="w-4 h-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -1427,27 +1438,33 @@ const DeleteConfirmDialog: React.FC<{
   name: string;
   onCancel: () => void;
   onConfirm: () => void;
-}> = ({ open, type, name, onCancel, onConfirm }) => (
-  <Dialog open={open} onOpenChange={onCancel}>
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2 text-destructive">
-          <AlertCircle className="w-5 h-5" />
-          Confirm Delete
-        </DialogTitle>
-        <DialogDescription>
-          Are you sure you want to delete <strong>{name}</strong>?
-          {type === 'branch' && ' This will also delete all gates and devices under this branch.'}
-          {type === 'gate' && ' This will also delete all devices under this gate.'}
-        </DialogDescription>
-      </DialogHeader>
-      <DialogFooter>
-        <Button variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button variant="destructive" onClick={onConfirm}>
-          <Trash2 className="w-4 h-4 mr-2" />
-          Delete
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
-);
+}> = ({ open, type, name, onCancel, onConfirm }) => {
+  const handleConfirm = () => {
+    onConfirm();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <AlertCircle className="w-5 h-5" />
+            Confirm Delete
+          </DialogTitle>
+          <DialogDescription>
+            Are you sure you want to delete <strong>{name}</strong>?
+            {type === 'branch' && ' This will also delete all gates and devices under this branch.'}
+            {type === 'gate' && ' This will also delete all devices under this gate.'}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>Cancel</Button>
+          <Button variant="destructive" onClick={handleConfirm}>
+            <Trash2 className="w-4 h-4 mr-2" />
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
