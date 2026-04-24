@@ -420,8 +420,8 @@ pub async fn add_manual_attendance(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "INSERT INTO AttendanceLogs (employee_id, timestamp, punch_method, branch_id, gate_id)
-         VALUES (?1, ?2, ?3, 1, 1)",
+        "INSERT INTO AttendanceLogs (employee_id, timestamp, punch_method, branch_id, gate_id, device_id)
+         VALUES (?1, ?2, ?3, 1, 1, 1)",
         params![employee_id, timestamp, punch_method],
     )
     .map_err(|e| AppError::DatabaseError(format!("Failed to add manual log: {}", e)))?;
@@ -456,8 +456,8 @@ pub async fn import_csv_attendance(
             match emp_id {
                 Ok(id) => {
                     let res = conn.execute(
-                        "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, punch_method, branch_id, gate_id)
-                         VALUES (?1, ?2, ?3, 1, 1)",
+                        "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, punch_method, branch_id, gate_id, device_id)
+                         VALUES (?1, ?2, ?3, 1, 1, 1)",
                         params![id, timestamp, method],
                     );
                     match res {

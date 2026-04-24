@@ -206,7 +206,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             employee_id INTEGER NOT NULL,
             branch_id INTEGER NOT NULL,
             gate_id INTEGER NOT NULL DEFAULT 1,
-            device_id INTEGER NOT NULL,
+            device_id INTEGER,
             timestamp TEXT NOT NULL,
             log_type TEXT,
             punch_method TEXT,
@@ -680,6 +680,12 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         "INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')",
         [],
     )?;
+
+    // Seed default system device for manual entries
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO Devices (id, name, brand, ip_address, port, status) VALUES (1, 'System/Manual', 'Internal', '0.0.0.0', 0, 'online')",
+        [],
+    );
 
     // Seed test employee for hardware bio-id 1
     conn.execute(
