@@ -1,15 +1,25 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import { getAccessibleBranchIds, isSuperAdmin } from '@/config/accessPolicy';
 import {
   Calendar, Upload, UserPlus,
-  Clock, CheckCircle, AlertCircle, RefreshCw, Fingerprint, Database
+  Clock, CheckCircle, AlertCircle, RefreshCw, Fingerprint, Database, Search
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { BsDatePicker } from '@/components/BsDatePicker';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Table,
   TableBody,
@@ -38,6 +48,7 @@ interface AttendanceLog {
 
 interface Employee {
   id: number;
+  employee_code?: string;
   name: string;
   full_name?: string;
   department: string;
@@ -70,13 +81,28 @@ interface Device {
   is_default: boolean;
 }
 
-type TabType = 'daily' | 'manual' | 'import' | 'history';
+interface UnknownEmployee {
+  id: number;
+  device_user_id: number | null;
+  name: string;
+  employee_code?: string | null;
+  branch_id?: number | null;
+  branch_name?: string | null;
+  log_count?: number;
+  last_seen?: string | null;
+  sync_status?: string | null;
+}
+
+type TabType = 'daily' | 'unknown' | 'manual' | 'import' | 'history';
 type DailyViewMode = 'logs' | 'summary';
 
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export const AttendanceManagement: React.FC = () => {
   const { user } = useAuth();
+  const superAdmin = isSuperAdmin(user?.role);
+  const accessibleBranchIds = getAccessibleBranchIds(user);
+  const hasBranchScope = superAdmin || accessibleBranchIds.length === 0;
   const [activeTab, setActiveTab] = useState<TabType>('daily');
   const [branches, setBranches] = useState<Branch[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -98,6 +124,11 @@ export const AttendanceManagement: React.FC = () => {
   const [syncBranch, setSyncBranch] = useState<string>("1");
   const [syncGate, setSyncGate] = useState<string>("1");
   const [gates, setGates] = useState<any[]>([]);
+  const [unknownIds, setUnknownIds] = useState<UnknownEmployee[]>([]);
+  const [unknownForms, setUnknownForms] = useState<Record<number, { name: string; employeeId: string; branchId: string }>>({});
+  const [unknownSearch, setUnknownSearch] = useState('');
+  const [mergeConfirmItem, setMergeConfirmItem] = useState<UnknownEmployee | null>(null);
+  const [mergeConfirmForm, setMergeConfirmForm] = useState<{ name: string; employeeId: string } | null>(null);
   const [allHistoryLogs, setAllHistoryLogs] = useState<AttendanceLog[]>([]);
   const [historySearch, setHistorySearch] = useState('');
 
@@ -124,32 +155,43 @@ export const AttendanceManagement: React.FC = () => {
   // CSV Import
   const [csvContent, setCsvContent] = useState('');
   const [csvStatus, setCsvStatus] = useState('');
+  const scopedBranches = hasBranchScope
+    ? branches
+    : branches.filter(branch => accessibleBranchIds.includes(String(branch.id)));
+  const scopedEmployees = hasBranchScope
+    ? employees
+    : employees.filter(emp => !emp.branch_id || accessibleBranchIds.includes(String(emp.branch_id)));
+  const scopedDevices = hasBranchScope
+    ? devices
+    : devices.filter(device => accessibleBranchIds.includes(String(device.branch_id)));
 
   // Load data
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [branchData, empResult, deviceData, gateData, localId] = await Promise.all([
+      const [branchData, empResult, deviceData, gateData, localId, unknownData] = await Promise.all([
         invoke<any[]>('list_branches'),
         invoke<any>('list_employees'),
         invoke<any[]>('list_all_devices', { branchId: selectedBranch }),
         invoke<any[]>('list_gates', { branchId: selectedBranch }),
         invoke<number | null>('get_local_sync_target'),
+        invoke<UnknownEmployee[]>('get_unmapped_logs').catch(() => []),
       ]);
-      setBranches(branchData);
+      setBranches(hasBranchScope ? branchData : branchData.filter((branch: any) => accessibleBranchIds.includes(String(branch.id))));
       
       const empData = Array.isArray(empResult) ? empResult : (empResult as any)?.data || [];
-      setEmployees(empData);
+      setEmployees(hasBranchScope ? empData : empData.filter((emp: any) => !emp.branch_id || accessibleBranchIds.includes(String(emp.branch_id))));
       
-      setDevices(deviceData);
-      setGates(gateData);
+      setDevices(hasBranchScope ? deviceData : deviceData.filter((device: any) => accessibleBranchIds.includes(String(device.branch_id))));
+      setGates(hasBranchScope ? gateData : gateData.filter((gate: any) => accessibleBranchIds.includes(String(gate.branch_id))));
       setLocalDefaultId(localId);
+      setUnknownIds(Array.isArray(unknownData) ? unknownData : []);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
       setLoading(false);
     }
-  }, [selectedBranch]);
+  }, [selectedBranch, hasBranchScope, accessibleBranchIds]);
 
   const handleSetLocalDefault = async (deviceId: number) => {
     try {
@@ -167,6 +209,13 @@ export const AttendanceManagement: React.FC = () => {
     window.addEventListener('data-synced', handleDataSynced);
     return () => window.removeEventListener('data-synced', handleDataSynced);
   }, [loadData]);
+
+  useEffect(() => {
+    if (!hasBranchScope && !selectedBranch && scopedBranches.length > 0) {
+      setSelectedBranch(scopedBranches[0].id);
+      setSyncBranch(String(scopedBranches[0].id));
+    }
+  }, [hasBranchScope, selectedBranch, scopedBranches]);
 
   // Load daily logs when date or branch changes
   useEffect(() => {
@@ -244,6 +293,68 @@ export const AttendanceManagement: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAssignUnknown = async (item: UnknownEmployee) => {
+    const form = unknownForms[item.id] || { name: '', employeeId: '', branchId: String(item.branch_id || selectedBranch || '') };
+    const targetEmployeeId = form.employeeId ? Number(form.employeeId) : null;
+    const nextName = (form.name || item.name || '').trim();
+    const targetBranchId = form.branchId ? Number(form.branchId) : (item.branch_id || selectedBranch || 1);
+
+    if (!item.device_user_id) {
+      setSyncStatus('❌ Missing device user ID');
+      return;
+    }
+
+    if (!nextName && !targetEmployeeId) {
+      setSyncStatus('❌ Enter a name or select an employee to merge');
+      return;
+    }
+
+    try {
+      await invoke('assign_name_to_id', {
+        deviceUserId: item.device_user_id,
+        name: nextName || item.name || `Employee ${item.device_user_id}`,
+        employeeId: targetEmployeeId,
+        branchId: targetBranchId,
+      });
+      setUnknownForms(prev => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+      await loadData();
+      await loadDailyLogs();
+      setSyncStatus(`✅ ID #${item.device_user_id} assigned successfully`);
+    } catch (error) {
+      console.error('Failed to assign unknown ID:', error);
+      setSyncStatus(`❌ Assign failed: ${error}`);
+    } finally {
+      setTimeout(() => setSyncStatus(''), 5000);
+    }
+  };
+
+  const requestUnknownAssignment = (item: UnknownEmployee) => {
+    const form = unknownForms[item.id] || { name: '', employeeId: '', branchId: String(item.branch_id || selectedBranch || '') };
+    if (form.employeeId) {
+      setMergeConfirmItem(item);
+      setMergeConfirmForm(form);
+      return;
+    }
+
+    void handleAssignUnknown(item);
+  };
+
+  const confirmMergeAssignment = async () => {
+    if (!mergeConfirmItem || !mergeConfirmForm) return;
+    const item = mergeConfirmItem;
+    const form = mergeConfirmForm;
+    setMergeConfirmItem(null);
+    setMergeConfirmForm(null);
+    await handleAssignUnknown({
+      ...item,
+      name: form.name || item.name,
+    });
   };
 
   const filteredHistory = allHistoryLogs.filter(log => {
@@ -379,14 +490,14 @@ export const AttendanceManagement: React.FC = () => {
 
       {selectedBranch && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {devices.length === 0 ? (
+          {scopedDevices.length === 0 ? (
             <Card className="md:col-span-3 border-dashed bg-muted/20">
               <CardContent className="h-20 flex items-center justify-center text-sm text-muted-foreground italic">
                 No attendance devices found for this branch.
               </CardContent>
             </Card>
           ) : (
-            devices.map(device => (
+            scopedDevices.map(device => (
               <Card key={device.id} className="shadow-sm border-muted/60">
                 <CardContent className="p-4 py-3">
                   <div className="flex items-center justify-between mb-3">
@@ -443,7 +554,7 @@ export const AttendanceManagement: React.FC = () => {
                 className="w-full h-11 px-4 rounded-xl border border-slate-200 bg-white dark:bg-slate-950 dark:border-slate-800 text-sm font-medium focus:ring-2 focus:ring-primary/20 transition-all"
               >
                 <option value="">All Branches</option>
-                {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                {scopedBranches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </div>
 
@@ -472,11 +583,10 @@ export const AttendanceManagement: React.FC = () => {
 
             <div className="min-w-[150px] space-y-1.5">
               <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Select Date</Label>
-              <Input
-                type="date"
+              <BsDatePicker
                 value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="h-11 rounded-xl font-mono text-sm border-slate-200 shadow-none"
+                onChange={setSelectedDate}
+                className="w-full"
               />
             </div>
 
@@ -546,12 +656,38 @@ export const AttendanceManagement: React.FC = () => {
         </Card>
       </div>
 
+      {unknownIds.length > 0 && activeTab !== 'unknown' && (
+        <Card className="mb-6 border-amber-200 bg-amber-50/40">
+          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-amber-900">Unresolved device IDs are waiting</p>
+              <p className="text-xs text-amber-800">
+                {unknownIds.length} ID{unknownIds.length === 1 ? '' : 's'} need mapping so future attendance shows the right employee names.
+              </p>
+            </div>
+            <Button
+              onClick={() => setActiveTab('unknown')}
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+            >
+              Open ID Mapping
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="flex gap-2 mb-6 border-b border-border">
         <TabButton
           icon={<Calendar className="w-4 h-4" />}
           label="Daily Attendance"
           active={activeTab === 'daily'}
           onClick={() => setActiveTab('daily')}
+        />
+        <TabButton
+          icon={<Fingerprint className="w-4 h-4" />}
+          label="ID Mapping"
+          active={activeTab === 'unknown'}
+          onClick={() => setActiveTab('unknown')}
+          count={unknownIds.length}
         />
         {user?.role?.toUpperCase() === 'SUPER_ADMIN' && (
           <TabButton
@@ -622,15 +758,11 @@ export const AttendanceManagement: React.FC = () => {
                 <>
                   <div>
                     <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">From</label>
-                    <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                      className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white font-mono"
-                    />
+                    <BsDatePicker value={dateFrom} onChange={setDateFrom} className="w-full" />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">To</label>
-                    <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                      className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white font-mono"
-                    />
+                    <BsDatePicker value={dateTo} onChange={setDateTo} className="w-full" />
                   </div>
                   <Button size="sm" className="h-9 text-xs" onClick={() => {
                     if (dailyViewMode === 'logs') {
@@ -886,6 +1018,171 @@ export const AttendanceManagement: React.FC = () => {
         </div>
       )}
 
+      {activeTab === 'unknown' && (
+        <div className="space-y-4">
+          <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-white">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="flex items-center gap-2 text-amber-900">
+                  <AlertCircle className="w-5 h-5" />
+                  Unknown ID Mapping
+                </span>
+                <Badge variant="secondary" className="w-fit bg-amber-100 text-amber-800">
+                  {unknownIds.length} unresolved
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div className="max-w-2xl">
+                  <p className="text-sm font-medium text-slate-700">
+                    Map device IDs once. After assignment, the same attendance source will resolve to the employee name automatically.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Unknown IDs stay in the database until you map or merge them, so attendance is never dropped.
+                  </p>
+                </div>
+                <div className="relative w-full lg:w-80">
+                  <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={unknownSearch}
+                    onChange={(e) => setUnknownSearch(e.target.value)}
+                    placeholder="Search ID, name, branch..."
+                    className="pl-9"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="rounded-xl border bg-white p-4">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Unresolved IDs</p>
+                  <p className="mt-1 text-2xl font-black text-amber-600">{unknownIds.length}</p>
+                </div>
+                <div className="rounded-xl border bg-white p-4">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Total logs</p>
+                  <p className="mt-1 text-2xl font-black text-slate-800">
+                    {unknownIds.reduce((acc, item) => acc + (item.log_count || 0), 0)}
+                  </p>
+                </div>
+                <div className="rounded-xl border bg-white p-4">
+                  <p className="text-xs font-semibold uppercase text-muted-foreground">Latest seen</p>
+                  <p className="mt-1 text-sm font-semibold text-slate-800">
+                    {unknownIds[0]?.last_seen || 'No data yet'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {unknownIds
+                  .filter(item => {
+                    const term = unknownSearch.trim().toLowerCase();
+                    if (!term) return true;
+                    return [
+                      String(item.device_user_id ?? ''),
+                      item.name || '',
+                      item.employee_code || '',
+                      item.branch_name || '',
+                      item.sync_status || '',
+                    ].some(value => value.toLowerCase().includes(term));
+                  })
+                  .map(item => {
+                    const currentForm = unknownForms[item.id] || { name: item.name || '', employeeId: '' };
+                    return (
+                      <div key={item.id} className="rounded-xl border border-amber-200 bg-white p-3 shadow-sm">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+                          <div className="flex-1 min-w-[180px]">
+                            <p className="text-xs font-semibold text-amber-900">Device User ID</p>
+                            <div className="font-mono text-sm text-slate-700">
+                              #{item.device_user_id ?? 'Unknown'} <span className="text-muted-foreground">({item.log_count || 0} logs)</span>
+                            </div>
+                          </div>
+                          <div className="flex-1 min-w-[220px]">
+                            <Label className="text-xs font-semibold text-amber-900">Assign / Rename</Label>
+                            <Input
+                              value={currentForm.name}
+                              onChange={(e) => setUnknownForms(prev => ({
+                                ...prev,
+                                [item.id]: { ...currentForm, name: e.target.value }
+                              }))}
+                              placeholder="New name"
+                              className="mt-1 bg-white"
+                            />
+                          </div>
+                        <div className="flex-1 min-w-[220px]">
+                          <Label className="text-xs font-semibold text-amber-900">Merge Into Existing</Label>
+                          <select
+                            value={currentForm.employeeId}
+                            onChange={(e) => setUnknownForms(prev => ({
+                              ...prev,
+                              [item.id]: { ...currentForm, employeeId: e.target.value }
+                            }))}
+                            className="mt-1 w-full h-10 px-3 rounded-md border border-input bg-white text-sm"
+                          >
+                            <option value="">Create / keep placeholder</option>
+                            {employees
+                              .filter(emp => !currentForm.branchId || String(emp.branch_id || '') === currentForm.branchId)
+                              .map(emp => (
+                                <option key={emp.id} value={emp.id}>
+                                  {emp.name || emp.full_name || emp.employee_code || `#${emp.id}`}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                        <div className="flex-1 min-w-[180px]">
+                          <Label className="text-xs font-semibold text-amber-900">Branch</Label>
+                          <select
+                            value={currentForm.branchId}
+                            onChange={(e) => setUnknownForms(prev => ({
+                              ...prev,
+                              [item.id]: { ...currentForm, branchId: e.target.value }
+                            }))}
+                            className="mt-1 w-full h-10 px-3 rounded-md border border-input bg-white text-sm"
+                          >
+                            <option value="">Use selected branch</option>
+                            {scopedBranches.map(branch => (
+                              <option key={branch.id} value={branch.id}>
+                                {branch.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="shrink-0">
+                          <Button
+                            onClick={() => requestUnknownAssignment(item)}
+                              className="w-full lg:w-auto bg-amber-600 hover:bg-amber-700 text-white"
+                            >
+                              Assign
+                            </Button>
+                          </div>
+                        </div>
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          Branch: {item.branch_name || 'N/A'} · Last seen: {item.last_seen || 'N/A'}
+                        </p>
+                      </div>
+                    );
+                  })}
+
+                {unknownIds.filter(item => {
+                  const term = unknownSearch.trim().toLowerCase();
+                  if (!term) return true;
+                  return [
+                    String(item.device_user_id ?? ''),
+                    item.name || '',
+                    item.employee_code || '',
+                    item.branch_name || '',
+                    item.sync_status || '',
+                  ].some(value => value.toLowerCase().includes(term));
+                }).length === 0 && (
+                  <div className="rounded-xl border border-dashed border-amber-200 bg-amber-50/30 p-8 text-center text-sm text-muted-foreground">
+                    No unresolved IDs match your search.
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {activeTab === 'history' && (
         <Card>
           <CardHeader>
@@ -965,7 +1262,7 @@ export const AttendanceManagement: React.FC = () => {
                   className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm mt-1"
                 >
                   <option value="">Select Employee</option>
-                  {employees
+                  {scopedEmployees
                     .filter(e => !selectedBranch || e.branch_id === selectedBranch)
                       .map(e => (
                         <option key={e.id} value={e.id}>
@@ -976,11 +1273,10 @@ export const AttendanceManagement: React.FC = () => {
               </div>
               <div>
                 <Label>Date</Label>
-                <Input
-                  type="date"
+                <BsDatePicker
                   value={manualForm.date}
-                  onChange={(e) => setManualForm({ ...manualForm, date: e.target.value })}
-                  className="mt-1"
+                  onChange={(date) => setManualForm({ ...manualForm, date })}
+                  className="mt-1 w-full"
                 />
               </div>
               <div>
@@ -1071,6 +1367,63 @@ export const AttendanceManagement: React.FC = () => {
           </CardContent>
         </Card>
       )}
+
+      <Dialog
+        open={!!mergeConfirmItem}
+        onOpenChange={(open) => {
+          if (!open) {
+            setMergeConfirmItem(null);
+            setMergeConfirmForm(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Fingerprint className="h-5 w-5 text-amber-600" />
+              Confirm Merge & Reassign
+            </DialogTitle>
+            <DialogDescription>
+              This will move the attendance history for device user ID{' '}
+              <span className="font-mono font-semibold text-foreground">
+                #{mergeConfirmItem?.device_user_id ?? 'Unknown'}
+              </span>{' '}
+              to{' '}
+              <span className="font-semibold text-foreground">
+                {mergeConfirmForm?.employeeId
+                  ? employees.find(emp => emp.id === Number(mergeConfirmForm.employeeId))?.name ||
+                    employees.find(emp => emp.id === Number(mergeConfirmForm.employeeId))?.full_name ||
+                    `Employee #${mergeConfirmForm.employeeId}`
+                  : 'the selected employee'}
+              </span>
+              . Use this only when the device ID already belongs to that employee.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-900">
+            <p className="font-semibold">What will happen</p>
+            <ul className="mt-2 space-y-1 text-sm">
+              <li>• The employee record will keep the selected name.</li>
+              <li>• Attendance logs for this device ID will be reassigned.</li>
+              <li>• Future punches from the device will resolve to the same employee.</li>
+            </ul>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setMergeConfirmItem(null)}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-amber-600 hover:bg-amber-700 text-white"
+              onClick={() => void confirmMergeAssignment()}
+              disabled={!mergeConfirmItem}
+            >
+              Confirm Merge
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Sync Preview Modal */}
       {showPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -1140,7 +1493,8 @@ const TabButton: React.FC<{
   label: string;
   active: boolean;
   onClick: () => void;
-}> = ({ icon, label, active, onClick }) => (
+  count?: number;
+}> = ({ icon, label, active, onClick, count }) => (
   <button
     onClick={onClick}
     className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -1151,5 +1505,10 @@ const TabButton: React.FC<{
   >
     {icon}
     {label}
+    {typeof count === 'number' && count > 0 && (
+      <span className="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+        {count}
+      </span>
+    )}
   </button>
 );

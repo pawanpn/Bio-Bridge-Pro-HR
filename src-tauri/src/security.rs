@@ -3,6 +3,7 @@ use aes_gcm::{
     Aes256Gcm, Key, Nonce,
 };
 use base64::{engine::general_purpose, Engine as _};
+use bcrypt::verify;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
@@ -75,6 +76,11 @@ pub fn _verify_password(password: &str, hash: &str) -> bool {
     } else {
         false
     }
+}
+
+/// Verify a bcrypt password hash
+pub fn verify_bcrypt_password(password: &str, hash: &str) -> bool {
+    verify(password, hash).unwrap_or(false)
 }
 
 /// Sanitize input to prevent SQL injection

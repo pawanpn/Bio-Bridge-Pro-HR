@@ -1,18 +1,19 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { AttendanceConsole } from '../components/AttendanceConsole';
 import { ConnectivityBadge } from '../components/ConnectivityBadge';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { useAuth } from '../context/AuthContext';
+import { usePermission } from '../hooks/usePermission';
 import { syncService } from '../services/syncService';
 import { AppConfig } from '../config/appConfig';
+import { canAccessModule, getAccessibleBranchIds, isSuperAdmin, normalizeRole } from '../config/accessPolicy';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { setCalendarModePreference } from '@/lib/dateUtils';
 import {
   Calendar,
-  Search,
   LayoutDashboard,
   Monitor,
   FileText,
@@ -35,7 +36,11 @@ import {
   X,
   ChevronRight,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  ChevronDown,
+  UserCircle,
+  LogIn,
+  Search as SearchIcon
 } from 'lucide-react';
 
 export const MainLayout: React.FC = () => {
@@ -43,27 +48,49 @@ export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
-  const [calendarMode, setCalendarMode] = useState(localStorage.getItem('calendarMode') || 'BS');
+  const { hasAnyPermission, loading: permissionLoading } = usePermission(user?.id);
+  const role = normalizeRole(user?.role);
+  const isSuperAdminUser = isSuperAdmin(user?.role);
+  const accessibleBranchIds = getAccessibleBranchIds(user);
+  const [calendarMode, setCalendarMode] = useState(() => {
+    try {
+      return localStorage.getItem('calendarMode') || 'BS';
+    } catch {
+      return 'BS';
+    }
+  });
   const [activeTab, setActiveTab] = useState('Overview');
   const [branches, setBranches] = useState<{id: number, name: string}[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<number | string>('all');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [breadcrumbHistory, setBreadcrumbHistory] = useState<Array<{label: string, path: string}>>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const searchBoxRef = useRef<HTMLDivElement | null>(null);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Initialize sync service
   useEffect(() => {
-    syncService.initialize();
-    syncService.setupRealtimeListeners((table, data) => {
-      console.log(`📡 Realtime update: ${table}`, data);
-      // Reload data when changes detected
+    let mounted = true;
+
+    syncService.initialize().catch((error) => {
+      console.error('Sync service init failed:', error);
+    });
+
+    void syncService.setupRealtimeListeners((table, data) => {
+      if (!mounted) return;
+      console.log('Realtime update:', table, data);
       if (table === 'employees' || table === 'attendance_logs') {
-        // Trigger reload of current page data
         window.dispatchEvent(new CustomEvent('data-synced', { detail: { table } }));
       }
+    }).catch((error) => {
+      console.error('Realtime listener setup failed:', error);
     });
-    
+
     return () => {
+      mounted = false;
       syncService.destroy();
     };
   }, []);
@@ -117,16 +144,35 @@ export const MainLayout: React.FC = () => {
   useEffect(() => {
     invoke<any[]>('list_branches').then(setBranches).catch(console.error);
 
-    // Set initial branch if user is branch-locked
-    if (user?.branch_id) {
+    // Set initial branch from assigned branch scope
+    if (!isSuperAdminUser && accessibleBranchIds.length > 0) {
+      setSelectedBranch(accessibleBranchIds[0]);
+    } else if (user?.branch_id && !isSuperAdminUser) {
       setSelectedBranch(user.branch_id);
+    } else if (isSuperAdminUser) {
+      setSelectedBranch('all');
     }
-  }, [user]);
+  }, [user, isSuperAdminUser, accessibleBranchIds]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (searchBoxRef.current && !searchBoxRef.current.contains(target)) {
+        setIsSearchOpen(false);
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(target)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const toggleCalendar = () => {
     const nextMode = calendarMode === 'BS' ? 'AD' : 'BS';
     setCalendarMode(nextMode);
-    localStorage.setItem('calendarMode', nextMode);
+    setCalendarModePreference(nextMode);
   };
 
   const handleLogout = async () => {
@@ -184,7 +230,62 @@ export const MainLayout: React.FC = () => {
     }
   }, [navigate, breadcrumbHistory]);
 
-  const isOperator = user?.role === 'OPERATOR';
+  const isOperator = role === 'OPERATOR';
+  const canAccessLeave = user?.role === 'SUPER_ADMIN' || (!permissionLoading && hasAnyPermission(['view_leaves', 'apply_leave', 'approve_leave']));
+  const visibleBranches = isSuperAdminUser
+    ? branches
+    : branches.filter(branch => accessibleBranchIds.includes(String(branch.id)));
+
+  const navigationItems = useMemo(() => {
+    const items = [
+      { label: 'Dashboard', path: '/dashboard', keywords: ['overview', 'home'] },
+      { label: 'Employees', path: '/employees', keywords: ['staff', 'users', 'workforce', 'hr'] },
+      { label: 'Attendance', path: '/attendance', keywords: ['punch', 'logs', 'check in', 'check out'] },
+      { label: 'Leave Management', path: '/leave-management', keywords: ['leave', 'vacation', 'absence'] },
+      { label: 'Payroll', path: '/payroll', keywords: ['salary', 'wages', 'payment'] },
+      { label: 'Finance & Accounts', path: '/finance', keywords: ['accounts', 'invoice', 'billing'] },
+      { label: 'Reports', path: '/reports', keywords: ['analytics', 'export'] },
+      { label: 'Inventory', path: '/inventory', keywords: ['items', 'stock', 'warehouse'] },
+      { label: 'Projects', path: '/projects', keywords: ['tasks', 'planning'] },
+      { label: 'CRM', path: '/crm', keywords: ['leads', 'sales', 'customers'] },
+      { label: 'Assets', path: '/assets', keywords: ['equipment', 'fixed assets'] },
+      { label: 'Organization', path: '/organization', keywords: ['branches', 'gates', 'devices', 'organization structure'] },
+      { label: 'Device Settings', path: '/device-settings', keywords: ['device', 'scanner', 'hardware'] },
+      { label: 'Notifications', path: '/notifications', keywords: ['alerts', 'messages'] },
+      { label: 'System Settings', path: '/system-settings', keywords: ['settings', 'profile', 'security'] },
+      { label: 'System Tools', path: '/system-tools', keywords: ['tools', 'maintenance', 'rebuild'] },
+      { label: 'Roles & Permissions', path: '/permissions', keywords: ['roles', 'access', 'security'] },
+    ];
+
+    const branchItems = visibleBranches.map((branch) => ({
+      label: branch.name,
+      path: `/organization?branch=${branch.id}`,
+      keywords: ['branch', 'location', 'gate', 'device'],
+      meta: 'Branch',
+    }));
+
+    return [
+      ...items.map(item => ({ ...item, meta: 'Module' })),
+      ...branchItems,
+    ];
+  }, [visibleBranches]);
+
+  const searchResults = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return [] as Array<{ label: string; path: string; meta: string }>;
+    return navigationItems
+      .filter((item) => {
+        const haystack = `${item.label} ${item.path} ${(item.keywords || []).join(' ')} ${item.meta}`.toLowerCase();
+        return haystack.includes(query);
+      })
+      .slice(0, 8);
+  }, [navigationItems, searchQuery]);
+
+  const navigateToSearchResult = useCallback((label: string, path: string) => {
+    setSearchQuery('');
+    setIsSearchOpen(false);
+    go(label, path);
+  }, [go]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
@@ -241,7 +342,7 @@ export const MainLayout: React.FC = () => {
             <div className="px-3 pt-2 pb-0.5 text-[10px] font-semibold text-white/40 uppercase tracking-wider">
               Human Resources
             </div>
-            {!isOperator && (
+            {canAccessModule(role, 'employees') && (
               <SidebarItem
                 icon={<Users size={16} />}
                 label="Employees"
@@ -249,7 +350,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Employees', '/employees')}
               />
             )}
-            {!isOperator && (
+            {canAccessLeave && canAccessModule(role, 'leave') && (
               <SidebarItem
                 icon={<CalendarCheck size={16} />}
                 label="Leave Management"
@@ -257,7 +358,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Leave', '/leave-management')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'attendance') && (
               <SidebarItem
                 icon={<ClipboardCheck size={16} />}
                 label="Attendance"
@@ -265,7 +366,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Attendance', '/attendance')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'payroll') && (
               <SidebarItem
                 icon={<DollarSign size={16} />}
                 label="Payroll"
@@ -278,7 +379,7 @@ export const MainLayout: React.FC = () => {
             <div className="px-3 pt-2 pb-0.5 text-[10px] font-semibold text-white/40 uppercase tracking-wider">
               Finance
             </div>
-            {!isOperator && (
+            {canAccessModule(role, 'finance') && (
               <SidebarItem
                 icon={<TrendingUp size={16} />}
                 label="Finance & Accounts"
@@ -286,7 +387,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Finance', '/finance')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'reports') && (
               <SidebarItem
                 icon={<FileText size={16} />}
                 label="Reports"
@@ -299,7 +400,7 @@ export const MainLayout: React.FC = () => {
             <div className="px-3 pt-2 pb-0.5 text-[10px] font-semibold text-white/40 uppercase tracking-wider">
               Operations
             </div>
-            {!isOperator && (
+            {canAccessModule(role, 'inventory') && (
               <SidebarItem
                 icon={<Package size={16} />}
                 label="Inventory"
@@ -307,7 +408,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Inventory', '/inventory')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'projects') && (
               <SidebarItem
                 icon={<Briefcase size={16} />}
                 label="Projects"
@@ -315,7 +416,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Projects', '/projects')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'crm') && (
               <SidebarItem
                 icon={<Users2 size={16} />}
                 label="CRM"
@@ -323,7 +424,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('CRM', '/crm')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'assets') && (
               <SidebarItem
                 icon={<Building2 size={16} />}
                 label="Assets"
@@ -336,7 +437,7 @@ export const MainLayout: React.FC = () => {
             <div className="px-3 pt-2 pb-0.5 text-[10px] font-semibold text-white/40 uppercase tracking-wider">
               Administration
             </div>
-            {!isOperator && (
+            {canAccessModule(role, 'organization') && (
               <SidebarItem
                 icon={<Monitor size={16} />}
                 label="Organization"
@@ -344,7 +445,7 @@ export const MainLayout: React.FC = () => {
                 onClick={() => go('Devices', '/organization')}
               />
             )}
-            {!isOperator && (
+            {canAccessModule(role, 'permissions') && (
               <SidebarItem
                 icon={<Shield size={16} />}
                 label="Roles & Permissions"
@@ -363,7 +464,7 @@ export const MainLayout: React.FC = () => {
 
         {/* Footer - Fixed at Bottom */}
         <div className="flex-shrink-0 py-1 border-t border-white/10 space-y-0">
-          {!isOperator && (
+          {(canAccessModule(role, 'system-tools') || canAccessModule(role, 'system-settings')) && (
             <>
               <SidebarItem
                 icon={<Database size={16} />}
@@ -450,12 +551,47 @@ export const MainLayout: React.FC = () => {
             </nav>
           </div>
 
-          <div className="relative flex-1 max-w-xs lg:max-w-sm">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <div ref={searchBoxRef} className="relative flex-1 max-w-xs lg:max-w-sm">
+            <SearchIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Search..."
+              placeholder="Search modules, branches, settings..."
               className="pl-10 bg-muted/50 text-sm"
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setIsSearchOpen(true);
+              }}
+              onFocus={() => setIsSearchOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchResults[0]) {
+                  e.preventDefault();
+                  navigateToSearchResult(searchResults[0].label, searchResults[0].path);
+                }
+              }}
             />
+            {isSearchOpen && searchQuery.trim() && (
+              <div className="absolute left-0 right-0 top-full mt-2 z-50 rounded-xl border bg-card shadow-xl overflow-hidden">
+                {searchResults.length > 0 ? (
+                  <div className="max-h-80 overflow-y-auto">
+                    {searchResults.map((item) => (
+                      <button
+                        key={`${item.meta}-${item.path}`}
+                        type="button"
+                        onClick={() => navigateToSearchResult(item.label, item.path)}
+                        className="w-full text-left px-4 py-3 hover:bg-muted/60 border-b last:border-b-0 transition-colors"
+                      >
+                        <div className="text-sm font-semibold">{item.label}</div>
+                        <div className="text-xs text-muted-foreground">{item.meta} · {item.path}</div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="px-4 py-6 text-sm text-muted-foreground">
+                    No matches for "{searchQuery}".
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2 lg:gap-4 flex-shrink-0">
@@ -465,12 +601,12 @@ export const MainLayout: React.FC = () => {
             {/* Branch Selector */}
             <select
               value={selectedBranch}
-              disabled={!!user?.branch_id}
+              disabled={!isSuperAdminUser && visibleBranches.length <= 1}
               onChange={(e) => setSelectedBranch(e.target.value)}
               className="hidden md:block h-9 px-2 rounded-md border border-input bg-background text-xs lg:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value="all">Global (All Branches)</option>
-              {branches.map(b => (
+              {visibleBranches.map(b => (
                 <option key={b.id} value={b.id}>{b.name}</option>
               ))}
             </select>
@@ -485,11 +621,76 @@ export const MainLayout: React.FC = () => {
               <span className="hidden sm:inline font-medium">{calendarMode} Mode</span>
             </Button>
 
-            <Avatar className="h-7 w-7 lg:h-8 lg:w-8 bg-primary text-primary-foreground">
-              <AvatarFallback className="text-xs">
-                <UserIcon size={16} />
-              </AvatarFallback>
-            </Avatar>
+            <div ref={userMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setIsUserMenuOpen(prev => !prev)}
+                className="flex items-center gap-2 rounded-full border border-border bg-background px-2 py-1.5 hover:bg-muted/60 transition-colors"
+              >
+                <Avatar className="h-7 w-7 lg:h-8 lg:w-8 bg-primary text-primary-foreground">
+                  <AvatarFallback className="text-xs">
+                    <UserIcon size={16} />
+                  </AvatarFallback>
+                </Avatar>
+                <div className="hidden xl:flex flex-col items-start leading-tight">
+                  <span className="text-xs font-semibold max-w-36 truncate">{user?.full_name || user?.username}</span>
+                  <span className="text-[10px] text-muted-foreground">{user?.role}</span>
+                </div>
+                <ChevronDown size={14} className="text-muted-foreground" />
+              </button>
+
+              {isUserMenuOpen && (
+                <div className="absolute right-0 top-full mt-2 w-56 rounded-xl border bg-card shadow-xl z-50 overflow-hidden">
+                  <div className="px-4 py-3 border-b">
+                    <div className="text-sm font-semibold truncate">{user?.full_name || user?.username}</div>
+                    <div className="text-xs text-muted-foreground truncate">{user?.email}</div>
+                  </div>
+                  <div className="py-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        go('Settings', '/system-settings');
+                      }}
+                      className="w-full px-4 py-2.5 text-left text-sm hover:bg-muted/60 flex items-center gap-2"
+                    >
+                      <UserCircle size={16} />
+                      My Settings
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        go('Organization', '/organization');
+                      }}
+                      className="w-full px-4 py-2.5 text-left text-sm hover:bg-muted/60 flex items-center gap-2"
+                    >
+                      <GitBranch size={16} />
+                      Organization
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        go('System Tools', '/system-tools');
+                      }}
+                      className="w-full px-4 py-2.5 text-left text-sm hover:bg-muted/60 flex items-center gap-2"
+                    >
+                      <Database size={16} />
+                      System Tools
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleLogout}
+                      className="w-full px-4 py-2.5 text-left text-sm hover:bg-muted/60 flex items-center gap-2 text-destructive"
+                    >
+                      <LogIn size={16} className="rotate-180" />
+                      Sign Out
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
@@ -497,8 +698,6 @@ export const MainLayout: React.FC = () => {
         <main className="flex-1 overflow-y-auto overflow-x-hidden bg-muted/20 p-3 sm:p-4 lg:p-6">
           <Outlet />
         </main>
-
-        <AttendanceConsole />
       </div>
     </div>
   );

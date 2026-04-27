@@ -1,6 +1,109 @@
+use bcrypt::{hash, DEFAULT_COST};
 use rusqlite::{Connection, Result};
 use std::fs;
 use std::path::Path;
+
+fn recreate_users_table_if_needed(conn: &Connection) -> Result<()> {
+    let schema: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'Users'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+
+    if schema
+        .as_deref()
+        .map(|sql| sql.contains("PROVIDER") && sql.contains("ORG_SUPERADMIN"))
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    conn.execute("PRAGMA foreign_keys = OFF", [])?;
+    conn.execute("ALTER TABLE Users RENAME TO Users_legacy", [])?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS Users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            full_name TEXT,
+            email TEXT,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('PROVIDER', 'SUPER_ADMIN', 'ORG_SUPERADMIN', 'ADMIN', 'BRANCH_HEAD', 'ORG_MANAGER', 'MANAGER', 'SUPERVISOR', 'HR', 'EMPLOYEE', 'OPERATOR', 'VIEWER')),
+            branch_id INTEGER,
+            organization_id INTEGER DEFAULT 1,
+            is_active INTEGER DEFAULT 1,
+            must_change_password INTEGER DEFAULT 0,
+            FOREIGN KEY(branch_id) REFERENCES Branches(id)
+        )",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO Users (id, username, full_name, email, password_hash, role, branch_id, organization_id, is_active, must_change_password)
+         SELECT id, username, full_name, email, password_hash, role, branch_id, organization_id, is_active, must_change_password FROM Users_legacy",
+        [],
+    )?;
+    conn.execute("DROP TABLE Users_legacy", [])?;
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
+
+    Ok(())
+}
+
+fn seed_default_local_users(conn: &Connection) -> Result<()> {
+    recreate_users_table_if_needed(conn)?;
+
+    let master_hash = hash("masterpassword", DEFAULT_COST)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    let client_hash = hash("clientpassword", DEFAULT_COST)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    let provider_hash = hash("provider123", DEFAULT_COST)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
+    conn.execute(
+        "INSERT INTO Users (username, full_name, email, password_hash, role, branch_id, organization_id, is_active, must_change_password)
+         VALUES (?1, 'Master Admin', 'master_admin@biobridge.com', ?2, 'SUPER_ADMIN', NULL, 1, 1, 0)
+         ON CONFLICT(username) DO UPDATE SET
+            full_name = excluded.full_name,
+            email = excluded.email,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            organization_id = excluded.organization_id,
+            is_active = excluded.is_active,
+            must_change_password = excluded.must_change_password",
+        rusqlite::params!["master_admin", master_hash],
+    )?;
+
+    conn.execute(
+        "INSERT INTO Users (username, full_name, email, password_hash, role, branch_id, organization_id, is_active, must_change_password)
+         VALUES (?1, 'Client HR', 'client_hr@biobridge.com', ?2, 'ORG_SUPERADMIN', 1, 1, 1, 0)
+         ON CONFLICT(username) DO UPDATE SET
+            full_name = excluded.full_name,
+            email = excluded.email,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            branch_id = excluded.branch_id,
+            organization_id = excluded.organization_id,
+            is_active = excluded.is_active,
+            must_change_password = excluded.must_change_password",
+        rusqlite::params!["client_hr", client_hash],
+    )?;
+
+    conn.execute(
+        "INSERT INTO Users (username, full_name, email, password_hash, role, branch_id, organization_id, is_active, must_change_password)
+         VALUES (?1, 'Provider Admin', 'provider@biobridge.com', ?2, 'PROVIDER', NULL, 1, 1, 0)
+         ON CONFLICT(username) DO UPDATE SET
+            full_name = excluded.full_name,
+            email = excluded.email,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            organization_id = excluded.organization_id,
+            is_active = excluded.is_active,
+            must_change_password = excluded.must_change_password",
+        rusqlite::params!["provider_admin", provider_hash],
+    )?;
+
+    Ok(())
+}
 
 pub fn init_db(app_dir: &Path) -> Result<Connection> {
     if !app_dir.exists() {
@@ -32,15 +135,33 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             address TEXT,
             contact_info TEXT,
             auth_key TEXT UNIQUE,
-            license_expiry TEXT
+            license_expiry TEXT,
+            license_started_on TEXT,
+            payment_received_on TEXT,
+            provider_name TEXT,
+            provider_contact TEXT,
+            payment_term_days INTEGER DEFAULT 30,
+            payment_status TEXT DEFAULT 'Pending',
+            provider_approved INTEGER DEFAULT 0,
+            notes TEXT
         )",
         [],
     )?;
+
+    let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN provider_name TEXT", []);
+    let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN provider_contact TEXT", []);
+    let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN payment_term_days INTEGER DEFAULT 30", []);
+    let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN payment_status TEXT DEFAULT 'Pending'", []);
+    let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN provider_approved INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN notes TEXT", []);
+    let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN license_started_on TEXT", []);
+    let _ = conn.execute("ALTER TABLE Organizations ADD COLUMN payment_received_on TEXT", []);
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Branches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             org_id INTEGER NOT NULL,
+            organization_id INTEGER DEFAULT 1,
             name TEXT NOT NULL,
             location TEXT,
             FOREIGN KEY(org_id) REFERENCES Organizations(id)
@@ -80,6 +201,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_uuid TEXT,
             name TEXT NOT NULL,
             first_name TEXT,
             middle_name TEXT,
@@ -100,6 +222,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             department_id INTEGER,
             designation_id INTEGER,
             branch_id INTEGER,
+            organization_id INTEGER DEFAULT 1,
             reporting_manager_id INTEGER,
             bank_name TEXT,
             account_number TEXT,
@@ -135,9 +258,13 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             whatsapp_punch INTEGER DEFAULT 0,
             supervisor_mobile TEXT,
             biometric_id INTEGER,
+            device_user_id INTEGER,
             employment_status TEXT DEFAULT 'Active',
             employment_type TEXT DEFAULT 'Full-time',
             status TEXT DEFAULT 'active',
+            sync_status TEXT DEFAULT 'pending',
+            last_modified TEXT DEFAULT (datetime('now')),
+            server_id TEXT,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now')),
             FOREIGN KEY(branch_id) REFERENCES Branches(id)
@@ -147,9 +274,9 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
 
     // Safe Migration Logic: Add columns one by one if they don't exist
     let migrations = vec![
-        ("first_name", "TEXT"), ("middle_name", "TEXT"), ("last_name", "TEXT"), 
+        ("employee_uuid", "TEXT"), ("first_name", "TEXT"), ("middle_name", "TEXT"), ("last_name", "TEXT"), 
         ("employee_code", "TEXT"), ("department_id", "INTEGER"), ("designation_id", "INTEGER"), 
-        ("biometric_id", "INTEGER"), ("pan_number", "TEXT"), ("citizenship_number", "TEXT"), 
+        ("biometric_id", "INTEGER"), ("organization_id", "INTEGER DEFAULT 1"), ("pan_number", "TEXT"), ("citizenship_number", "TEXT"), 
         ("date_of_joining", "TEXT"), ("date_of_birth", "TEXT"), ("gender", "TEXT"), 
         ("marital_status", "TEXT"), ("personal_email", "TEXT"), ("personal_phone", "TEXT"),
         ("current_address", "TEXT"), ("permanent_address", "TEXT"),
@@ -157,6 +284,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("whatsapp_alert", "INTEGER DEFAULT 0"), ("whatsapp_exception", "INTEGER DEFAULT 0"), 
         ("whatsapp_punch", "INTEGER DEFAULT 0"), ("supervisor_mobile", "TEXT"),
         ("mobile_punch", "INTEGER DEFAULT 1"), ("full_name", "TEXT"), ("department", "TEXT"),
+        ("device_user_id", "INTEGER"),
         ("reporting_manager_id", "INTEGER"), ("bank_name", "TEXT"), ("account_number", "TEXT"),
         ("emergency_contact_name", "TEXT"), ("emergency_contact_phone", "TEXT"), ("emergency_contact_relation", "TEXT"),
         ("area_id", "TEXT"), ("location_id", "TEXT"), ("photo", "TEXT"),
@@ -168,6 +296,8 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("enable_holiday", "INTEGER DEFAULT 1"), ("outdoor_management", "INTEGER DEFAULT 0"),
         ("workflow_role", "TEXT"), ("app_role", "TEXT"),
         ("deleted_at", "TEXT"),
+        ("sync_status", "TEXT DEFAULT 'pending'"), ("last_modified", "TEXT DEFAULT (datetime('now'))"),
+        ("server_id", "TEXT"),
         ("shift_start_time", "TEXT"), ("shift_end_time", "TEXT")
     ];
 
@@ -177,9 +307,17 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
 
     let _ = conn.execute("ALTER TABLE Departments ADD COLUMN branch_id INTEGER", []);
     let _ = conn.execute("ALTER TABLE Designations ADD COLUMN branch_id INTEGER", []);
+    let _ = conn.execute("ALTER TABLE Branches ADD COLUMN organization_id INTEGER DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE Gates ADD COLUMN organization_id INTEGER DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE Devices ADD COLUMN organization_id INTEGER DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE AttendanceLogs ADD COLUMN organization_id INTEGER DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE Users ADD COLUMN organization_id INTEGER DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE Users ADD COLUMN full_name TEXT", []);
+    let _ = conn.execute("ALTER TABLE Users ADD COLUMN email TEXT", []);
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Devices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_uuid TEXT,
             name TEXT NOT NULL,
             brand TEXT NOT NULL,
             ip_address TEXT NOT NULL,
@@ -188,6 +326,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             machine_number INTEGER DEFAULT 1,
             is_default INTEGER DEFAULT 0,
             branch_id INTEGER REFERENCES Branches(id),
+            organization_id INTEGER DEFAULT 1,
             gate_id INTEGER REFERENCES Gates(id),
             status TEXT DEFAULT 'offline',
             subnet_mask TEXT,
@@ -196,7 +335,10 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             dhcp INTEGER DEFAULT 0,
             server_mode TEXT,
             server_address TEXT,
-            https_enabled INTEGER DEFAULT 0
+            https_enabled INTEGER DEFAULT 0,
+            sync_status TEXT DEFAULT 'pending',
+            last_modified TEXT DEFAULT (datetime('now')),
+            server_id TEXT
         )",
         [],
     )?;
@@ -205,7 +347,9 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         "CREATE TABLE IF NOT EXISTS AttendanceLogs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             employee_id INTEGER NOT NULL,
+            device_user_id INTEGER,
             branch_id INTEGER NOT NULL,
+            organization_id INTEGER DEFAULT 1,
             gate_id INTEGER NOT NULL DEFAULT 1,
             device_id INTEGER,
             timestamp TEXT NOT NULL,
@@ -233,9 +377,19 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         "CREATE TABLE IF NOT EXISTS LeaveRequests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             employee_id INTEGER NOT NULL,
+            leave_type TEXT DEFAULT 'Casual Leave',
             start_date TEXT NOT NULL,
             end_date TEXT NOT NULL,
+            reason TEXT,
             status TEXT DEFAULT 'pending',
+            applied_by TEXT,
+            applied_at TEXT DEFAULT (datetime('now')),
+            approved_by TEXT,
+            approved_at TEXT,
+            approval_remarks TEXT,
+            rejection_reason TEXT,
+            updated_at TEXT DEFAULT (datetime('now')),
+            deleted_at TEXT,
             FOREIGN KEY(employee_id) REFERENCES Employees(id)
         )",
         [],
@@ -246,8 +400,9 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('SUPER_ADMIN', 'ADMIN', 'OPERATOR')),
+            role TEXT NOT NULL CHECK(role IN ('PROVIDER', 'SUPER_ADMIN', 'ORG_SUPERADMIN', 'ADMIN', 'BRANCH_HEAD', 'ORG_MANAGER', 'MANAGER', 'SUPERVISOR', 'HR', 'EMPLOYEE', 'OPERATOR', 'VIEWER')),
             branch_id INTEGER,
+            organization_id INTEGER DEFAULT 1,
             is_active INTEGER DEFAULT 1,
             must_change_password INTEGER DEFAULT 0,
             FOREIGN KEY(branch_id) REFERENCES Branches(id)
@@ -359,6 +514,10 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("server_mode", "TEXT"),
         ("server_address", "TEXT"),
         ("https_enabled", "INTEGER DEFAULT 0"),
+        ("device_uuid", "TEXT"),
+        ("sync_status", "TEXT DEFAULT 'pending'"),
+        ("last_modified", "TEXT DEFAULT (datetime('now'))"),
+        ("server_id", "TEXT"),
     ];
     for (col, col_type) in columns {
         let _ = conn.execute(
@@ -368,6 +527,10 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     }
     let _ = conn.execute(
         "ALTER TABLE AttendanceLogs ADD COLUMN gate_id INTEGER NOT NULL DEFAULT 1",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE AttendanceLogs ADD COLUMN device_user_id INTEGER",
         [],
     );
     let _ = conn.execute(
@@ -389,6 +552,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         ("first_name", "TEXT"),
         ("middle_name", "TEXT"),
         ("last_name", "TEXT"),
+        ("organization_id", "INTEGER DEFAULT 1"),
         ("date_of_birth", "TEXT"),
         ("gender", "TEXT"),
         ("marital_status", "TEXT"),
@@ -464,17 +628,60 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     );
     let _ = conn.execute(
+        "UPDATE Employees SET employee_uuid = LOWER(HEX(RANDOMBLOB(4)) || '-' || HEX(RANDOMBLOB(2)) || '-4' || SUBSTR(HEX(RANDOMBLOB(2)), 2) || '-' || SUBSTR('89AB', ABS(RANDOM()) % 4 + 1, 1) || SUBSTR(HEX(RANDOMBLOB(2)), 2) || '-' || HEX(RANDOMBLOB(6))) WHERE employee_uuid IS NULL OR employee_uuid = ''",
+        [],
+    );
+    let _ = conn.execute(
         "UPDATE Employees SET employment_status = UPPER(status) WHERE status IS NOT NULL",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE Employees SET sync_status = COALESCE(sync_status, 'pending'), last_modified = COALESCE(last_modified, datetime('now'))",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE Branches SET organization_id = COALESCE(organization_id, org_id, 1)",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE Gates SET organization_id = COALESCE(organization_id, 1)",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE Devices SET organization_id = COALESCE(organization_id, 1)",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE AttendanceLogs SET organization_id = COALESCE(organization_id, 1)",
+        [],
+    );
+    let _ = conn.execute(
+        "UPDATE Users SET organization_id = COALESCE(organization_id, 1)",
         [],
     );
 
     // Migration for LeaveRequests table
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN leave_type TEXT DEFAULT 'Casual Leave'", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN reason TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN applied_by TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN applied_at TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN approved_at TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN approval_remarks TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN rejection_reason TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN updated_at TEXT", []);
+    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN deleted_at TEXT", []);
     let _ = conn.execute(
-        "ALTER TABLE LeaveRequests ADD COLUMN leave_type TEXT DEFAULT 'Casual Leave'",
+        "UPDATE LeaveRequests SET status = LOWER(status) WHERE status IS NOT NULL",
         [],
     );
-    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN reason TEXT", []);
-    let _ = conn.execute("ALTER TABLE LeaveRequests ADD COLUMN approved_by TEXT", []);
+    let _ = conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_employees_employee_uuid ON Employees (employee_uuid)",
+        [],
+    );
+    let _ = conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_device_uuid ON Devices (device_uuid)",
+        [],
+    );
 
     // Migration for EmployeeDocuments table (ensure it exists)
     let _ = conn.execute(
@@ -484,11 +691,18 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             doc_type TEXT,
             doc_name TEXT,
             cloud_file_id TEXT,
+            valid_until TEXT,
+            email_alert INTEGER DEFAULT 0,
+            alert_before_days INTEGER DEFAULT 0,
             upload_date TEXT,
             FOREIGN KEY(employee_id) REFERENCES Employees(id)
         )",
         [],
     );
+
+    let _ = conn.execute("ALTER TABLE EmployeeDocuments ADD COLUMN valid_until TEXT", []);
+    let _ = conn.execute("ALTER TABLE EmployeeDocuments ADD COLUMN email_alert INTEGER DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE EmployeeDocuments ADD COLUMN alert_before_days INTEGER DEFAULT 0", []);
 
     // Multi-branch access table: allows ADMIN users to access multiple branches
     let _ = conn.execute(
@@ -675,11 +889,11 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     )?;
     conn.execute(
-        "INSERT OR IGNORE INTO Branches (id, org_id, name) VALUES (1, 1, 'Head Office')",
+        "INSERT OR IGNORE INTO Branches (id, org_id, organization_id, name) VALUES (1, 1, 1, 'Head Office')",
         [],
     )?;
     conn.execute(
-        "INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')",
+        "INSERT OR IGNORE INTO Gates (id, branch_id, organization_id, name) VALUES (1, 1, 1, 'Main Gate')",
         [],
     )?;
 
@@ -699,9 +913,10 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     // bcrypt hash for 'admin123'
     let admin_pass_hash = "$2b$10$hmwXr.AU9waNfqdDwBPMwurCdtk5VT2mKSN4eqach.HlnACpNxv0y";
     let _ = conn.execute(
-        "INSERT OR IGNORE INTO Users (username, password_hash, role, must_change_password) VALUES ('admin', ?1, 'SUPER_ADMIN', 1)",
+        "INSERT OR IGNORE INTO Users (username, full_name, email, password_hash, role, organization_id, must_change_password) VALUES ('admin', 'System Administrator', 'admin@biobridge.com', ?1, 'SUPER_ADMIN', 1, 1)",
         [admin_pass_hash]
     );
+    let _ = seed_default_local_users(&conn);
 
     // Seed corporate dummy data
     let branches = vec![
@@ -711,14 +926,14 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     ];
     for (id, name, loc) in branches {
         let _ = conn.execute(
-            "INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (?1, 1, ?2, ?3)",
+            "INSERT OR IGNORE INTO Branches (id, org_id, organization_id, name, location) VALUES (?1, 1, 1, ?2, ?3)",
             [id.to_string(), name.to_string(), loc.to_string()],
         );
         // Queue for Supabase Sync
         let _ = conn.execute(
             "INSERT OR IGNORE INTO SyncQueue (table_name, operation, record_id, payload, priority, status, created_at)
              VALUES ('branches', 'INSERT', ?1, ?2, 'HIGH', 'PENDING', datetime('now'))",
-            [id.to_string(), serde_json::json!({"id": id, "name": name, "location": loc, "org_id": 1}).to_string()],
+            [id.to_string(), serde_json::json!({"id": id, "name": name, "location": loc, "org_id": 1, "organization_id": 1}).to_string()],
         );
     }
 
@@ -764,11 +979,11 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
 
     // Seed real branches (if not exist)
     conn.execute(
-        "INSERT OR IGNORE INTO Branches (id, org_id, name, location) VALUES (1, 1, 'Main Office', 'Kathmandu')",
+        "INSERT OR IGNORE INTO Branches (id, org_id, organization_id, name, location) VALUES (1, 1, 1, 'Main Office', 'Kathmandu')",
         [],
     )?;
     conn.execute(
-        "INSERT OR IGNORE INTO Gates (id, branch_id, name) VALUES (1, 1, 'Main Gate')",
+        "INSERT OR IGNORE INTO Gates (id, branch_id, organization_id, name) VALUES (1, 1, 1, 'Main Gate')",
         [],
     )?;
 
@@ -776,13 +991,13 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
        DUMMY DATA SEEDING (Restored per user request)
     */
     conn.execute(
-        "INSERT OR IGNORE INTO Employees (id, name, first_name, last_name, employee_code, department_id, branch_id, status) 
-         VALUES (101, 'Suman Shrestha', 'Suman', 'Shrestha', 'EMP-101', 1, 1, 'active')",
+        "INSERT OR IGNORE INTO Employees (id, name, first_name, last_name, employee_code, department_id, branch_id, organization_id, status) 
+         VALUES (101, 'Suman Shrestha', 'Suman', 'Shrestha', 'EMP-101', 1, 1, 1, 'active')",
         []
     )?;
     conn.execute(
-        "INSERT OR IGNORE INTO Employees (id, name, first_name, last_name, employee_code, department_id, branch_id, status) 
-         VALUES (102, 'Dilip Kumar', 'Dilip', 'Kumar', 'EMP-102', 2, 1, 'active')",
+        "INSERT OR IGNORE INTO Employees (id, name, first_name, last_name, employee_code, department_id, branch_id, organization_id, status) 
+         VALUES (102, 'Dilip Kumar', 'Dilip', 'Kumar', 'EMP-102', 2, 1, 1, 'active')",
         []
     )?;
 

@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import { getAccessibleBranchIds } from '@/config/accessPolicy';
 import { Switch } from '@/components/ui/switch';
 import {
   Users, UserPlus, Search, Filter, Download, Upload,
@@ -13,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { BsDatePicker } from '@/components/BsDatePicker';
 import {
   Table,
   TableBody,
@@ -34,6 +36,7 @@ import { Textarea } from '@/components/ui/textarea';
 
 // Employee Form Interface
 interface EmployeeForm {
+  employee_uuid: string;
   employee_code: string;
   first_name: string;
   middle_name: string;
@@ -96,6 +99,7 @@ interface EmployeeForm {
 }
 
 const emptyForm: EmployeeForm = {
+  employee_uuid: '',
   employee_code: '',
   first_name: '',
   middle_name: '',
@@ -159,6 +163,17 @@ const emptyForm: EmployeeForm = {
 
 export const EmployeeManagement: React.FC = () => {
   const { user, resetPassword } = useAuth();
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const accessibleBranchIds = getAccessibleBranchIds(user);
+  const hasBranchScope = isSuperAdmin || accessibleBranchIds.length === 0;
+
+  const filterEmployeesByScope = (rows: any[]) => {
+    if (hasBranchScope) return rows;
+    return rows.filter((emp) => {
+      const branchId = emp.branch_id;
+      return !branchId || accessibleBranchIds.includes(String(branchId));
+    });
+  };
   
   // State
   const [employees, setEmployees] = useState<any[]>([]);
@@ -183,12 +198,25 @@ export const EmployeeManagement: React.FC = () => {
   const [selectedBranchId, setSelectedBranchId] = useState<string>('');
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<any>(null);
+  const [employeeDocuments, setEmployeeDocuments] = useState<any[]>([]);
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentForm, setDocumentForm] = useState({
+    doc_type: 'ID Card',
+    valid_until: '',
+    email_alert: false,
+    alert_before_days: 30,
+  });
+  const [documentUploading, setDocumentUploading] = useState(false);
+  const [documentStatus, setDocumentStatus] = useState('');
 
   // Form state
   const [formData, setFormData] = useState<EmployeeForm>(emptyForm);
   const [formStep, setFormStep] = useState(1);
   const [formStatus, setFormStatus] = useState('');
   const [debugInfo, setDebugInfo] = useState<any>(null);
+  const profilePhotoInputRef = useRef<HTMLInputElement>(null);
+  const bioPhotoInputRef = useRef<HTMLInputElement>(null);
+  const employeeDocumentInputRef = useRef<HTMLInputElement>(null);
 
   // Load data
   useEffect(() => {
@@ -203,40 +231,106 @@ export const EmployeeManagement: React.FC = () => {
     };
   }, [viewMode]);
 
+  useEffect(() => {
+    if (formDialog.open && formDialog.editing?.id) {
+      loadEmployeeDocuments(formDialog.editing.id);
+      setDocumentStatus('');
+      setDocumentFile(null);
+      setDocumentForm({
+        doc_type: 'ID Card',
+        valid_until: '',
+        email_alert: false,
+        alert_before_days: 30,
+      });
+    } else {
+      setEmployeeDocuments([]);
+      setDocumentFile(null);
+      setDocumentStatus('');
+    }
+  }, [formDialog.open, formDialog.editing?.id]);
+
   const loadData = async () => {
     setLoading(true);
     try {
       console.log('[EmployeeManagement] Loading data...');
-      const [empResult, branchData, deviceData, deptData, desigData] = await Promise.all([
-        invoke<any>('list_employees', { statusFilter: viewMode === 'deleted' ? 'deleted' : 'active' }),
+      const employeeStatusFilter = viewMode === 'deleted'
+        ? 'deleted'
+        : isSuperAdmin
+          ? 'all'
+          : 'active';
+
+      const [empResult, branchResult, deviceResult, deptResult, desigResult] = await Promise.allSettled([
+        invoke<any>('list_employees', { statusFilter: employeeStatusFilter }),
         invoke<any[]>('list_branches'),
         invoke<any[]>('list_all_devices'),
         invoke<any[]>('list_departments'),
         invoke<any[]>('list_designations'),
       ]);
-      
-      console.log('[EmployeeManagement] Raw branch data:', branchData);
-      console.log('[EmployeeManagement] Raw device data:', deviceData);
-      console.log('[EmployeeManagement] Branch data type:', typeof branchData, Array.isArray(branchData));
-      console.log('[EmployeeManagement] Device data type:', typeof deviceData, Array.isArray(deviceData));
-      
-      // Handle both flat array and wrapped {success, data, count} format
-      const empData = Array.isArray(empResult) ? empResult : (empResult as any)?.data || [];
-      const branches = Array.isArray(branchData) ? branchData : [];
-      const devices = Array.isArray(deviceData) ? deviceData : [];
-      
-      console.log('[EmployeeManagement] Setting employees:', empData.length);
+
+      if (empResult.status === 'fulfilled') {
+        const empData = Array.isArray(empResult.value)
+          ? empResult.value
+          : empResult.value?.data || [];
+
+        const scopedEmployees = filterEmployeesByScope(empData);
+
+        console.log('[EmployeeManagement] Setting employees:', scopedEmployees.length);
+        setEmployees(scopedEmployees);
+
+        if (empResult.value?.debug) {
+          setDebugInfo(empResult.value.debug);
+        }
+
+      } else {
+        console.error('[EmployeeManagement] Failed to load employees:', empResult.reason);
+        setEmployees([]);
+        setDebugInfo(null);
+      }
+
+      const branches = branchResult.status === 'fulfilled' && Array.isArray(branchResult.value)
+        ? branchResult.value
+        : [];
+      const devices = deviceResult.status === 'fulfilled' && Array.isArray(deviceResult.value)
+        ? deviceResult.value
+        : [];
+      const departments = deptResult.status === 'fulfilled' && Array.isArray(deptResult.value)
+        ? deptResult.value
+        : [];
+      const designations = desigResult.status === 'fulfilled' && Array.isArray(desigResult.value)
+        ? desigResult.value
+        : [];
+
+      if (branchResult.status === 'rejected') {
+        console.error('[EmployeeManagement] Failed to load branches:', branchResult.reason);
+      }
+      if (deviceResult.status === 'rejected') {
+        console.error('[EmployeeManagement] Failed to load devices:', deviceResult.reason);
+      }
+      if (deptResult.status === 'rejected') {
+        console.error('[EmployeeManagement] Failed to load departments:', deptResult.reason);
+      }
+      if (desigResult.status === 'rejected') {
+        console.error('[EmployeeManagement] Failed to load designations:', desigResult.reason);
+      }
+
       console.log('[EmployeeManagement] Setting branches:', branches.length, branches);
       console.log('[EmployeeManagement] Setting devices:', devices.length, devices);
-      
-      setEmployees(empData);
-      setBranches(branches);
-      setDevices(devices);
-      setDepartments(Array.isArray(deptData) ? deptData : []);
-      setDesignations(Array.isArray(desigData) ? desigData : []);
-      if ((empResult as any)?.debug) {
-        setDebugInfo((empResult as any).debug);
-      }
+
+      const fallbackBranches = empResult.status === 'fulfilled'
+        ? deriveBranchesFromEmployees(Array.isArray(empResult.value) ? empResult.value : empResult.value?.data || [])
+        : [];
+
+      const visibleBranches = hasBranchScope
+        ? (branches.length > 0 ? branches : fallbackBranches)
+        : (branches.length > 0 ? branches.filter((branch: any) => accessibleBranchIds.includes(String(branch.id))) : fallbackBranches.filter((branch: any) => accessibleBranchIds.includes(String(branch.id))));
+      const visibleDevices = hasBranchScope
+        ? devices
+        : devices.filter((device: any) => accessibleBranchIds.includes(String(device.branch_id)));
+
+      setBranches(visibleBranches);
+      setDevices(visibleDevices);
+      setDepartments(departments);
+      setDesignations(designations);
     } catch (error) {
       console.error('Failed to load data:', error);
       setEmployees([]);
@@ -247,12 +341,38 @@ export const EmployeeManagement: React.FC = () => {
     }
   };
 
+  const loadEmployeeDocuments = async (employeeId: number) => {
+    try {
+      const docs = await invoke<any[]>('list_employee_documents', { employeeId });
+      setEmployeeDocuments(Array.isArray(docs) ? docs : []);
+    } catch (error) {
+      console.error('Failed to load employee documents:', error);
+      setEmployeeDocuments([]);
+    }
+  };
+
+  const fileToDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+
+  const getEmployeeStatus = (emp: any) =>
+    String(emp?.employment_status || emp?.status || 'Active').trim();
+
   // Filter employees
   const filteredEmployees = employees.filter(emp => {
     const name = emp.full_name || `${emp.first_name || ''} ${emp.middle_name || ''} ${emp.last_name || ''}`.trim();
     const matchesSearch = name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          emp.employee_code?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === 'all' || emp.status === statusFilter;
+    const employeeStatus = getEmployeeStatus(emp).toLowerCase();
+    const selectedStatus = statusFilter.toLowerCase();
+    const matchesStatus =
+      statusFilter === 'all' ||
+      employeeStatus === selectedStatus ||
+      (!employeeStatus && selectedStatus === 'active');
     return matchesSearch && matchesStatus;
   });
 
@@ -263,6 +383,20 @@ export const EmployeeManagement: React.FC = () => {
   const filteredDesignations = formData.branch_id 
     ? designations.filter(d => !d.branch_id || d.branch_id.toString() === formData.branch_id?.toString())
     : designations;
+
+  const deriveBranchesFromEmployees = (empRows: any[]) => {
+    const branchMap = new Map<number, { id: number; name: string }>();
+
+    empRows.forEach((emp: any) => {
+      const branchId = Number(emp.branch_id);
+      const branchName = emp.branch_name || emp.branch?.name;
+      if (branchId && branchName && !branchMap.has(branchId)) {
+        branchMap.set(branchId, { id: branchId, name: branchName });
+      }
+    });
+
+    return Array.from(branchMap.values());
+  };
 
   // Form handlers
   const handleNextStep = () => {
@@ -290,16 +424,24 @@ export const EmployeeManagement: React.FC = () => {
   };
 
   const handleAddEmployee = () => {
-    // Auto-calculate the next sequential Employee ID (BB-00XX) 
-    const maxId = employees.reduce((max, emp) => Math.max(max, parseInt(emp.id) || 0), 0);
-    const nextCode = `BB-${String(maxId + 1).padStart(4, '0')}`;
+    const employeeUuid = window.crypto?.randomUUID?.() || `emp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     
     setFormData({
       ...emptyForm,
-      employee_code: nextCode
+      employee_uuid: employeeUuid,
+      employee_code: `EMP-${employeeUuid.slice(0, 8).toUpperCase()}`
     });
     setFormStep(1);
     setFormStatus('');
+    setEmployeeDocuments([]);
+    setDocumentFile(null);
+    setDocumentStatus('');
+    setDocumentForm({
+      doc_type: 'ID Card',
+      valid_until: '',
+      email_alert: false,
+      alert_before_days: 30,
+    });
     setFormDialog({ open: true, editing: null });
   };
 
@@ -323,6 +465,7 @@ export const EmployeeManagement: React.FC = () => {
     try {
       // Build full request with all fields from the form
       const request = {
+        employee_uuid: formData.employee_uuid || (window.crypto?.randomUUID?.() || `emp-${Date.now()}-${Math.random().toString(16).slice(2)}`),
         employee_code: formData.employee_code,
         first_name: formData.first_name,
         middle_name: formData.middle_name || undefined,
@@ -337,17 +480,19 @@ export const EmployeeManagement: React.FC = () => {
         citizenship_number: formData.citizenship_number || undefined,
         pan_number: formData.pan_number || undefined,
         branch_id: formData.branch_id ? String(formData.branch_id) : undefined,
-        department_id: formData.department_id || undefined,
-        designation_id: formData.designation_id || undefined,
+        department_id: formData.department_id ? String(formData.department_id) : undefined,
+        designation_id: formData.designation_id ? String(formData.designation_id) : undefined,
         employment_type: formData.employment_type || undefined,
         employment_status: formData.employment_status || 'Active',
         date_of_joining: formData.date_of_joining || undefined,
-        reporting_manager_id: formData.reporting_manager_id || undefined,
+        reporting_manager_id: formData.reporting_manager_id ? String(formData.reporting_manager_id) : undefined,
         bank_name: formData.bank_name || undefined,
         account_number: formData.account_number || undefined,
+        emergency_contact_name: formData.emergency_contact_name || undefined,
+        emergency_contact_phone: formData.emergency_contact_phone || undefined,
         emergency_contact_relation: formData.emergency_contact_relation || undefined,
-        area_id: formData.area_id || undefined,
-        location_id: formData.location_id || undefined,
+        area_id: formData.area_id ? String(formData.area_id) : undefined,
+        location_id: formData.location_id ? String(formData.location_id) : undefined,
         photo: formData.photo || undefined,
         enable_self_service: formData.enable_self_service,
         enable_mobile_access: formData.enable_mobile_access,
@@ -362,8 +507,8 @@ export const EmployeeManagement: React.FC = () => {
         postcode: formData.postcode || undefined,
         passport_no: formData.passport_no || undefined,
         nationality: formData.nationality || undefined,
-        verification_mode: formData.verification_mode || undefined,
-        device_privilege: formData.device_privilege || undefined,
+        verification_mode: formData.verification_mode ? String(formData.verification_mode) : undefined,
+        device_privilege: formData.device_privilege ? String(formData.device_privilege) : undefined,
         device_password: formData.device_password || undefined,
         card_no: formData.card_no || undefined,
         bio_photo: formData.bio_photo || undefined,
@@ -380,6 +525,9 @@ export const EmployeeManagement: React.FC = () => {
         biometric_id: formData.biometric_id ? parseInt(String(formData.biometric_id)) : undefined,
         shift_start_time: formData.shift_start_time || undefined,
         shift_end_time: formData.shift_end_time || undefined,
+        sync_status: formDialog.editing ? 'modified' : 'pending',
+        last_modified: new Date().toISOString(),
+        server_id: undefined,
       };
 
       // Save using the crud commands (local SQLite first)
@@ -389,7 +537,7 @@ export const EmployeeManagement: React.FC = () => {
           request,
         });
       } else {
-        await invoke('create_employee', { request });
+        await invoke('register_new_staff', { request });
       }
 
       setFormStatus('✅ Employee saved successfully!');
@@ -455,6 +603,84 @@ export const EmployeeManagement: React.FC = () => {
       setFormStatus('❌ Pull failed: ' + (error?.message || error));
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleProfilePhotoUpload = async (file?: File) => {
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    setFormData(prev => ({ ...prev, photo: dataUrl }));
+  };
+
+  const handleBioPhotoUpload = async (file?: File) => {
+    if (!file) return;
+    const dataUrl = await fileToDataUrl(file);
+    setFormData(prev => ({ ...prev, bio_photo: dataUrl }));
+  };
+
+  const handleUploadEmployeeDocument = async () => {
+    if (!formDialog.editing?.id) {
+      setDocumentStatus('Save the employee first before uploading documents.');
+      return;
+    }
+
+    if (!documentFile) {
+      setDocumentStatus('Select a document file first.');
+      return;
+    }
+
+    setDocumentUploading(true);
+    setDocumentStatus('Uploading document...');
+
+    try {
+      const fileBytes = Array.from(new Uint8Array(await documentFile.arrayBuffer()));
+      await invoke('upload_employee_document', {
+        employeeId: formDialog.editing.id,
+        docType: documentForm.doc_type,
+        fileName: documentFile.name,
+        fileBytes,
+        validUntil: documentForm.valid_until || null,
+        emailAlert: documentForm.email_alert,
+        alertBeforeDays: documentForm.alert_before_days,
+      });
+
+      setDocumentFile(null);
+      setDocumentStatus('Document uploaded successfully.');
+      await loadEmployeeDocuments(formDialog.editing.id);
+    } catch (error: any) {
+      setDocumentStatus('Failed to upload document: ' + (error?.message || error));
+    } finally {
+      setDocumentUploading(false);
+    }
+  };
+
+  const handlePreviewEmployeeDocument = async (doc: any) => {
+    try {
+      const previewKey = doc.cloudId || doc.name;
+      const bytes = await invoke<number[]>('get_document_preview', { docName: previewKey });
+      const blob = new Blob([new Uint8Array(bytes)], {
+        type: (doc.name || '').toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream',
+      });
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, '_blank');
+      if (!win) {
+        alert('Popup blocked. Please allow popups to preview the document.');
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    } catch (error: any) {
+      alert('Could not preview document: ' + (error?.message || error));
+    }
+  };
+
+  const handleDeleteEmployeeDocument = async (doc: any) => {
+    if (!confirm(`Delete ${doc.name}?`)) return;
+    try {
+      await invoke('delete_employee_document', { documentId: doc.id });
+      if (formDialog.editing?.id) {
+        await loadEmployeeDocuments(formDialog.editing.id);
+      }
+    } catch (error: any) {
+      alert('Failed to delete document: ' + (error?.message || error));
     }
   };
 
@@ -595,7 +821,7 @@ export const EmployeeManagement: React.FC = () => {
             <div>
               <p className="text-sm text-muted-foreground">Active</p>
               <p className="text-2xl font-bold text-green-600">
-                {employees.filter(e => e.status === 'Active' || !e.status).length}
+                {employees.filter(e => getEmployeeStatus(e).toLowerCase() === 'active').length}
               </p>
             </div>
             <Users className="w-8 h-8 text-green-600" />
@@ -606,7 +832,7 @@ export const EmployeeManagement: React.FC = () => {
             <div>
               <p className="text-sm text-muted-foreground">On Leave</p>
               <p className="text-2xl font-bold text-orange-600">
-                {employees.filter(e => e.status === 'On Leave').length}
+                {employees.filter(e => getEmployeeStatus(e).toLowerCase() === 'on leave').length}
               </p>
             </div>
             <Calendar className="w-8 h-8 text-orange-600" />
@@ -617,7 +843,10 @@ export const EmployeeManagement: React.FC = () => {
             <div>
               <p className="text-sm text-muted-foreground">Inactive</p>
               <p className="text-2xl font-bold text-red-600">
-                {employees.filter(e => e.status === 'Inactive').length}
+                {employees.filter(e => {
+                  const status = getEmployeeStatus(e).toLowerCase();
+                  return ['inactive', 'terminated', 'resigned', 'retired'].includes(status);
+                }).length}
               </p>
             </div>
             <Users className="w-8 h-8 text-red-600" />
@@ -715,8 +944,8 @@ export const EmployeeManagement: React.FC = () => {
                     <TableCell className="text-muted-foreground">{emp.department || '—'}</TableCell>
                     <TableCell className="text-muted-foreground">{emp.branch_name || '—'}</TableCell>
                     <TableCell>
-                      <Badge variant={emp.employment_status === 'Active' || !emp.employment_status ? 'default' : 'secondary'}>
-                        {emp.employment_status || 'Active'}
+                      <Badge variant={getEmployeeStatus(emp).toLowerCase() === 'active' ? 'default' : 'secondary'}>
+                        {getEmployeeStatus(emp)}
                       </Badge>
                     </TableCell>
                     {viewMode === 'deleted' && (
@@ -851,9 +1080,29 @@ export const EmployeeManagement: React.FC = () => {
                       <h3 className="text-lg font-semibold">Profile</h3>
                       <p className="text-sm text-muted-foreground">Basic identity and employment assignment</p>
                     </div>
-                    <div className="w-24 h-24 rounded-full border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors">
-                      <Upload className="w-6 h-6 text-muted-foreground mb-1" />
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold">Photo</span>
+                    <div
+                      className="relative w-24 h-24 rounded-full border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors overflow-hidden"
+                      onClick={() => profilePhotoInputRef.current?.click()}
+                    >
+                      {formData.photo ? (
+                        <img src={formData.photo} alt="Employee photo" className="w-full h-full object-cover" />
+                      ) : (
+                        <>
+                          <Upload className="w-6 h-6 text-muted-foreground mb-1" />
+                          <span className="text-[10px] text-muted-foreground uppercase font-bold">Photo</span>
+                        </>
+                      )}
+                      <input
+                        ref={profilePhotoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          await handleProfilePhotoUpload(file);
+                          e.target.value = '';
+                        }}
+                      />
                     </div>
                   </div>
                   
@@ -902,12 +1151,10 @@ export const EmployeeManagement: React.FC = () => {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="doj" className="text-sm font-semibold">Date of Joining</Label>
-                      <Input
-                        id="doj"
-                        type="date"
+                      <BsDatePicker
                         value={formData.date_of_joining}
-                        onChange={(e) => setFormData({ ...formData, date_of_joining: e.target.value })}
-                        className="bg-background"
+                        onChange={(date) => setFormData({ ...formData, date_of_joining: date })}
+                        className="bg-background w-full"
                       />
                     </div>
                     <div className="space-y-2">
@@ -1019,7 +1266,7 @@ export const EmployeeManagement: React.FC = () => {
                   <div className="grid grid-cols-3 gap-6">
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase text-muted-foreground">Birth Date</Label>
-                      <Input type="date" value={formData.date_of_birth} onChange={(e) => setFormData({ ...formData, date_of_birth: e.target.value })} />
+                      <BsDatePicker value={formData.date_of_birth} onChange={(date) => setFormData({ ...formData, date_of_birth: date })} className="w-full" />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs font-bold uppercase text-muted-foreground">Local Name</Label>
@@ -1098,9 +1345,29 @@ export const EmployeeManagement: React.FC = () => {
                       <h3 className="text-lg font-semibold">Device Settings</h3>
                       <p className="text-sm text-muted-foreground">Hardware authentication configuration</p>
                     </div>
-                    <div className="w-24 h-24 rounded-full border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors">
-                      <Upload className="w-6 h-6 text-muted-foreground mb-1" />
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold text-center">Bio-photo</span>
+                    <div
+                      className="relative w-24 h-24 rounded-full border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors overflow-hidden"
+                      onClick={() => bioPhotoInputRef.current?.click()}
+                    >
+                      {formData.bio_photo ? (
+                        <img src={formData.bio_photo} alt="Bio photo" className="w-full h-full object-cover" />
+                      ) : (
+                        <>
+                          <Upload className="w-6 h-6 text-muted-foreground mb-1" />
+                          <span className="text-[10px] text-muted-foreground uppercase font-bold text-center">Bio-photo</span>
+                        </>
+                      )}
+                      <input
+                        ref={bioPhotoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          await handleBioPhotoUpload(file);
+                          e.target.value = '';
+                        }}
+                      />
                     </div>
                   </div>
                   
@@ -1294,15 +1561,96 @@ export const EmployeeManagement: React.FC = () => {
                 <div className="space-y-8 animate-in fade-in duration-300">
                   <div className="flex justify-between items-center border-b pb-4">
                     <h3 className="text-lg font-semibold">Document Setting</h3>
-                    <Button size="sm" className="bg-primary h-8 px-3">
+                    <Button
+                      size="sm"
+                      className="bg-primary h-8 px-3"
+                      onClick={() => employeeDocumentInputRef.current?.click()}
+                      disabled={!formDialog.editing?.id || documentUploading}
+                    >
                       <Plus className="w-4 h-4 mr-1" /> Add Document
                     </Button>
                   </div>
-                  
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4 rounded-lg border bg-muted/20">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Document Type</Label>
+                      <select
+                        value={documentForm.doc_type}
+                        onChange={(e) => setDocumentForm(prev => ({ ...prev, doc_type: e.target.value }))}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                        disabled={!formDialog.editing?.id || documentUploading}
+                      >
+                        <option value="ID Card">ID Card</option>
+                        <option value="Contract">Contract</option>
+                        <option value="Appointment Letter">Appointment Letter</option>
+                        <option value="Citizenship">Citizenship</option>
+                        <option value="Passport">Passport</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">File</Label>
+                      <Input
+                        ref={employeeDocumentInputRef}
+                        type="file"
+                        disabled={!formDialog.editing?.id || documentUploading}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0] || null;
+                          setDocumentFile(file);
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Valid Up To</Label>
+                      <BsDatePicker
+                        value={documentForm.valid_until}
+                        onChange={(date) => setDocumentForm(prev => ({ ...prev, valid_until: date }))}
+                        disabled={!formDialog.editing?.id || documentUploading}
+                        className="w-full"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Alert Before Days</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={documentForm.alert_before_days}
+                        onChange={(e) => setDocumentForm(prev => ({ ...prev, alert_before_days: parseInt(e.target.value || '0') }))}
+                        disabled={!formDialog.editing?.id || documentUploading}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between rounded-md border bg-background px-3 py-2">
+                      <div>
+                        <Label className="text-sm font-semibold">Email Alert</Label>
+                        <p className="text-xs text-muted-foreground">Notify before the document expires.</p>
+                      </div>
+                      <Switch
+                        checked={documentForm.email_alert}
+                        onCheckedChange={(val) => setDocumentForm(prev => ({ ...prev, email_alert: val }))}
+                        disabled={!formDialog.editing?.id || documentUploading}
+                      />
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Button
+                        onClick={handleUploadEmployeeDocument}
+                        disabled={!formDialog.editing?.id || !documentFile || documentUploading}
+                        className="w-full"
+                      >
+                        {documentUploading ? 'Uploading...' : 'Upload Document'}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {documentStatus && (
+                    <div className="text-sm rounded-md border bg-muted/20 px-4 py-3">
+                      {documentStatus}
+                    </div>
+                  )}
+
                   <Table className="border rounded-md">
                     <TableHeader className="bg-muted/50">
                       <TableRow>
-                        <TableHead className="w-[40%] text-xs font-bold">Document</TableHead>
+                        <TableHead className="w-[30%] text-xs font-bold">Document</TableHead>
                         <TableHead className="text-xs font-bold">Valid Up To</TableHead>
                         <TableHead className="text-xs font-bold text-center">Email Alert</TableHead>
                         <TableHead className="text-xs font-bold">Alert Before</TableHead>
@@ -1310,11 +1658,41 @@ export const EmployeeManagement: React.FC = () => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      <TableRow>
-                        <TableCell colSpan={5} className="h-48 text-center text-muted-foreground italic">
-                           No documents uploaded for this employee
-                        </TableCell>
-                      </TableRow>
+                      {employeeDocuments.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="h-48 text-center text-muted-foreground italic">
+                            No documents uploaded for this employee
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        employeeDocuments.map((doc) => (
+                          <TableRow key={doc.id}>
+                            <TableCell>
+                              <div className="flex flex-col">
+                                <span className="font-medium">{doc.type || 'Document'}</span>
+                                <span className="text-xs text-muted-foreground">{doc.name}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell>{doc.valid_until || '—'}</TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant={doc.email_alert ? 'default' : 'secondary'}>
+                                {doc.email_alert ? 'On' : 'Off'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{doc.alert_before_days ?? 0} days</TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <Button variant="ghost" size="icon" onClick={() => handlePreviewEmployeeDocument(doc)}>
+                                  <Eye className="w-4 h-4" />
+                                </Button>
+                                <Button variant="ghost" size="icon" onClick={() => handleDeleteEmployeeDocument(doc)}>
+                                  <Trash2 className="w-4 h-4 text-destructive" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
                     </TableBody>
                   </Table>
                 </div>
@@ -1462,7 +1840,7 @@ export const EmployeeManagement: React.FC = () => {
             <div className="space-y-4">
               <div className="flex items-center gap-4 mb-6">
                 <div className="w-16 h-16 rounded-full bg-primary flex items-center justify-center text-white text-2xl font-bold">
-                  {viewDialog.employee.name?.charAt(0) || '?'}
+                  {(viewDialog.employee.name?.trim()?.charAt(0)) || '?'}
                 </div>
                 <div>
                   <h3 className="text-xl font-bold">{viewDialog.employee.name}</h3>

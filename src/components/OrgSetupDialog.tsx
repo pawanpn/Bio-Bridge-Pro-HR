@@ -23,11 +23,11 @@ export const OrgSetupDialog: React.FC<OrgSetupDialogProps> = ({ open, onOpenChan
     if(!newName.trim()) return;
     try {
       if(activeTab === 'branches') {
-        await invoke('add_branch', { name: newName, location: null });
+        await invoke('add_branch', { name: newName, location: null, organization_id: null });
       } else if (activeTab === 'departments') {
-         await invoke('create_department', { name: newName, branchId: selectedBranchId ? parseInt(selectedBranchId) : null });
+         await invoke('create_department', { name: newName, branch_id: selectedBranchId ? parseInt(selectedBranchId) : null });
       } else {
-         await invoke('create_designation', { name: newName, branchId: selectedBranchId ? parseInt(selectedBranchId) : null });
+         await invoke('create_designation', { name: newName, branch_id: selectedBranchId ? parseInt(selectedBranchId) : null });
       }
       setNewName('');
       onRefresh();

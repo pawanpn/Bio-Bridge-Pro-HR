@@ -812,7 +812,7 @@ export const Dashboard: React.FC = () => {
                         >
                           <div className="flex items-center gap-2.5">
                              <div className="h-7 w-7 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-[10px] font-bold text-blue-700 group-hover:bg-blue-600 group-hover:text-white transition-all">
-                                {s.name.charAt(0)}
+                                {s.name?.trim()?.charAt(0) || '?'}
                              </div>
                              <div>
                                 <span className="text-sm font-bold text-slate-700 dark:text-slate-200 group-hover:text-blue-600 transition-colors">{s.name}</span>
@@ -853,7 +853,7 @@ export const Dashboard: React.FC = () => {
                         >
                           <div className="flex items-center gap-2.5 opacity-80 group-hover:opacity-100">
                              <div className="h-7 w-7 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-400">
-                                {s.name.charAt(0)}
+                                {s.name?.trim()?.charAt(0) || '?'}
                              </div>
                              <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">{s.name}</span>
                           </div>

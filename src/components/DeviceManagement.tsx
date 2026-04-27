@@ -352,7 +352,7 @@ export const DeviceManagement: React.FC = () => {
             if (deviceDialog.editing) {
               await invoke('update_device', { id: deviceDialog.editing.id, device: data });
             } else {
-              await invoke('add_device', { device: data });
+              await invoke('register_new_device', { device: data });
             }
             setDeviceDialog({ open: false, editing: null });
             loadData();

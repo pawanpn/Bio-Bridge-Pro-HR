@@ -56,6 +56,12 @@ export const DynamicSystemSettings: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
+  const capitalizeLabel = (value?: string | null) => {
+    const text = value?.trim();
+    if (!text) return 'General';
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  };
+
   const categories: SettingCategory[] = [
     {
       category: 'general',
@@ -288,7 +294,7 @@ export const DynamicSystemSettings: React.FC = () => {
               className="whitespace-nowrap"
             >
               <Icon size={14} className="mr-1" />
-              {cat.category.charAt(0).toUpperCase() + cat.category.slice(1)}
+              {capitalizeLabel(cat.category)}
             </Button>
           );
         })}
@@ -307,7 +313,7 @@ export const DynamicSystemSettings: React.FC = () => {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Icon size={20} />
-                    {cat.category.charAt(0).toUpperCase() + cat.category.slice(1)} Settings
+                    {capitalizeLabel(cat.category)} Settings
                   </CardTitle>
                   <CardDescription>{cat.description}</CardDescription>
                 </CardHeader>

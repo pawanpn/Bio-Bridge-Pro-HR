@@ -7,8 +7,14 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Badge } from '@/components/ui/badge';
 import { Lock, Mail as MailIcon, ShieldCheck, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { AppConfig } from '../config/appConfig';
+import { type PortalType, getPortalLabel } from '@/config/portalPolicy';
 
-export const Login: React.FC = () => {
+interface LoginProps {
+  portal?: PortalType;
+  embedded?: boolean;
+}
+
+export const Login: React.FC<LoginProps> = ({ portal, embedded = false }) => {
   const { login, changePassword, resetPassword, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -43,7 +49,7 @@ export const Login: React.FC = () => {
     setError('');
     setSuccess('');
     try {
-      const result = await login(email, password);
+      const result = await login(email, password, portal);
 
       if (!result.success) {
         setError(result.error || 'Login failed. Please check your credentials.');
@@ -106,7 +112,7 @@ export const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-accent/10 p-4">
+    <div className={embedded ? 'w-full' : 'min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-accent/10 p-4'}>
       <Card className="w-full max-w-md shadow-2xl border-0">
         <CardHeader className="space-y-4 text-center">
           <div className="mx-auto w-16 h-16 rounded-full bg-gradient-to-br from-primary to-primary/80 flex items-center justify-center shadow-lg">
@@ -114,7 +120,7 @@ export const Login: React.FC = () => {
           </div>
           <CardTitle className="text-2xl font-bold">{AppConfig.appName}</CardTitle>
           <CardDescription className="text-sm">
-            Enterprise Attendance & HR Management
+            {portal ? `${getPortalLabel(portal)} access` : 'Enterprise Attendance & HR Management'}
           </CardDescription>
         </CardHeader>
 
@@ -302,7 +308,13 @@ export const Login: React.FC = () => {
         <CardFooter className="flex flex-col space-y-3 text-center text-xs text-muted-foreground">
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-xs">
-              Default: <span className="font-semibold ml-1">admin</span> / <span className="font-semibold ml-1">admin123</span>
+              {portal === 'provider' ? (
+                <>Provider: <span className="font-semibold ml-1">master_admin</span> / <span className="font-semibold ml-1">masterpassword</span></>
+              ) : portal === 'admin' ? (
+                <>Client: <span className="font-semibold ml-1">client_hr</span> / <span className="font-semibold ml-1">clientpassword</span></>
+              ) : (
+                <>Default: <span className="font-semibold ml-1">admin</span> / <span className="font-semibold ml-1">admin123</span></>
+              )}
             </Badge>
           </div>
           <p>© 2026 Bio Bridge Pro HR. All rights reserved.</p>

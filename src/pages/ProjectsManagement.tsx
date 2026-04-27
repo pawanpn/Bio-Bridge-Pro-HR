@@ -4,6 +4,8 @@ import {
   Users, Target, CheckCircle, Clock, AlertCircle
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { formatDualDate } from '@/lib/dateUtils';
+import { BsDatePicker } from '@/components/BsDatePicker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -301,7 +303,7 @@ export const ProjectsManagement: React.FC = () => {
                 <div className="flex items-center justify-between text-sm pt-2 border-t">
                   <div className="flex items-center gap-1 text-muted-foreground">
                     <Calendar className="w-4 h-4" />
-                    <span>{new Date(project.start_date).toLocaleDateString()}</span>
+                    <span>{formatDualDate(project.start_date)}</span>
                   </div>
                   <div className="flex items-center gap-1 text-muted-foreground">
                     <Users className="w-4 h-4" />
@@ -370,19 +372,11 @@ export const ProjectsManagement: React.FC = () => {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Start Date</Label>
-                <Input
-                  type="date"
-                  value={formData.start_date}
-                  onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                />
+                <BsDatePicker value={formData.start_date} onChange={(date) => setFormData({ ...formData, start_date: date })} className="w-full" />
               </div>
               <div>
                 <Label>End Date</Label>
-                <Input
-                  type="date"
-                  value={formData.end_date}
-                  onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                />
+                <BsDatePicker value={formData.end_date} onChange={(date) => setFormData({ ...formData, end_date: date })} className="w-full" />
               </div>
             </div>
             <div>

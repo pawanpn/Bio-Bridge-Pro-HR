@@ -1,10 +1,47 @@
 use crate::errors::AppError;
-use crate::hardware::{sync_device, test_device, push_user_info, pull_user_biometric};
+use crate::hardware::{get_all_user_info, sync_device, test_device, push_user_info, pull_user_biometric};
 use crate::models::DeviceBrand;
 use crate::sync_service;
 use crate::AppState;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
+use std::fs;
+use std::path::PathBuf;
+use tauri::Manager;
+use rand::{rngs::OsRng, RngCore};
+
+fn generate_uuid_v4() -> String {
+    let mut bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3],
+        bytes[4], bytes[5],
+        bytes[6], bytes[7],
+        bytes[8], bytes[9],
+        bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+    )
+}
+
+fn read_json_str<'a>(value: &'a Value, keys: &[&str], default: &'a str) -> String {
+    for key in keys {
+        if let Some(val) = value.get(*key).and_then(|v| v.as_str()) {
+            return val.to_string();
+        }
+    }
+    default.to_string()
+}
+
+fn read_json_i64(value: &Value, keys: &[&str], default: i64) -> i64 {
+    for key in keys {
+        if let Some(val) = value.get(*key).and_then(|v| v.as_i64()) {
+            return val;
+        }
+    }
+    default
+}
 
 #[tauri::command]
 pub async fn list_all_devices(
@@ -21,7 +58,8 @@ pub async fn list_all_devices(
 
     let mut query = String::from(
         "SELECT d.id, d.name, d.brand, d.ip_address, d.port, d.comm_key, d.machine_number, d.is_default, d.status,
-                b.name as branch_name, g.name as gate_name, d.branch_id, d.gate_id
+                b.name as branch_name, g.name as gate_name, d.branch_id, d.gate_id,
+                d.device_uuid, d.sync_status, d.last_modified, d.server_id
          FROM Devices d
          LEFT JOIN Branches b ON d.branch_id = b.id
          LEFT JOIN Gates g ON d.gate_id = g.id"
@@ -52,6 +90,10 @@ pub async fn list_all_devices(
                 "gate_name": row.get::<_, Option<String>>(10)?,
                 "branch_id": row.get::<_, Option<i64>>(11)?,
                 "gate_id": row.get::<_, Option<i64>>(12)?,
+                "device_uuid": row.get::<_, Option<String>>(13)?,
+                "sync_status": row.get::<_, Option<String>>(14)?,
+                "last_modified": row.get::<_, Option<String>>(15)?,
+                "server_id": row.get::<_, Option<String>>(16)?,
             }))
         })
         .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
@@ -59,6 +101,145 @@ pub async fn list_all_devices(
         .collect();
 
     Ok(devices)
+}
+
+fn sanitize_filename_component(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| match c {
+            'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '-' | '_' => c,
+            _ => '_',
+        })
+        .collect()
+}
+
+fn employee_documents_root(app_handle: &tauri::AppHandle) -> Result<PathBuf, AppError> {
+    let app_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Unknown(format!("Unable to resolve app data directory: {}", e)))?;
+    let docs_dir = app_dir.join("Employee_Documents");
+    fs::create_dir_all(&docs_dir)
+        .map_err(|e| AppError::DatabaseError(format!("Failed to create document folder: {}", e)))?;
+    Ok(docs_dir)
+}
+
+#[tauri::command]
+pub async fn import_device_employees(
+    device_id: i64,
+    branch_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let (ip, port, comm_key, machine_number, brand) = {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        let (ip, port, comm_key, machine_number, brand_str) = conn.query_row(
+            "SELECT ip_address, port, comm_key, machine_number, brand FROM Devices WHERE id = ?1",
+            params![device_id],
+            |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i32>(1)? as u16,
+                r.get::<_, i32>(2)?,
+                r.get::<_, i32>(3)?,
+                r.get::<_, String>(4)?,
+            )),
+        ).map_err(|e| AppError::DatabaseError(format!("Device not found: {}", e)))?;
+
+        let brand = match brand_str.as_str() {
+            "ZKTeco" => DeviceBrand::ZKTeco,
+            "Hikvision" => DeviceBrand::Hikvision,
+            _ => DeviceBrand::Unknown,
+        };
+
+        (ip, port, comm_key, machine_number, brand)
+    };
+
+    let users = get_all_user_info(&ip, port, comm_key, machine_number, brand).await?;
+
+    let mut imported = 0i64;
+    let mut updated = 0i64;
+    let mut skipped = 0i64;
+    let mut error_details: Vec<String> = Vec::new();
+
+    {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        for user in users {
+            let code = user.employee_id.to_string();
+            let existing_id: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM Employees WHERE biometric_id = ?1 OR employee_code = ?2",
+                    params![user.employee_id, code],
+                    |r| r.get(0),
+                )
+                .ok();
+
+            if let Some(emp_id) = existing_id {
+                let mut changed = false;
+                if let Err(e) = conn.execute(
+                    "UPDATE Employees SET name = CASE WHEN name LIKE 'User %' OR name = '' THEN ?1 ELSE name END,
+                     first_name = CASE WHEN first_name IS NULL OR first_name = '' THEN ?1 ELSE first_name END,
+                     biometric_id = ?2,
+                     branch_id = COALESCE(branch_id, ?3),
+                     updated_at = datetime('now')
+                     WHERE id = ?4",
+                    params![user.name, user.employee_id, branch_id, emp_id],
+                ) {
+                    error_details.push(format!("Update failed for {}: {}", user.employee_id, e));
+                } else {
+                    changed = true;
+                }
+
+                if changed {
+                    updated += 1;
+                } else {
+                    skipped += 1;
+                }
+                continue;
+            }
+
+            let res = conn.execute(
+                "INSERT INTO Employees (name, first_name, employee_code, biometric_id, branch_id, employment_status, status, app_role)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 'Active', 'active', 'employee')",
+                params![user.name, user.name, code, user.employee_id, branch_id],
+            );
+
+            match res {
+                Ok(_) => {
+                    imported += 1;
+                    let new_id = conn.last_insert_rowid();
+                    let _ = sync_service::_queue_for_sync(
+                        conn,
+                        "employees",
+                        "INSERT",
+                        &new_id.to_string(),
+                        &json!({
+                            "name": user.name,
+                            "employee_code": user.employee_id.to_string(),
+                            "biometric_id": user.employee_id,
+                            "branch_id": branch_id
+                        }),
+                        "HIGH",
+                    );
+                }
+                Err(e) => {
+                    skipped += 1;
+                    error_details.push(format!("Insert failed for {}: {}", user.employee_id, e));
+                }
+            }
+        }
+    }
+
+    Ok(json!({
+        "success": true,
+        "imported": imported,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": error_details.len(),
+        "error_details": error_details
+    }))
 }
 
 #[tauri::command]
@@ -109,7 +290,7 @@ pub async fn test_device_connection(
 }
 
 #[tauri::command]
-pub async fn add_device(device: Value, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+pub async fn add_device(device: Value, state: tauri::State<'_, AppState>) -> Result<Value, AppError> {
     let db_guard = state
         .db
         .lock()
@@ -117,23 +298,36 @@ pub async fn add_device(device: Value, state: tauri::State<'_, AppState>) -> Res
     let conn = db_guard
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    let device_uuid = read_json_str(&device, &["device_uuid", "deviceUuid"], "");
+    let device_uuid = if device_uuid.is_empty() { generate_uuid_v4() } else { device_uuid };
+    let last_modified = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
-        "INSERT INTO Devices (name, brand, ip_address, port, comm_key, machine_number, branch_id, gate_id, status)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'offline')",
+        "INSERT INTO Devices (device_uuid, name, brand, ip_address, port, comm_key, machine_number, branch_id, gate_id, status, sync_status, last_modified)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'offline', 'pending', ?10)",
         params![
-            device["name"].as_str().unwrap_or("New Device"),
-            device["brand"].as_str().unwrap_or("ZKTeco"),
-            device["ip"].as_str().unwrap_or(""),
-            device["port"].as_i64().unwrap_or(4370) as i32,
-            device["comm_key"].as_i64().unwrap_or(0) as i32,
-            device["machine_number"].as_i64().unwrap_or(1) as i32,
-            device["branch_id"].as_i64(),
-            device["gate_id"].as_i64(),
+            device_uuid,
+            read_json_str(&device, &["name"], "New Device"),
+            read_json_str(&device, &["brand"], "ZKTeco"),
+            read_json_str(&device, &["ip", "ip_address"], ""),
+            read_json_i64(&device, &["port"], 4370) as i32,
+            read_json_i64(&device, &["comm_key", "commKey"], 0) as i32,
+            read_json_i64(&device, &["machine_number", "machineNumber"], 1) as i32,
+            read_json_i64(&device, &["branch_id", "branchId"], 1),
+            read_json_i64(&device, &["gate_id", "gateId"], 1),
+            last_modified,
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to add device: {}", e)))?;
 
-    Ok(())
+    Ok(json!({
+        "success": true,
+        "id": conn.last_insert_rowid()
+    }))
+}
+
+#[tauri::command]
+pub async fn register_new_device(device: Value, state: tauri::State<'_, AppState>) -> Result<Value, AppError> {
+    add_device(device, state).await
 }
 
 #[tauri::command]
@@ -151,16 +345,17 @@ pub async fn update_device(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, machine_number=?6, branch_id=?7, gate_id=?8 WHERE id=?9",
+        "UPDATE Devices SET name=?1, brand=?2, ip_address=?3, port=?4, comm_key=?5, machine_number=?6, branch_id=?7, gate_id=?8, sync_status='modified', last_modified=?9 WHERE id=?10",
         params![
-            device["name"].as_str().unwrap_or(""),
-            device["brand"].as_str().unwrap_or("ZKTeco"),
-            device["ip"].as_str().unwrap_or(""),
-            device["port"].as_i64().unwrap_or(4370) as i32,
-            device["comm_key"].as_i64().unwrap_or(0) as i32,
-            device["machine_number"].as_i64().unwrap_or(1) as i32,
-            device["branch_id"].as_i64(),
-            device["gate_id"].as_i64(),
+            read_json_str(&device, &["name"], ""),
+            read_json_str(&device, &["brand"], "ZKTeco"),
+            read_json_str(&device, &["ip", "ip_address"], ""),
+            read_json_i64(&device, &["port"], 4370) as i32,
+            read_json_i64(&device, &["comm_key", "commKey"], 0) as i32,
+            read_json_i64(&device, &["machine_number", "machineNumber"], 1) as i32,
+            read_json_i64(&device, &["branch_id", "branchId"], 1),
+            read_json_i64(&device, &["gate_id", "gateId"], 1),
+            chrono::Utc::now().to_rfc3339(),
             id
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to update device: {}", e)))?;
@@ -293,39 +488,41 @@ pub async fn sync_device_logs(
 
         // 3. CAPTURE LOGS: Link to correct local IDs and queue for cloud
         for log in &logs {
-            let local_id: Option<i64> = conn
-                .query_row(
-                    "SELECT id FROM Employees WHERE biometric_id = ?1",
-                    params![log.employee_id],
-                    |r| r.get(0),
-                )
-                .ok();
+            let display_name = device_users
+                .iter()
+                .find(|u| u.employee_id == log.employee_id)
+                .map(|u| u.name.as_str());
+            let employee_row_id = crate::crud::ensure_attendance_employee_exists(
+                conn,
+                log.employee_id as i64,
+                display_name,
+                Some(target_branch_id),
+            )?;
 
-            if let Some(eid) = local_id {
-                let res = conn.execute(
-                    "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, device_id, branch_id, gate_id, punch_method)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![eid, log.timestamp, log.device_id, target_branch_id, target_gate_id, log.punch_method],
-                );
+            let res = conn.execute(
+                "INSERT OR IGNORE INTO AttendanceLogs (employee_id, device_user_id, timestamp, device_id, branch_id, gate_id, punch_method)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![employee_row_id, log.employee_id as i64, log.timestamp, log.device_id, target_branch_id, target_gate_id, log.punch_method],
+            );
 
-                if let Ok(affected) = res {
-                    if affected > 0 {
-                        let log_id = conn.last_insert_rowid();
-                        // Queue for Supabase Sync
-                        let _ = crate::sync_service::_queue_for_sync(
-                            conn,
+            if let Ok(affected) = res {
+                if affected > 0 {
+                    let log_id = conn.last_insert_rowid();
+                    // Queue for Supabase Sync
+                    let _ = crate::sync_service::_queue_for_sync(
+                        conn,
                             "AttendanceLogs",
                             "INSERT",
                             &log_id.to_string(),
                             &serde_json::json!({
-                                "employee_id": eid,
+                                "employee_id": employee_row_id,
+                                "device_user_id": log.employee_id,
                                 "timestamp": log.timestamp,
                                 "device_id": log.device_id,
                                 "punch_method": log.punch_method
                             }),
                             "MEDIUM",
-                        );
-                    }
+                    );
                 }
             }
         }
@@ -356,6 +553,161 @@ pub async fn sync_device_logs(
     });
 
     Ok(serde_json::json!(ui_logs))
+}
+
+#[tauri::command]
+pub async fn fetch_attendance_from_device(
+    ip: String,
+    port: u16,
+    device_id: i32,
+    brand: String,
+    target_branch_id: i64,
+    target_gate_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    sync_device_logs(
+        ip,
+        port,
+        device_id,
+        brand,
+        target_branch_id,
+        target_gate_id,
+        state,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn get_unmapped_logs(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.device_user_id, e.name, e.employee_code, e.branch_id, b.name as branch_name,
+                COUNT(al.id) as log_count, MAX(al.timestamp) as last_seen, e.sync_status
+         FROM Employees e
+         LEFT JOIN AttendanceLogs al ON al.employee_id = e.id
+         LEFT JOIN Branches b ON e.branch_id = b.id
+         WHERE e.device_user_id IS NOT NULL
+           AND (e.sync_status = 'placeholder' OR e.name LIKE 'Unknown ID %' OR e.name LIKE 'User %')
+         GROUP BY e.id, e.device_user_id, e.name, e.employee_code, e.branch_id, b.name, e.sync_status
+         ORDER BY last_seen DESC, e.id DESC",
+    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(json!({
+                "id": row.get::<_, i64>(0)?,
+                "device_user_id": row.get::<_, Option<i64>>(1)?,
+                "name": row.get::<_, String>(2)?,
+                "employee_code": row.get::<_, Option<String>>(3)?,
+                "branch_id": row.get::<_, Option<i64>>(4)?,
+                "branch_name": row.get::<_, Option<String>>(5)?,
+                "log_count": row.get::<_, i64>(6)?,
+                "last_seen": row.get::<_, Option<String>>(7)?,
+                "sync_status": row.get::<_, Option<String>>(8)?,
+            }))
+        })
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
+
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+#[tauri::command]
+pub async fn assign_name_to_id(
+    device_user_id: i64,
+    name: String,
+    employee_id: Option<i64>,
+    branch_id: Option<i64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let clean_name = name.trim().to_string();
+    let final_name = if clean_name.is_empty() {
+        format!("Employee {}", device_user_id)
+    } else {
+        clean_name
+    };
+    let branch = branch_id.unwrap_or(1);
+
+    let placeholder_employee_id: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM Employees WHERE device_user_id = ?1 AND (sync_status = 'placeholder' OR name LIKE 'Unknown ID %' OR name LIKE 'User %') ORDER BY id DESC LIMIT 1",
+            params![device_user_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| AppError::DatabaseError(format!("Lookup failed: {}", e)))?;
+
+    let resolved_employee_id = if let Some(target_id) = employee_id {
+        conn.execute(
+            "UPDATE Employees
+             SET device_user_id = ?1,
+                 name = CASE WHEN name IS NULL OR TRIM(name) = '' OR name LIKE 'User %' OR name LIKE 'Unknown ID %' THEN ?2 ELSE name END,
+                 sync_status = 'active',
+                 branch_id = ?3,
+                 updated_at = datetime('now')
+             WHERE id = ?4",
+            params![device_user_id, final_name, branch, target_id],
+        ).map_err(|e| AppError::DatabaseError(format!("Employee update failed: {}", e)))?;
+
+        if let Some(placeholder_id) = placeholder_employee_id {
+            if placeholder_id != target_id {
+                conn.execute(
+                    "UPDATE AttendanceLogs SET employee_id = ?1 WHERE employee_id = ?2",
+                    params![target_id, placeholder_id],
+                ).ok();
+                conn.execute("DELETE FROM Employees WHERE id = ?1", params![placeholder_id]).ok();
+            }
+        }
+        target_id
+    } else if let Some(placeholder_id) = placeholder_employee_id {
+        conn.execute(
+            "UPDATE Employees
+             SET name = ?1,
+                 sync_status = 'active',
+                 branch_id = ?2,
+                 updated_at = datetime('now')
+             WHERE id = ?3",
+            params![final_name, branch, placeholder_id],
+        ).map_err(|e| AppError::DatabaseError(format!("Employee rename failed: {}", e)))?;
+        placeholder_id
+    } else {
+        let employee_uuid = generate_uuid_v4();
+        conn.execute(
+            "INSERT INTO Employees (
+                employee_uuid, name, first_name, last_name, employee_code, biometric_id, device_user_id,
+                branch_id, employment_status, status, app_role, sync_status, last_modified, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'Active', 'active', 'employee', 'active', datetime('now'), datetime('now'), datetime('now'))",
+            params![
+                employee_uuid,
+                final_name.clone(),
+                final_name.clone(),
+                "",
+                device_user_id.to_string(),
+                device_user_id,
+                device_user_id,
+                branch,
+            ],
+        ).map_err(|e| AppError::DatabaseError(format!("Employee create failed: {}", e)))?;
+        conn.last_insert_rowid()
+    };
+
+    Ok(json!({
+        "success": true,
+        "employee_id": resolved_employee_id,
+        "device_user_id": device_user_id,
+        "name": final_name,
+        "branch_id": branch,
+    }))
 }
 
 #[tauri::command]
@@ -430,20 +782,192 @@ pub async fn list_employees_for_select(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let mut stmt =
-        conn.prepare("SELECT id, name, department FROM Employees WHERE status != 'deleted'")?;
+    let mut stmt = conn.prepare(
+        "SELECT e.id, e.employee_code, e.name, e.department, e.first_name, e.last_name, e.branch_id, b.name as branch_name
+         FROM Employees e
+         LEFT JOIN Branches b ON e.branch_id = b.id
+         WHERE e.status != 'deleted'",
+    )?;
     let employees: Vec<Value> = stmt
         .query_map([], |row| {
+            let first_name = row.get::<_, Option<String>>(4)?.unwrap_or_default();
+            let last_name = row.get::<_, Option<String>>(5)?.unwrap_or_default();
+            let display_name = if !first_name.is_empty() || !last_name.is_empty() {
+                format!("{} {}", first_name, last_name).trim().to_string()
+            } else {
+                row.get::<_, String>(2)?
+            };
             Ok(json!({
                 "id": row.get::<_, i64>(0)?,
-                "name": row.get::<_, String>(1)?,
-                "department": row.get::<_, Option<String>>(2).unwrap_or(Some("N/A".to_string()))
+                "employee_code": row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                "name": display_name,
+                "department": row.get::<_, Option<String>>(3)?.unwrap_or_else(|| "N/A".to_string()),
+                "branch_id": row.get::<_, Option<i64>>(6)?,
+                "branch_name": row.get::<_, Option<String>>(7)?,
             }))
         })?
         .filter_map(|r| r.ok())
         .collect();
 
     Ok(employees)
+}
+
+#[tauri::command]
+pub async fn list_employee_documents(
+    employee_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Value>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let mut stmt = conn.prepare(
+        "SELECT id, employee_id, doc_type, doc_name, cloud_file_id, valid_until, email_alert, alert_before_days, upload_date
+         FROM EmployeeDocuments
+         WHERE employee_id = ?1
+         ORDER BY datetime(upload_date) DESC, id DESC",
+    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+
+    let docs: Vec<Value> = stmt
+        .query_map(params![employee_id], |row| {
+            Ok(json!({
+                "id": row.get::<_, i64>(0)?,
+                "employee_id": row.get::<_, i64>(1)?,
+                "type": row.get::<_, Option<String>>(2)?.unwrap_or_else(|| "Document".to_string()),
+                "name": row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                "cloudId": row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                "valid_until": row.get::<_, Option<String>>(5)?,
+                "email_alert": row.get::<_, Option<i32>>(6)?.unwrap_or(0) != 0,
+                "alert_before_days": row.get::<_, Option<i32>>(7)?.unwrap_or(0),
+                "date": row.get::<_, Option<String>>(8)?.unwrap_or_default(),
+            }))
+        })
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(docs)
+}
+
+#[tauri::command]
+pub async fn upload_employee_document(
+    employee_id: i64,
+    doc_type: String,
+    file_name: String,
+    file_bytes: Vec<u8>,
+    valid_until: Option<String>,
+    email_alert: Option<bool>,
+    alert_before_days: Option<i32>,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let employee_exists: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM Employees WHERE id = ?1 AND (status IS NULL OR status != 'deleted')",
+            params![employee_id],
+            |r| r.get(0),
+        )
+        .ok();
+
+    if employee_exists.is_none() {
+        return Err(AppError::NotFound("Employee not found".into()));
+    }
+
+    let docs_root = employee_documents_root(&app_handle)?;
+    let employee_dir = docs_root.join(format!("employee_{}", employee_id));
+    fs::create_dir_all(&employee_dir)
+        .map_err(|e| AppError::DatabaseError(format!("Failed to create employee document folder: {}", e)))?;
+
+    let stored_name = format!(
+        "emp{}_{}_{}",
+        employee_id,
+        chrono::Utc::now().timestamp_millis(),
+        sanitize_filename_component(&file_name)
+    );
+    let file_path = employee_dir.join(&stored_name);
+
+    fs::write(&file_path, &file_bytes)
+        .map_err(|e| AppError::DatabaseError(format!("Failed to save document: {}", e)))?;
+
+    conn.execute(
+        "INSERT INTO EmployeeDocuments (employee_id, doc_type, doc_name, cloud_file_id, valid_until, email_alert, alert_before_days, upload_date)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))",
+        params![
+            employee_id,
+            doc_type,
+            file_name,
+            stored_name,
+            valid_until,
+            email_alert.unwrap_or(false) as i32,
+            alert_before_days.unwrap_or(0),
+        ],
+    ).map_err(|e| AppError::DatabaseError(format!("Failed to record document: {}", e)))?;
+
+    Ok(json!({
+        "success": true,
+        "message": "Document uploaded successfully"
+    }))
+}
+
+#[tauri::command]
+pub async fn get_document_preview(
+    doc_name: String,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<u8>, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let doc_row: Option<(i64, String)> = conn
+        .query_row(
+            "SELECT employee_id, COALESCE(cloud_file_id, doc_name) FROM EmployeeDocuments WHERE cloud_file_id = ?1 OR doc_name = ?1 ORDER BY id DESC LIMIT 1",
+            params![doc_name],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
+
+    let (employee_id, stored_name) = doc_row.ok_or_else(|| AppError::NotFound("Document not found".into()))?;
+    let docs_root = employee_documents_root(&app_handle)?;
+    let file_path = docs_root.join(format!("employee_{}", employee_id)).join(stored_name);
+
+    fs::read(&file_path).map_err(|e| AppError::DatabaseError(format!("Failed to read document: {}", e)))
+}
+
+#[tauri::command]
+pub async fn delete_employee_document(
+    document_id: i64,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let doc: Option<(i64, Option<String>)> = conn
+        .query_row(
+            "SELECT employee_id, cloud_file_id FROM EmployeeDocuments WHERE id = ?1",
+            params![document_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
+
+    let (employee_id, stored_name) = doc.ok_or_else(|| AppError::NotFound("Document not found".into()))?;
+    let docs_root = employee_documents_root(&app_handle)?;
+    if let Some(name) = stored_name {
+        let file_path = docs_root.join(format!("employee_{}", employee_id)).join(name);
+        let _ = fs::remove_file(file_path);
+    }
+
+    conn.execute("DELETE FROM EmployeeDocuments WHERE id = ?1", params![document_id])
+        .map_err(|e| AppError::DatabaseError(format!("Failed to delete document: {}", e)))?;
+
+    Ok(json!({
+        "success": true,
+        "message": "Document deleted successfully"
+    }))
 }
 
 #[tauri::command]
@@ -461,10 +985,12 @@ pub async fn add_manual_attendance(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
+    let employee_row_id = crate::crud::ensure_attendance_employee_exists(conn, employee_id, None, Some(1))?;
+
     conn.execute(
-        "INSERT INTO AttendanceLogs (employee_id, timestamp, punch_method, branch_id, gate_id, device_id)
-         VALUES (?1, ?2, ?3, 1, 1, 999)",
-        params![employee_id, timestamp, punch_method],
+        "INSERT INTO AttendanceLogs (employee_id, device_user_id, timestamp, punch_method, branch_id, gate_id, device_id)
+         VALUES (?1, NULL, ?2, ?3, 1, 1, 999)",
+        params![employee_row_id, timestamp, punch_method],
     )
     .map_err(|e| AppError::DatabaseError(format!("Failed to add manual log: {}", e)))?;
 
@@ -497,10 +1023,11 @@ pub async fn import_csv_attendance(
 
             match emp_id {
                 Ok(id) => {
+                    let employee_row_id = crate::crud::ensure_attendance_employee_exists(conn, id, None, Some(1))?;
                     let res = conn.execute(
-                        "INSERT OR IGNORE INTO AttendanceLogs (employee_id, timestamp, punch_method, branch_id, gate_id, device_id)
-                         VALUES (?1, ?2, ?3, 1, 1, 999)",
-                        params![id, timestamp, method],
+                        "INSERT OR IGNORE INTO AttendanceLogs (employee_id, device_user_id, timestamp, punch_method, branch_id, gate_id, device_id)
+                         VALUES (?1, NULL, ?2, ?3, 1, 1, 999)",
+                        params![employee_row_id, timestamp, method],
                     );
                     match res {
                         Ok(1) => imported += 1,
@@ -648,6 +1175,7 @@ pub async fn scan_network(_base_ip: String) -> Result<(), AppError> {
 pub async fn add_branch(
     name: String,
     location: Option<String>,
+    organization_id: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -660,11 +1188,14 @@ pub async fn add_branch(
 
     // Default org_id = 1 for now
     conn.execute(
-        "INSERT INTO Branches (org_id, name, location) VALUES (1, ?1, ?2)",
-        params![name, location],
+        "INSERT INTO Branches (org_id, organization_id, name, location) VALUES (?1, ?2, ?3, ?4)",
+        params![organization_id.unwrap_or(1), organization_id.unwrap_or(1), name, location],
     )?;
 
-    Ok(serde_json::json!({"success": true}))
+    Ok(serde_json::json!({
+        "success": true,
+        "id": conn.last_insert_rowid()
+    }))
 }
 
 #[tauri::command]
@@ -672,6 +1203,7 @@ pub async fn update_branch(
     id: i64,
     name: String,
     location: Option<String>,
+    organization_id: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -683,8 +1215,8 @@ pub async fn update_branch(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "UPDATE Branches SET name = ?1, location = ?2 WHERE id = ?3",
-        params![name, location, id],
+        "UPDATE Branches SET name = ?1, location = ?2, organization_id = COALESCE(?3, organization_id, 1), org_id = COALESCE(?3, org_id, 1) WHERE id = ?4",
+        params![name, location, organization_id, id],
     )?;
 
     Ok(serde_json::json!({"success": true}))
@@ -727,11 +1259,14 @@ pub async fn add_gate(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "INSERT INTO Gates (branch_id, name) VALUES (?1, ?2)",
+        "INSERT INTO Gates (branch_id, organization_id, name) VALUES (?1, 1, ?2)",
         params![branch_id, name],
     )?;
 
-    Ok(serde_json::json!({"success": true}))
+    Ok(serde_json::json!({
+        "success": true,
+        "id": conn.last_insert_rowid()
+    }))
 }
 
 #[tauri::command]
@@ -750,7 +1285,7 @@ pub async fn update_gate(
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
     conn.execute(
-        "UPDATE Gates SET branch_id = ?1, name = ?2 WHERE id = ?3",
+        "UPDATE Gates SET branch_id = ?1, organization_id = COALESCE(organization_id, 1), name = ?2 WHERE id = ?3",
         params![branch_id, name, id],
     )?;
 
@@ -899,4 +1434,105 @@ pub async fn pull_employee_biometric(
     ).await?;
 
     Ok(bio_data)
+}
+
+#[tauri::command]
+pub async fn get_organization_status(
+    organizationId: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let result: Option<Value> = conn
+        .query_row(
+            "SELECT provider_approved, payment_status, license_expiry
+             FROM Organizations WHERE id = ?1",
+            params![organizationId],
+            |row| {
+                let provider_approved: i64 = row.get(0)?;
+                let payment_status: Option<String> = row.get(1)?;
+                let license_expiry: Option<String> = row.get(2)?;
+                Ok(json!({
+                    "org_status": "active",
+                    "status": "active",
+                    "payment_status": payment_status.unwrap_or_else(|| "Paid".to_string()),
+                    "provider_approved": provider_approved,
+                    "license_expiry": license_expiry
+                }))
+            },
+        )
+        .optional()?;
+
+    Ok(result.unwrap_or(json!({
+        "org_status": "active",
+        "status": "active",
+        "payment_status": "Paid",
+}
+    )))
+}
+
+#[tauri::command]
+pub async fn authenticate_local_user(
+    identifier: String,
+    password: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let user_data: Option<(i64, String, String, Option<String>, String, String, Option<i64>, Option<i64>, i32)> = conn
+        .query_row(
+            "SELECT id, username, email, full_name, password_hash, role, branch_id, organization_id, must_change_password 
+             FROM Users 
+             WHERE username = ?1 OR email = ?1",
+            params![identifier],
+            |r| Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+                r.get(7)?,
+                r.get(8)?,
+            ))
+        )
+        .optional()
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
+
+    if let Some((id, username, email, full_name, hash, role, branch_id, org_id, must_change)) = user_data {
+        if crate::security::verify_bcrypt_password(&password, &hash) {
+            let mut stmt = conn.prepare("SELECT branch_id FROM UserBranchAccess WHERE user_id = ?1").unwrap();
+            let branch_ids: Vec<i64> = stmt.query_map(params![id], |row| row.get(0)).unwrap().filter_map(|r| r.ok()).collect();
+            
+            return Ok(json!({
+                "success": true,
+                "user": {
+                    "id": id,
+                    "username": username,
+                    "email": email,
+                    "full_name": full_name,
+                    "role": role,
+                    "branch_id": branch_id,
+                    "organization_id": org_id,
+                    "must_change_password": must_change == 1,
+                    "branch_ids": branch_ids
+                }
+            }));
+        }
+    }
+
+    Ok(json!({ "success": false, "error": "Invalid credentials" }))
 }

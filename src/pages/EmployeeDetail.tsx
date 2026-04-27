@@ -44,6 +44,7 @@ export const EmployeeDetail: React.FC = () => {
   const [data, setData] = useState<EmployeeMonthlyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [dailyChart, setDailyChart] = useState<{ day: string; punches: number; isPresent: boolean }[]>([]);
+  const employeeInitial = data?.name?.trim()?.charAt(0) || 'E';
 
   const fetchData = useCallback(async () => {
     if (!employeeId) return;
@@ -149,7 +150,7 @@ export const EmployeeDetail: React.FC = () => {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: 'white', fontSize: '24px', fontWeight: 'bold'
           }}>
-            {data.name.charAt(0)}
+            {employeeInitial}
           </div>
           <div>
             <h1 style={{ margin: 0, fontSize: '24px' }}>{data.name}</h1>

@@ -161,12 +161,12 @@ export const EmployeeHierarchyTree: React.FC = () => {
           designation:designations(name, level),
           branch:branches(name)
         `)
-        .or('employment_status.eq.Active,employment_status.eq.active')
+        // Super admin hierarchy should show every assigned employee, not only active ones.
         .order('employee_code');
 
       if (error) throw error;
 
-      // Normalize is_active from employment_status if not present
+      // Keep all employees visible, but derive a display flag for the badge when the source data does not provide one.
       const normalizedData = (data || []).map(emp => ({
         ...emp,
         is_active: emp.is_active ?? (emp.employment_status === 'Active' || emp.employment_status === 'active')

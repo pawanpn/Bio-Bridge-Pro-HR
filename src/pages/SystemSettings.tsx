@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
+import { setCalendarModePreference } from '@/lib/dateUtils';
 import { AppConfig } from '../config/appConfig';
 import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, UserPlus, UserCircle, Database } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -147,8 +148,8 @@ const FunctionalityControl: React.FC = () => {
        const initSync = async () => {
           try {
              const data = await invoke<any[]>('get_system_configs', { category: 'database' });
-             const url = data.find(c => c.key === 'supabase_url')?.value;
-             const key = data.find(c => c.key === 'supabase_key')?.value;
+             const url = data.find(c => c.setting_key === 'supabase_url')?.setting_value;
+             const key = data.find(c => c.setting_key === 'supabase_key')?.setting_value;
              if (url && key) {
                 await invoke('initialize_supabase_sync', { 
                    config: { 
@@ -239,8 +240,8 @@ const FunctionalityControl: React.FC = () => {
                     variant="ghost" 
                     size="sm"
                     onClick={async () => {
-                        const url = configs.find(c => c.key === 'supabase_url')?.value;
-                        const key = configs.find(c => c.key === 'supabase_key')?.value;
+                        const url = configs.find(c => c.setting_key === 'supabase_url')?.setting_value;
+                        const key = configs.find(c => c.setting_key === 'supabase_key')?.setting_value;
                         if (!url || !key) { setStatus('❌ Config missing'); return; }
                         setStatus('⌛ Testing...');
                         try {
@@ -361,7 +362,7 @@ const GeneralSettings: React.FC = () => {
 
   const handleCalChange = (mode: string) => {
     setCalMode(mode);
-    localStorage.setItem('calendarMode', mode);
+    setCalendarModePreference(mode as 'BS' | 'AD');
   };
 
   return (
@@ -1044,7 +1045,13 @@ const UserManagement: React.FC = () => {
               <select value={role} onChange={e => setRole(e.target.value)} style={inputStyle}>
                 <option value="SUPER_ADMIN">Super Admin (Full Access)</option>
                 <option value="ADMIN">Admin (Branch Limited)</option>
+                <option value="BRANCH_HEAD">Branch Head (Branch Control)</option>
+                <option value="MANAGER">Manager (Team/Department)</option>
+                <option value="SUPERVISOR">Supervisor (Operational)</option>
+                <option value="HR">HR (People Ops)</option>
+                <option value="EMPLOYEE">Employee (Self Service)</option>
                 <option value="OPERATOR">Operator (Read Only/Branch)</option>
+                <option value="VIEWER">Viewer (Read Only)</option>
               </select>
             </div>
             {role !== 'SUPER_ADMIN' && (

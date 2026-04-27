@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { AppConfig } from '../config/appConfig';
+import { setCalendarModePreference } from '@/lib/dateUtils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -122,7 +123,7 @@ export const SetupWizard: React.FC = () => {
 
       // 3. Mark setup complete
       localStorage.setItem('setupComplete', 'true');
-      localStorage.setItem('calendarMode', formData.defaultCalendar);
+      setCalendarModePreference(formData.defaultCalendar as 'BS' | 'AD');
       navigate('/dashboard');
     } catch (e) {
       alert("Failed to finalize setup: " + e);

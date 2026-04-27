@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
+import { useAuth } from '@/context/AuthContext';
+import { canAccessModule, getAccessibleBranchIds, getRoleLabel, isSuperAdmin } from '@/config/accessPolicy';
 import { 
   Users, UserCheck, UserMinus, Cloud, Clock, CalendarCheck, 
   DollarSign, TrendingUp, TrendingDown, ShoppingCart, Package, FileText, 
   Briefcase, Activity, CreditCard, Wallet, BarChart3, 
   Layers, CheckCircle, AlertCircle, UserPlus, 
   Building2, ArrowUpRight, ArrowDownRight,
-  Target, Users2, FileBarChart
+  Target, Users2, FileBarChart, DoorOpen, Monitor
 } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, 
@@ -16,6 +18,7 @@ import {
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
 
 // Color palette matching the original theme
 const COLORS = {
@@ -71,6 +74,21 @@ interface ERPStats {
   activeOpportunities: number;
   expectedRevenue: number;
   totalCustomers: number;
+}
+
+interface OrganizationSummary {
+  id: number;
+  name: string;
+  address?: string | null;
+}
+
+interface BranchSummary {
+  id: number;
+  name: string;
+  location?: string | null;
+  employee_count?: number;
+  gate_count?: number;
+  device_count?: number;
 }
 
 const formatNumber = (value: number): string => {
@@ -142,11 +160,19 @@ const ModuleSection: React.FC<{
 
 export const ERPDashboard: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [stats, setStats] = useState<ERPStats | null>(null);
+  const [organizations, setOrganizations] = useState<OrganizationSummary[]>([]);
+  const [branchSummaries, setBranchSummaries] = useState<BranchSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isDeviceOnline, setIsDeviceOnline] = useState<boolean | null>(null);
   const [lastSync, setLastSync] = useState<string>('');
+
+  const role = user?.role || 'EMPLOYEE';
+  const roleLabel = getRoleLabel(role);
+  const superAdmin = isSuperAdmin(role);
+  const accessibleBranchIds = getAccessibleBranchIds(user);
 
   useEffect(() => {
     // Load real data from local SQLite via Tauri commands
@@ -156,13 +182,14 @@ export const ERPDashboard: React.FC = () => {
       else setIsRefreshing(true);
       try {
         // Fetch real data from local database
-        const [empResult, leaveResult, itemResult, projectResult, leadResult, dashStats] = await Promise.all([
+        const [empResult, leaveResult, itemResult, projectResult, leadResult, dashStats, orgResult] = await Promise.all([
           invoke<any>('list_employees').catch(() => ({ data: [] })),
-          invoke<any>('list_leave_requests').catch(() => ({ data: [] })),
+          invoke<any>('list_leave_requests', { request: {} }).catch(() => ({ data: [] })),
           invoke<any[]>('list_items').catch(() => []),
           invoke<any[]>('list_projects').catch(() => []),
           invoke<any[]>('list_leads').catch(() => []),
           invoke<any>('get_dashboard_stats').catch(() => null),
+          invoke<any[]>('list_organizations').catch(() => []),
         ]);
 
         // Parse employees
@@ -171,14 +198,35 @@ export const ERPDashboard: React.FC = () => {
         const items = Array.isArray(itemResult) ? itemResult : [];
         const projects = Array.isArray(projectResult) ? projectResult : [];
         const leads = Array.isArray(leadResult) ? leadResult : [];
+        const orgs = Array.isArray(orgResult) ? orgResult : [];
+        const branches = Array.isArray((dashStats as any)?.branches) ? (dashStats as any).branches : [];
 
-        const totalEmployees = employees.length;
-        const activeEmployees = employees.filter((e: any) => e.employment_status === 'Active' || e.status === 'Active').length;
-        const onLeaveEmployees = employees.filter((e: any) => e.employment_status === 'On Leave').length;
+        const scopeAware = <T extends { branch_id?: string | number | null }>(rows: T[]) => {
+          if (superAdmin || accessibleBranchIds.length === 0) return rows;
+          return rows.filter((row) => {
+            if (row.branch_id === null || row.branch_id === undefined || row.branch_id === '') return true;
+            return accessibleBranchIds.includes(String(row.branch_id));
+          });
+        };
+
+        const visibleEmployees = scopeAware(employees);
+        const visibleLeaves = scopeAware(leaves);
+        const visibleBranches = superAdmin || accessibleBranchIds.length === 0
+          ? branches
+          : branches.filter((branch: any) => accessibleBranchIds.includes(String(branch.id)));
+
+        setOrganizations(orgs);
+        setBranchSummaries(visibleBranches);
+
+        const totalEmployees = visibleEmployees.length;
+        const activeEmployees = visibleEmployees.filter((e: any) => e.employment_status === 'Active' || e.status === 'Active').length;
+        const onLeaveEmployees = visibleEmployees.filter((e: any) => e.employment_status === 'On Leave').length;
 
         // Use REAL attendance data from dashboard_stats if available
-        const presentToday = dashStats?.presentToday ?? 0;
+        const presentToday = typeof dashStats?.presentToday === 'number' ? dashStats.presentToday : 0;
         const absentToday = dashStats ? Math.max(0, totalEmployees - presentToday) : 0;
+        const totalGates = visibleBranches.reduce((sum: number, branch: any) => sum + (Number(branch.gate_count) || 0), 0);
+        const totalDevices = visibleBranches.reduce((sum: number, branch: any) => sum + (Number(branch.device_count) || 0), 0);
 
         const stats: ERPStats = {
           // HR Module - REAL DATA
@@ -187,13 +235,13 @@ export const ERPDashboard: React.FC = () => {
           absentToday,
           lateToday: dashStats?.lateToday ?? 0,
           onLeave: onLeaveEmployees,
-          pendingLeaveRequests: leaves.filter((l: any) => l.status === 'Pending').length,
-          newHiresThisMonth: employees.filter((e: any) => {
+          pendingLeaveRequests: visibleLeaves.filter((l: any) => String(l.status || '').toLowerCase() === 'pending').length,
+          newHiresThisMonth: visibleEmployees.filter((e: any) => {
             const joinDate = new Date(e.date_of_joining);
             const now = new Date();
             return joinDate.getMonth() === now.getMonth() && joinDate.getFullYear() === now.getFullYear();
           }).length,
-          resignationsThisMonth: employees.filter((e: any) => e.employment_status === 'Inactive').length,
+          resignationsThisMonth: visibleEmployees.filter((e: any) => e.employment_status === 'Inactive').length,
           attendanceRate: totalEmployees > 0 ? Math.round((presentToday / totalEmployees) * 100) : 0,
 
           // Payroll Module
@@ -212,7 +260,7 @@ export const ERPDashboard: React.FC = () => {
           // Inventory Module - REAL DATA
           totalItems: items.length,
           lowStockItems: items.filter((i: any) => i.quantity <= (i.reorder_level || 10)).length,
-          totalWarehouses: 3,
+          totalWarehouses: Math.max(1, visibleBranches.length),
           pendingPOs: 12,
 
           // Project Module - REAL DATA
@@ -227,6 +275,10 @@ export const ERPDashboard: React.FC = () => {
           expectedRevenue: leads.reduce((sum: number, l: any) => sum + (l.value || 0), 0),
           totalCustomers: 156
         };
+        (stats as any).branchCount = visibleBranches.length;
+        (stats as any).organizationCount = orgs.length;
+        (stats as any).gateCount = totalGates;
+        (stats as any).deviceCount = totalDevices;
 
         setStats(stats);
         setIsDeviceOnline(true);
@@ -269,6 +321,29 @@ export const ERPDashboard: React.FC = () => {
     { name: 'On Hold', value: 3, color: COLORS.warning }
   ] : [];
 
+  const totalBranchesCount = (branches: BranchSummary[]) => branches.length || 0;
+
+  const roleIsAttendanceFocused = canAccessModule(role, 'attendance') && !canAccessModule(role, 'payroll') && !canAccessModule(role, 'finance');
+  const roleCanSeePayroll = canAccessModule(role, 'payroll');
+  const roleCanSeeFinance = canAccessModule(role, 'finance');
+  const roleCanSeeInventory = canAccessModule(role, 'inventory');
+  const roleCanSeeProjects = canAccessModule(role, 'projects');
+  const roleCanSeeCrm = canAccessModule(role, 'crm');
+
+  const summaryCards = stats ? (superAdmin
+    ? [
+        { label: 'Organizations', value: (stats as any).organizationCount ?? organizations.length, icon: <Building2 size={28} />, color: COLORS.primary, hint: 'All companies' },
+        { label: 'Branches', value: (stats as any).branchCount ?? branchSummaries.length, icon: <Layers size={28} />, color: COLORS.info, hint: 'Visible branch scope' },
+        { label: 'Gates', value: (stats as any).gateCount ?? 0, icon: <DoorOpen size={28} />, color: COLORS.warning, hint: 'Branch entrances' },
+        { label: 'Devices', value: (stats as any).deviceCount ?? 0, icon: <Monitor size={28} />, color: COLORS.success, hint: 'Registered devices' },
+      ]
+    : [
+        { label: 'Branches', value: branchSummaries.length, icon: <Layers size={28} />, color: COLORS.info, hint: 'Allowed scope' },
+        { label: 'Employees', value: stats.totalEmployees, icon: <Users size={28} />, color: COLORS.primary, hint: 'Scoped workforce' },
+        { label: 'Present Today', value: stats.presentToday, icon: <UserCheck size={28} />, color: COLORS.success, hint: 'Today only' },
+        { label: 'Pending Leave', value: stats.pendingLeaveRequests, icon: <CalendarCheck size={28} />, color: COLORS.warning, hint: 'Requests pending' },
+      ]) : [];
+
   if (isLoading || !stats) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -285,11 +360,25 @@ export const ERPDashboard: React.FC = () => {
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 lg:gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold">ERP Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Complete business overview and analytics</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-xl sm:text-2xl font-bold">
+              {superAdmin ? 'Super Admin Dashboard' : `${roleLabel} Dashboard`}
+            </h1>
+            <Badge variant="outline" className="text-xs">
+              {superAdmin ? 'Global scope' : `${branchSummaries.length || 0} branches`}
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {superAdmin
+              ? 'Company-wide control center for organizations, branches, gates, and attendance'
+              : 'Scoped view based on your role and branch access'}
+          </p>
         </div>
 
         <div className="flex items-center gap-2 lg:gap-4 flex-wrap">
+          <Badge variant="secondary" className="text-xs">
+            {roleLabel}
+          </Badge>
           {/* Device Status */}
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${
             isDeviceOnline
@@ -318,78 +407,46 @@ export const ERPDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Top Level KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 lg:gap-4">
-        <Card className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950/30 dark:to-blue-900/20 border-0">
-          <CardContent className="p-4 sm:p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">Total Employees</p>
-                <p className="text-2xl sm:text-3xl font-bold mt-1">{stats.totalEmployees}</p>
-                <div className="flex items-center gap-1 mt-2 text-xs text-green-600">
-                  <ArrowUpRight size={12} />
-                  <span>+{stats.newHiresThisMonth} this month</span>
+        {summaryCards.map((card) => (
+          <Card key={card.label} className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-800 border-0 shadow-sm">
+            <CardContent className="p-4 sm:p-6">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400">{card.label}</p>
+                  <p className="text-2xl sm:text-3xl font-bold mt-1">{card.value}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">{card.hint}</p>
+                </div>
+                <div className="p-2 sm:p-3 rounded-xl bg-white/20 backdrop-blur-sm" style={{ color: card.color }}>
+                  {card.icon}
                 </div>
               </div>
-              <div className="p-2 sm:p-3 rounded-xl bg-white/20 backdrop-blur-sm text-blue-600">
-                <Users size={20} className="sm:w-7 sm:h-7" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-950/30 dark:to-green-900/20 border-0">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Today's Attendance</p>
-                <p className="text-3xl font-bold mt-1">{stats.presentToday}/{stats.totalEmployees}</p>
-                <div className="flex items-center gap-1 mt-2 text-xs">
-                  <span className="text-green-600">{stats.attendanceRate}% rate</span>
-                </div>
-              </div>
-              <div className="p-3 rounded-xl bg-white/20 backdrop-blur-sm text-green-600">
-                <UserCheck size={28} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-950/30 dark:to-purple-900/20 border-0">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Monthly Revenue</p>
-                <p className="text-3xl font-bold mt-1">{formatNumber(stats.totalRevenue)}</p>
-                <div className="flex items-center gap-1 mt-2 text-xs text-green-600">
-                  <ArrowUpRight size={14} />
-                  <span>+12.5% from last month</span>
-                </div>
-              </div>
-              <div className="p-3 rounded-xl bg-white/20 backdrop-blur-sm text-purple-600">
-                <TrendingUp size={28} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-950/30 dark:to-amber-900/20 border-0">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Monthly Payroll</p>
-                <p className="text-3xl font-bold mt-1">{formatNumber(stats.monthlyPayroll)}</p>
-                <div className="flex items-center gap-1 mt-2 text-xs text-amber-600">
-                  <span>{stats.pendingPayslips} pending</span>
-                </div>
-              </div>
-              <div className="p-3 rounded-xl bg-white/20 backdrop-blur-sm text-amber-600">
-                <DollarSign size={28} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        ))}
       </div>
+
+      {(superAdmin || roleIsAttendanceFocused || canAccessModule(role, 'employees')) && (
+        <Card className="border-dashed bg-muted/20">
+          <CardContent className="p-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold">Scope</p>
+              <p className="text-xs text-muted-foreground">
+                {superAdmin
+                  ? 'You can see all organizations and branches.'
+                  : `This user can access ${branchSummaries.length || 0} branch${branchSummaries.length === 1 ? '' : 'es'}.`}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {branchSummaries.slice(0, 4).map((branch) => (
+                <Badge key={branch.id} variant="outline" className="text-xs">
+                  {branch.name}
+                </Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* HR & Attendance Module */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
@@ -468,13 +525,13 @@ export const ERPDashboard: React.FC = () => {
           </div>
         </ModuleSection>
 
-        {/* Payroll Module */}
-        <ModuleSection 
-          title="Payroll" 
-          icon={<DollarSign size={18} />} 
-          color={COLORS.purple}
-          onViewAll={() => navigate('/payroll')}
-        >
+        {roleCanSeePayroll && (
+          <ModuleSection 
+            title="Payroll" 
+            icon={<DollarSign size={18} />} 
+            color={COLORS.purple}
+            onViewAll={() => navigate('/payroll')}
+          >
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <MiniStatCard
@@ -524,15 +581,16 @@ export const ERPDashboard: React.FC = () => {
               </ResponsiveContainer>
             </div>
           </div>
-        </ModuleSection>
+          </ModuleSection>
+        )}
 
-        {/* Finance Module */}
-        <ModuleSection 
-          title="Finance" 
-          icon={<CreditCard size={18} />} 
-          color={COLORS.success}
-          onViewAll={() => navigate('/finance')}
-        >
+        {roleCanSeeFinance && (
+          <ModuleSection 
+            title="Finance" 
+            icon={<CreditCard size={18} />} 
+            color={COLORS.success}
+            onViewAll={() => navigate('/finance')}
+          >
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <MiniStatCard
@@ -594,18 +652,19 @@ export const ERPDashboard: React.FC = () => {
               </ResponsiveContainer>
             </div>
           </div>
-        </ModuleSection>
+          </ModuleSection>
+        )}
       </div>
 
-      {/* Projects, Inventory & CRM Module */}
+      {/* Secondary Modules */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Projects Module */}
-        <ModuleSection 
-          title="Projects" 
-          icon={<Briefcase size={18} />} 
-          color={COLORS.indigo}
-          onViewAll={() => navigate('/projects')}
-        >
+        {roleCanSeeProjects && (
+          <ModuleSection 
+            title="Projects" 
+            icon={<Briefcase size={18} />} 
+            color={COLORS.indigo}
+            onViewAll={() => navigate('/projects')}
+          >
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <MiniStatCard
@@ -668,15 +727,16 @@ export const ERPDashboard: React.FC = () => {
               ))}
             </div>
           </div>
-        </ModuleSection>
+          </ModuleSection>
+        )}
 
-        {/* Inventory Module */}
-        <ModuleSection 
-          title="Inventory" 
-          icon={<Package size={18} />} 
-          color={COLORS.warning}
-          onViewAll={() => navigate('/inventory')}
-        >
+        {roleCanSeeInventory && (
+          <ModuleSection 
+            title="Inventory" 
+            icon={<Package size={18} />} 
+            color={COLORS.warning}
+            onViewAll={() => navigate('/inventory')}
+          >
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <MiniStatCard
@@ -734,15 +794,16 @@ export const ERPDashboard: React.FC = () => {
               </div>
             </div>
           </div>
-        </ModuleSection>
+          </ModuleSection>
+        )}
 
-        {/* CRM Module */}
-        <ModuleSection 
-          title="CRM" 
-          icon={<Users2 size={18} />} 
-          color={COLORS.pink}
-          onViewAll={() => navigate('/crm')}
-        >
+        {roleCanSeeCrm && (
+          <ModuleSection 
+            title="CRM" 
+            icon={<Users2 size={18} />} 
+            color={COLORS.pink}
+            onViewAll={() => navigate('/crm')}
+          >
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <MiniStatCard
@@ -804,7 +865,8 @@ export const ERPDashboard: React.FC = () => {
               </div>
             </div>
           </div>
-        </ModuleSection>
+          </ModuleSection>
+        )}
       </div>
 
       {/* Bottom Section - Quick Actions & Notifications */}
@@ -816,38 +878,46 @@ export const ERPDashboard: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 gap-3">
-              <Button 
-                variant="outline" 
-                className="h-20 flex flex-col gap-2"
-                onClick={() => navigate('/employees')}
-              >
-                <UserPlus size={20} />
-                <span className="text-xs">Add Employee</span>
-              </Button>
-              <Button 
-                variant="outline" 
-                className="h-20 flex flex-col gap-2"
-                onClick={() => navigate('/leave-management')}
-              >
-                <CalendarCheck size={20} />
-                <span className="text-xs">Leave Requests</span>
-              </Button>
-              <Button 
-                variant="outline" 
-                className="h-20 flex flex-col gap-2"
-                onClick={() => navigate('/payroll')}
-              >
-                <DollarSign size={20} />
-                <span className="text-xs">Run Payroll</span>
-              </Button>
-              <Button 
-                variant="outline" 
-                className="h-20 flex flex-col gap-2"
-                onClick={() => navigate('/reports')}
-              >
-                <BarChart3 size={20} />
-                <span className="text-xs">View Reports</span>
-              </Button>
+              {canAccessModule(role, 'employees') && (
+                <Button 
+                  variant="outline" 
+                  className="h-20 flex flex-col gap-2"
+                  onClick={() => navigate('/employees')}
+                >
+                  <UserPlus size={20} />
+                  <span className="text-xs">Add Employee</span>
+                </Button>
+              )}
+              {canAccessModule(role, 'leave') && (
+                <Button 
+                  variant="outline" 
+                  className="h-20 flex flex-col gap-2"
+                  onClick={() => navigate('/leave-management')}
+                >
+                  <CalendarCheck size={20} />
+                  <span className="text-xs">Leave Requests</span>
+                </Button>
+              )}
+              {roleCanSeePayroll && (
+                <Button 
+                  variant="outline" 
+                  className="h-20 flex flex-col gap-2"
+                  onClick={() => navigate('/payroll')}
+                >
+                  <DollarSign size={20} />
+                  <span className="text-xs">Run Payroll</span>
+                </Button>
+              )}
+              {canAccessModule(role, 'reports') && (
+                <Button 
+                  variant="outline" 
+                  className="h-20 flex flex-col gap-2"
+                  onClick={() => navigate('/reports')}
+                >
+                  <BarChart3 size={20} />
+                  <span className="text-xs">View Reports</span>
+                </Button>
+              )}
             </div>
           </CardContent>
         </Card>
