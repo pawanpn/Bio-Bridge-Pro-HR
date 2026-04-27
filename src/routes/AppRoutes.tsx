@@ -11,7 +11,7 @@ import { StaffLayout } from '@/layouts/StaffLayout';
 import { ProviderDashboard } from '@/pages/provider/ProviderDashboard';
 import { StaffDashboard } from '@/pages/staff/StaffDashboard';
 import { LicenseExpired } from '@/pages/LicenseExpired';
-import { getDefaultPortalPath, getPortalForRole } from '@/config/portalPolicy';
+import { getDefaultPortalPath, getPortalForRole, type PortalType } from '@/config/portalPolicy';
 import { isOrganizationActive, isOrganizationApprovalPending, getOrganizationInactiveReason, type OrganizationStatusLike } from '@/config/organizationStatus';
 import { PortalAccessGuard } from '@/components/auth/PortalAccessGuard';
 import { PermissionGuard } from '@/components/auth/PermissionGuard';

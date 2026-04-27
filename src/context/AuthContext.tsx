@@ -30,6 +30,10 @@ interface AuthContextType {
   changePassword: (newPassword: string) => Promise<void>;
   resetPassword: (emailOrId: string) => Promise<{ success: boolean; error?: string }>;
   loading: boolean;
+  isImpersonating: boolean;
+  effectiveOrganizationId: string | undefined;
+  impersonatedOrgName: string | null;
+  stopImpersonating: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -202,15 +206,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let loginEmail = emailOrId.trim();
       const isEmailInput = loginEmail.includes('@');
 
-      if (!isEmailInput) {
-        try {
-          const localResponse: any = await invoke('authenticate_local_user', {
-            identifier: loginEmail,
-            password
-          });
+      // Always try local SQLite auth first (works for both email and username)
+      try {
+        const localResponse: any = await invoke('authenticate_local_user', {
+          identifier: loginEmail,
+          password
+        });
 
-          const localUser = localResponse?.user;
-          if (localResponse?.success && localUser) {
+        const localUser = localResponse?.user;
+        if (localResponse?.success && localUser) {
             const localUserData: User = {
               id: String(localUser.id),
               username: localUser.username,
@@ -365,8 +369,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const getEffectiveOrgId = (): string | undefined => {
+    const impersonatedId = sessionStorage.getItem('impersonated_org_id');
+    if (impersonatedId) return impersonatedId;
+    return user?.organization_id;
+  };
+
+  const isImpersonating = !!sessionStorage.getItem('impersonated_org_id');
+  const impersonatedOrgName = sessionStorage.getItem('impersonated_org_name');
+
+  const stopImpersonating = () => {
+    sessionStorage.removeItem('impersonated_org_id');
+    sessionStorage.removeItem('impersonated_org_name');
+    sessionStorage.removeItem('provider_original_portal');
+    window.location.href = '/provider/dashboard';
+  };
+
   const logout = async () => {
     try {
+      sessionStorage.removeItem('impersonated_org_id');
+      sessionStorage.removeItem('impersonated_org_name');
+      sessionStorage.removeItem('provider_original_portal');
       await supabase.auth.signOut();
       setUser(null);
       setSupabaseUser(null);
@@ -385,7 +408,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       logout, 
       changePassword,
       resetPassword,
-      loading
+      loading,
+      isImpersonating,
+      effectiveOrganizationId: getEffectiveOrgId(),
+      impersonatedOrgName,
+      stopImpersonating,
     }}>
       {children}
     </AuthContext.Provider>

@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Lock, LogOut } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { getPortalForRole, type PortalType } from '@/config/portalPolicy';
+import { isSuperAdmin } from '@/config/accessPolicy';
 import { Button } from '@/components/ui/button';
 
 interface PortalAccessGuardProps {
@@ -14,6 +15,10 @@ export const PortalAccessGuard: React.FC<PortalAccessGuardProps> = ({ allowedPor
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  if (isSuperAdmin(user?.role)) {
+    return <>{children}</>;
+  }
 
   const portals = Array.isArray(allowedPortals) ? allowedPortals : [allowedPortals];
   const currentPortal = getPortalForRole(user?.role);

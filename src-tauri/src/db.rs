@@ -14,7 +14,7 @@ fn recreate_users_table_if_needed(conn: &Connection) -> Result<()> {
 
     if schema
         .as_deref()
-        .map(|sql| sql.contains("ORG_SUPERADMIN"))
+        .map(|sql| sql.contains("PROVIDER") && sql.contains("ORG_SUPERADMIN"))
         .unwrap_or(false)
     {
         return Ok(());
@@ -29,7 +29,7 @@ fn recreate_users_table_if_needed(conn: &Connection) -> Result<()> {
             full_name TEXT,
             email TEXT,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('SUPER_ADMIN', 'ORG_SUPERADMIN', 'ADMIN', 'BRANCH_HEAD', 'ORG_MANAGER', 'MANAGER', 'SUPERVISOR', 'HR', 'EMPLOYEE', 'OPERATOR', 'VIEWER')),
+            role TEXT NOT NULL CHECK(role IN ('PROVIDER', 'SUPER_ADMIN', 'ORG_SUPERADMIN', 'ADMIN', 'BRANCH_HEAD', 'ORG_MANAGER', 'MANAGER', 'SUPERVISOR', 'HR', 'EMPLOYEE', 'OPERATOR', 'VIEWER')),
             branch_id INTEGER,
             organization_id INTEGER DEFAULT 1,
             is_active INTEGER DEFAULT 1,
@@ -55,6 +55,8 @@ fn seed_default_local_users(conn: &Connection) -> Result<()> {
     let master_hash = hash("masterpassword", DEFAULT_COST)
         .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
     let client_hash = hash("clientpassword", DEFAULT_COST)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    let provider_hash = hash("provider123", DEFAULT_COST)
         .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
 
     conn.execute(
@@ -84,6 +86,20 @@ fn seed_default_local_users(conn: &Connection) -> Result<()> {
             is_active = excluded.is_active,
             must_change_password = excluded.must_change_password",
         rusqlite::params!["client_hr", client_hash],
+    )?;
+
+    conn.execute(
+        "INSERT INTO Users (username, full_name, email, password_hash, role, branch_id, organization_id, is_active, must_change_password)
+         VALUES (?1, 'Provider Admin', 'provider@biobridge.com', ?2, 'PROVIDER', NULL, 1, 1, 0)
+         ON CONFLICT(username) DO UPDATE SET
+            full_name = excluded.full_name,
+            email = excluded.email,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            organization_id = excluded.organization_id,
+            is_active = excluded.is_active,
+            must_change_password = excluded.must_change_password",
+        rusqlite::params!["provider_admin", provider_hash],
     )?;
 
     Ok(())
@@ -384,7 +400,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('SUPER_ADMIN', 'ORG_SUPERADMIN', 'ADMIN', 'BRANCH_HEAD', 'ORG_MANAGER', 'MANAGER', 'SUPERVISOR', 'HR', 'EMPLOYEE', 'OPERATOR', 'VIEWER')),
+            role TEXT NOT NULL CHECK(role IN ('PROVIDER', 'SUPER_ADMIN', 'ORG_SUPERADMIN', 'ADMIN', 'BRANCH_HEAD', 'ORG_MANAGER', 'MANAGER', 'SUPERVISOR', 'HR', 'EMPLOYEE', 'OPERATOR', 'VIEWER')),
             branch_id INTEGER,
             organization_id INTEGER DEFAULT 1,
             is_active INTEGER DEFAULT 1,
