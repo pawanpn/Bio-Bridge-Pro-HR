@@ -1,7 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { ProviderAuthProvider, useProviderAuth } from './context/ProviderAuthContext';
+import { ProviderAuthProvider, useProviderAuth, type ProviderModule } from './context/ProviderAuthContext';
 import { EnhancedSetupWizard } from './components/EnhancedSetupWizard';
 import { MainLayout } from './layout/MainLayout';
 import { ERPDashboard } from './pages/ERPDashboard';
@@ -89,6 +89,12 @@ function ClientApp() {
   );
 }
 
+function ProviderRouteGuard({ module, children }: { module: ProviderModule; children: React.ReactNode }) {
+  const { canAccess } = useProviderAuth();
+  if (!canAccess(module)) return <Navigate to="/provider/dashboard" replace />;
+  return <>{children}</>;
+}
+
 function ProviderRoutesWrapper() {
   const { providerUser, loading } = useProviderAuth();
 
@@ -108,14 +114,14 @@ function ProviderRoutesWrapper() {
       <Route path="/provider/setup" element={<ProviderSetup />} />
       <Route path="/provider/login" element={providerUser ? <Navigate to="/provider/dashboard" replace /> : <ProviderLogin />} />
       <Route path="/provider" element={providerUser ? <ProviderLayout /> : <Navigate to="/provider/login" replace />}>
-        <Route path="dashboard" element={<ProviderDashboard />} />
-        <Route path="organizations" element={<ProviderOrganizations />} />
-        <Route path="users" element={<ProviderClientUsers />} />
-        <Route path="monitoring" element={<ProviderMonitoring />} />
-        <Route path="billing" element={<ProviderBilling />} />
-        <Route path="crm" element={<ProviderCRM />} />
-        <Route path="staff" element={<ProviderStaff />} />
-        <Route path="roles" element={<ProviderRoles />} />
+        <Route path="dashboard" element={<ProviderRouteGuard module="dashboard"><ProviderDashboard /></ProviderRouteGuard>} />
+        <Route path="organizations" element={<ProviderRouteGuard module="organizations"><ProviderOrganizations /></ProviderRouteGuard>} />
+        <Route path="users" element={<ProviderRouteGuard module="users"><ProviderClientUsers /></ProviderRouteGuard>} />
+        <Route path="monitoring" element={<ProviderRouteGuard module="monitoring"><ProviderMonitoring /></ProviderRouteGuard>} />
+        <Route path="billing" element={<ProviderRouteGuard module="billing"><ProviderBilling /></ProviderRouteGuard>} />
+        <Route path="crm" element={<ProviderRouteGuard module="crm"><ProviderCRM /></ProviderRouteGuard>} />
+        <Route path="staff" element={<ProviderRouteGuard module="staff"><ProviderStaff /></ProviderRouteGuard>} />
+        <Route path="roles" element={<ProviderRouteGuard module="roles"><ProviderRoles /></ProviderRouteGuard>} />
         <Route index element={<Navigate to="dashboard" replace />} />
       </Route>
       <Route path="/provider/*" element={<Navigate to="/provider/login" replace />} />

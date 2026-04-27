@@ -106,7 +106,8 @@ export const ProviderClientUsers: React.FC = () => {
     }
   };
 
-  const toggleLock = async (userId: string, currentActive: boolean) => {
+  const toggleLock = async (userId: string, currentActive: boolean, role: string) => {
+    if (role === 'PROVIDER') { setError('Cannot lock provider portal accounts from here. Use Staff page.'); return; }
     try {
       setActionLoading(userId);
       setSuccessMsg('');
@@ -296,7 +297,7 @@ export const ProviderClientUsers: React.FC = () => {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => toggleLock(user.id, user.is_active)}
+                      onClick={() => toggleLock(user.id, user.is_active, user.role)}
                       disabled={actionLoading === user.id}
                       className={`h-7 px-2 text-xs ${
                         user.is_active

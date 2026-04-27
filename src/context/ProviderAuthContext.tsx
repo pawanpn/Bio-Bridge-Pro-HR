@@ -21,7 +21,7 @@ interface ProviderAuthContextType {
   loading: boolean;
   permissions: ProviderModule[];
   providerLogin: (username: string, pin: string) => Promise<{ success: boolean; error?: string }>;
-  providerLogout: () => Promise<void>;
+  providerLogout: (reason?: string) => Promise<void>;
   canAccess: (module: ProviderModule) => boolean;
   isProviderPinSet: () => boolean;
   setProviderPin: (currentPin: string, newPin: string) => Promise<{ success: boolean; error?: string }>;
@@ -37,6 +37,7 @@ export const ProviderAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
   const [providerUser, setProviderUser] = useState<ProviderUser | null>(null);
   const [permissions, setPermissions] = useState<ProviderModule[]>([]);
   const [loading, setLoading] = useState(true);
+  const LOGOUT_REASON_KEY = 'biobridge_provider_logout_reason';
 
   const loadPermissions = async (role: ProviderRole) => {
     try {
@@ -57,23 +58,6 @@ export const ProviderAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setPermissions(fallback[role] || ['dashboard']);
   };
 
-  useEffect(() => {
-    const init = async () => {
-      const saved = localStorage.getItem(SESSION_KEY);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (parsed.id && parsed.role) {
-            setProviderUser(parsed);
-            await loadPermissions(parsed.role);
-          }
-        } catch {}
-      }
-      setLoading(false);
-    };
-    init();
-  }, []);
-
   const getDefaultPin = (): string => {
     return localStorage.getItem(DEFAULT_PIN_KEY) || 'provider123';
   };
@@ -85,11 +69,17 @@ export const ProviderAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (stored !== currentPin) return { success: false, error: 'Current PIN is incorrect' };
     if (newPin.length < 6) return { success: false, error: 'PIN must be at least 6 characters' };
     localStorage.setItem(DEFAULT_PIN_KEY, newPin);
-    // also update in DB if this user's PIN matches
     if (providerUser) {
       await supabase.from('provider_users').update({ pin: newPin }).eq('username', providerUser.username);
     }
     return { success: true };
+  };
+
+  const providerLogout = async (reason?: string) => {
+    setProviderUser(null);
+    setPermissions([]);
+    localStorage.removeItem(SESSION_KEY);
+    if (reason) localStorage.setItem(LOGOUT_REASON_KEY, reason);
   };
 
   const providerLogin = async (username: string, pin: string) => {
@@ -101,7 +91,11 @@ export const ProviderAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
       .maybeSingle();
 
     if (data && !data.is_active) {
-      return { success: false, error: 'Account is disabled. Contact super provider.' };
+      // allow default PIN even for disabled master account
+      const defaultPin = getDefaultPin();
+      if (pin !== defaultPin || username !== 'provider') {
+        return { success: false, error: 'Account is disabled. Contact super provider.' };
+      }
     }
 
     if (data && data.pin === pin) {
@@ -114,6 +108,7 @@ export const ProviderAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
       };
       setProviderUser(user);
       localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      localStorage.removeItem(LOGOUT_REASON_KEY);
       await loadPermissions(user.role);
       return { success: true };
     }
@@ -130,6 +125,7 @@ export const ProviderAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
       };
       setProviderUser(user);
       localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      localStorage.removeItem(LOGOUT_REASON_KEY);
       setPermissions(['dashboard','organizations','users','billing','crm','monitoring','staff','roles','setup']);
       return { success: true };
     }
@@ -141,11 +137,49 @@ export const ProviderAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
     return { success: false, error: 'Invalid username or PIN' };
   };
 
-  const providerLogout = async () => {
-    setProviderUser(null);
-    setPermissions([]);
-    localStorage.removeItem(SESSION_KEY);
-  };
+  // Periodic session validation — auto-logout if disabled, refresh if role changed
+  useEffect(() => {
+    if (!providerUser || providerUser.id === 'local-provider') return;
+    const validate = async () => {
+      try {
+        const { data } = await supabase
+          .from('provider_users')
+          .select('role, is_active')
+          .eq('username', providerUser.username)
+          .maybeSingle();
+        if (!data) return;
+        if (!data.is_active) {
+          providerLogout('Your account has been disabled. Contact super provider.');
+          return;
+        }
+        if (data.role !== providerUser.role) {
+          const updated = { ...providerUser, role: data.role as ProviderRole };
+          setProviderUser(updated);
+          localStorage.setItem(SESSION_KEY, JSON.stringify(updated));
+          await loadPermissions(data.role as ProviderRole);
+        }
+      } catch { /* ignore network errors */ }
+    };
+    const interval = setInterval(validate, 15000);
+    return () => clearInterval(interval);
+  }, [providerUser]);
+
+  useEffect(() => {
+    const init = async () => {
+      const saved = localStorage.getItem(SESSION_KEY);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed.id && parsed.role) {
+            setProviderUser(parsed);
+            await loadPermissions(parsed.role);
+          }
+        } catch {}
+      }
+      setLoading(false);
+    };
+    init();
+  }, []);
 
   const canAccess = (module: ProviderModule) => permissions.includes(module);
 
