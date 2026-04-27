@@ -5,25 +5,20 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Lock, Mail as MailIcon, ShieldAlert, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Lock, ShieldAlert, AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export const ProviderLogin: React.FC = () => {
-  const { providerLogin, loading: authLoading } = useProviderAuth();
+  const { providerLogin } = useProviderAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
-  React.useEffect(() => {
-    if (authLoading) return;
-  }, [authLoading]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
-      setError('Please enter both email and password.');
+    if (!pin) {
+      setError('Please enter your PIN.');
       return;
     }
 
@@ -32,19 +27,15 @@ export const ProviderLogin: React.FC = () => {
     setSuccess('');
 
     try {
-      const result = await providerLogin(email, password);
-
+      const result = await providerLogin(pin);
       if (!result.success) {
-        setError(result.error || 'Login failed. Provider access only.');
+        setError(result.error || 'Invalid PIN');
         return;
       }
-
-      setSuccess('Access granted! Redirecting...');
-      setTimeout(() => {
-        navigate('/provider/dashboard');
-      }, 500);
+      setSuccess('Access granted!');
+      setTimeout(() => navigate('/provider/dashboard'), 400);
     } catch (err: any) {
-      setError(err.message || 'Invalid credentials.');
+      setError(err.message || 'Authentication failed');
     } finally {
       setLoading(false);
     }
@@ -57,41 +48,26 @@ export const ProviderLogin: React.FC = () => {
           <div className="mx-auto w-16 h-16 rounded-full bg-gradient-to-br from-amber-500 to-red-600 flex items-center justify-center shadow-lg">
             <ShieldAlert size={32} className="text-white" />
           </div>
-          <CardTitle className="text-2xl font-bold text-white">BioBridge Provider</CardTitle>
+          <CardTitle className="text-2xl font-bold text-white">Provider Portal</CardTitle>
           <CardDescription className="text-sm text-slate-400">
-            Software Provider Control Panel
+            Enter your provider PIN to access the control panel
           </CardDescription>
         </CardHeader>
 
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-slate-300">Email</Label>
-              <div className="relative">
-                <MailIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="provider@biobridge.com"
-                  className="pl-10 bg-slate-700 border-slate-600 text-white placeholder:text-slate-500"
-                  autoFocus
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="password" className="text-slate-300">Password</Label>
+              <Label htmlFor="pin" className="text-slate-300">Provider PIN</Label>
               <div className="relative">
                 <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <Input
-                  id="password"
+                  id="pin"
                   type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter provider password"
-                  className="pl-10 bg-slate-700 border-slate-600 text-white placeholder:text-slate-500"
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value)}
+                  placeholder="Enter provider PIN"
+                  className="pl-10 bg-slate-700 border-slate-600 text-white placeholder:text-slate-500 text-lg tracking-widest"
+                  autoFocus
                 />
               </div>
             </div>
@@ -118,7 +94,8 @@ export const ProviderLogin: React.FC = () => {
               {loading ? 'Verifying...' : 'Access Provider Panel'}
             </Button>
 
-            <div className="text-center">
+            <div className="text-center space-y-1">
+              <p className="text-xs text-slate-500">Default PIN: <code className="text-amber-400 bg-slate-700 px-1 rounded">provider123</code></p>
               <a href="/" className="text-sm text-slate-500 hover:text-slate-400 transition-colors">
                 ← Back to Client Login
               </a>
@@ -127,7 +104,7 @@ export const ProviderLogin: React.FC = () => {
         </CardContent>
 
         <CardFooter className="flex flex-col space-y-3 text-center text-xs text-slate-500">
-          <p>BioBridge Pro HR Provider Portal</p>
+          <p>BioBridge Pro HR Provider Portal v1.0</p>
         </CardFooter>
       </Card>
     </div>
