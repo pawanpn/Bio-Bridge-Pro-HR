@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 
 interface OrgRecord { id: string; name: string; code?: string; email?: string; is_active: boolean; subscription_plan?: string; created_at: string; }
-interface UserRecord { id: string; username: string; email: string; full_name: string; role: string; is_active: boolean; organization_id: string; last_login_at: string | null; created_at: string; }
+interface UserRecord { id: string; username: string; email: string; full_name: string; role: string; is_active: boolean; organization_id: string; created_at: string; }
 
 export const ProviderDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
@@ -38,8 +38,7 @@ export const ProviderDashboard: React.FC = () => {
       setOrgs(orgList);
 
       if (orgList.length > 0) {
-        const ids = orgList.map(x => x.id);
-        const { data: u, error: ue } = await supabase.from('users').select('*').in('organization_id', ids).order('role').order('username');
+        const { data: u, error: ue } = await supabase.from('users').select('id,username,email,full_name,role,is_active,organization_id,created_at').order('role').order('username');
         if (ue) throw ue;
         const userList = (u || []) as UserRecord[];
         setUsers(userList);
@@ -363,7 +362,7 @@ const UserRow: React.FC<{
       {getRoleBadge(user.role)}
     </div>
     <div className="flex items-center gap-2 flex-shrink-0">
-      {user.last_login_at && <span className="text-[10px] text-slate-600">{new Date(user.last_login_at).toLocaleDateString()}</span>}
+      <span className="text-[10px] text-slate-600">{new Date(user.created_at).toLocaleDateString()}</span>
       <Button variant="ghost" size="sm" onClick={e => { e.stopPropagation(); onToggle(); }} disabled={loading}
         className={`h-6 px-1.5 text-[10px] ${user.is_active ? 'text-red-400 hover:text-red-300 hover:bg-red-500/10' : 'text-green-400 hover:text-green-300 hover:bg-green-500/10'}`}>
         {loading ? <Loader2 size={10} className="animate-spin" /> : user.is_active ? <><Lock size={10} className="mr-0.5" />Lock</> : <><Unlock size={10} className="mr-0.5" />Unlock</>}

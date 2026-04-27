@@ -7,8 +7,10 @@ import {
   LayoutDashboard,
   Building2,
   Users,
-  ShieldAlert,
   Activity,
+  DollarSign,
+  MessageSquare,
+  ShieldAlert,
   LogOut,
   User as UserIcon,
   Menu,
@@ -32,6 +34,8 @@ export const ProviderLayout: React.FC = () => {
     { icon: <LayoutDashboard size={18} />, label: 'Dashboard', path: '/provider/dashboard' },
     { icon: <Building2 size={18} />, label: 'Organizations', path: '/provider/organizations' },
     { icon: <Users size={18} />, label: 'Client Users', path: '/provider/users' },
+    { icon: <DollarSign size={18} />, label: 'Billing', path: '/provider/billing' },
+    { icon: <MessageSquare size={18} />, label: 'Support CRM', path: '/provider/crm' },
     { icon: <Activity size={18} />, label: 'Monitoring', path: '/provider/monitoring' },
   ];
 
