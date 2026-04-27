@@ -20,7 +20,7 @@ import {
 export const ProviderLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { providerUser, providerLogout } = useProviderAuth();
+  const { providerUser, providerLogout, canAccess } = useProviderAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const handleLogout = async () => {
@@ -30,16 +30,17 @@ export const ProviderLayout: React.FC = () => {
 
   const isActive = (path: string) => location.pathname === path;
 
-  const navItems = [
-    { icon: <LayoutDashboard size={18} />, label: 'Dashboard', path: '/provider/dashboard' },
-    { icon: <Building2 size={18} />, label: 'Organizations', path: '/provider/organizations' },
-    { icon: <Users size={18} />, label: 'Client Users', path: '/provider/users' },
-    { icon: <DollarSign size={18} />, label: 'Billing', path: '/provider/billing' },
-    { icon: <MessageSquare size={18} />, label: 'Support CRM', path: '/provider/crm' },
-    { icon: <Activity size={18} />, label: 'Monitoring', path: '/provider/monitoring' },
-    { icon: <UserIcon size={18} />, label: 'Staff', path: '/provider/staff' },
-    { icon: <ShieldAlert size={18} />, label: 'Roles', path: '/provider/roles' },
+  const allNavItems = [
+    { icon: <LayoutDashboard size={18} />, label: 'Dashboard', path: '/provider/dashboard', module: 'dashboard' as const },
+    { icon: <Building2 size={18} />, label: 'Organizations', path: '/provider/organizations', module: 'organizations' as const },
+    { icon: <Users size={18} />, label: 'Client Users', path: '/provider/users', module: 'users' as const },
+    { icon: <DollarSign size={18} />, label: 'Billing', path: '/provider/billing', module: 'billing' as const },
+    { icon: <MessageSquare size={18} />, label: 'Support CRM', path: '/provider/crm', module: 'crm' as const },
+    { icon: <Activity size={18} />, label: 'Monitoring', path: '/provider/monitoring', module: 'monitoring' as const },
+    { icon: <UserIcon size={18} />, label: 'Staff', path: '/provider/staff', module: 'staff' as const },
+    { icon: <ShieldAlert size={18} />, label: 'Roles', path: '/provider/roles', module: 'roles' as const },
   ];
+  const navItems = allNavItems.filter(item => canAccess(item.module));
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-900">
@@ -120,11 +121,20 @@ export const ProviderLayout: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-3">
-            <ShieldAlert size={16} className="text-amber-500" />
+            {providerUser && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-amber-400 font-medium">{providerUser.full_name}</span>
+                <span className="w-1 h-1 rounded-full bg-amber-600" />
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 text-[10px] font-semibold">
+                  {providerUser.role.replace('PROVIDER_', '')}
+                </span>
+              </div>
+            )}
+            <div className="w-px h-5 bg-slate-700" />
             <span className="text-xs text-slate-400 hidden sm:inline">Provider Mode</span>
             <Avatar className="h-7 w-7 bg-amber-600 text-white">
-              <AvatarFallback className="text-xs">
-                <UserIcon size={14} />
+              <AvatarFallback className="text-xs font-bold">
+                {providerUser?.full_name?.charAt(0) || <UserIcon size={14} />}
               </AvatarFallback>
             </Avatar>
           </div>

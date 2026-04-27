@@ -31,7 +31,7 @@ const ROLE_OPTIONS: { value: ProviderRole; label: string; color: string }[] = [
 ];
 
 export const ProviderStaff: React.FC = () => {
-  const { providerUser } = useProviderAuth();
+  const { providerUser, providerLogout } = useProviderAuth();
   const [staff, setStaff] = useState<ProviderStaff[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -89,6 +89,10 @@ export const ProviderStaff: React.FC = () => {
       await supabase.from('provider_users').update({ is_active: ns }).eq('id', s.id);
       setStaff(prev => prev.map(st => st.id === s.id ? { ...st, is_active: ns } : st));
       setSuccess(`${s.username} ${ns ? 'enabled' : 'disabled'}`);
+      // force-logout if disabling current user
+      if (!ns && providerUser && providerUser.username === s.username) {
+        providerLogout('Your account has been disabled. Contact super provider.');
+      }
       setTimeout(() => setSuccess(''), 2000);
     } catch (err: any) { setError(err.message); }
   };

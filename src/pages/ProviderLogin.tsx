@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProviderAuth } from '../context/ProviderAuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Lock, ShieldAlert, AlertCircle, CheckCircle2, User } from 'lucide-react';
+import { Lock, ShieldAlert, AlertCircle, CheckCircle2, User, Info } from 'lucide-react';
 
 export const ProviderLogin: React.FC = () => {
   const { providerLogin } = useProviderAuth();
@@ -15,6 +15,15 @@ export const ProviderLogin: React.FC = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
+  const [logoutReason, setLogoutReason] = useState('');
+
+  useEffect(() => {
+    const reason = localStorage.getItem('biobridge_provider_logout_reason');
+    if (reason) {
+      setLogoutReason(reason);
+      localStorage.removeItem('biobridge_provider_logout_reason');
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,6 +70,7 @@ export const ProviderLogin: React.FC = () => {
               </div>
             </div>
 
+            {logoutReason && <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-md text-sm"><Info size={16} />{logoutReason}</div>}
             {error && <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 text-red-400 rounded-md text-sm"><AlertCircle size={16} />{error}</div>}
             {success && <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/30 text-green-400 rounded-md text-sm"><CheckCircle2 size={16} />{success}</div>}
 

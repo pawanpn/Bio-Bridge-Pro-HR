@@ -53,7 +53,8 @@ export const ProviderDashboard: React.FC = () => {
 
   const handleRefresh = () => { setRefreshing(true); loadData(); };
 
-  const toggleLock = async (userId: string, current: boolean) => {
+  const toggleLock = async (userId: string, current: boolean, role: string) => {
+    if (role === 'PROVIDER') { setError('Cannot lock provider portal accounts from here. Use Staff page.'); return; }
     try { setActionLoading(userId);
       const ns = !current;
       await supabase.from('users').update({ is_active: ns, locked_until: ns ? null : new Date(Date.now() + 100 * 365 * 86400000).toISOString() }).eq('id', userId);
@@ -308,13 +309,13 @@ export const ProviderDashboard: React.FC = () => {
                       {sas.length > 0 && (
                         <div className="p-2">
                           <p className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider px-2 py-1">Super Admins</p>
-                          {sas.map(u => <UserRow key={u.id} user={u} loading={actionLoading === u.id} onToggle={() => toggleLock(u.id, u.is_active)} getRoleBadge={getRoleBadge} />)}
+                          {sas.map(u => <UserRow key={u.id} user={u} loading={actionLoading === u.id} onToggle={() => toggleLock(u.id, u.is_active, u.role)} getRoleBadge={getRoleBadge} />)}
                         </div>
                       )}
                       {others.length > 0 && (
                         <div className="p-2 border-t border-slate-700/50">
                           <p className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider px-2 py-1">Other Users ({others.length})</p>
-                          {others.map(u => <UserRow key={u.id} user={u} loading={actionLoading === u.id} onToggle={() => toggleLock(u.id, u.is_active)} getRoleBadge={getRoleBadge} />)}
+                          {others.map(u => <UserRow key={u.id} user={u} loading={actionLoading === u.id} onToggle={() => toggleLock(u.id, u.is_active, u.role)} getRoleBadge={getRoleBadge} />)}
                         </div>
                       )}
                       {usrs.length === 0 && <p className="text-xs text-slate-600 p-3 text-center">No users in this organization</p>}
