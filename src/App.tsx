@@ -1,5 +1,7 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ProviderAuthProvider, useProviderAuth } from './context/ProviderAuthContext';
 import { EnhancedSetupWizard } from './components/EnhancedSetupWizard';
 import { MainLayout } from './layout/MainLayout';
 import { ERPDashboard } from './pages/ERPDashboard';
@@ -22,12 +24,16 @@ import { ProjectsManagement } from './pages/ProjectsManagement';
 import { CRMManagement } from './pages/CRMManagement';
 import { AssetsManagement } from './pages/AssetsManagement';
 import { SystemTools } from './components/SystemTools';
+import { ProviderLogin } from './pages/ProviderLogin';
+import { ProviderLayout } from './layout/ProviderLayout';
+import { ProviderDashboard } from './pages/ProviderDashboard';
+import { ProviderOrganizations } from './pages/ProviderOrganizations';
+import { ProviderClientUsers } from './pages/ProviderClientUsers';
 
-function AppContent() {
+function ClientApp() {
   const { user, loading } = useAuth();
   const isSetupComplete = localStorage.getItem('setupComplete') === 'true';
 
-  // Show loading while checking auth
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -77,11 +83,52 @@ function AppContent() {
   );
 }
 
+function ProviderRoutesWrapper() {
+  const { providerUser, loading } = useProviderAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500 mx-auto mb-4"></div>
+          <p className="text-slate-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <Routes>
+      <Route path="/provider/login" element={providerUser ? <Navigate to="/provider/dashboard" replace /> : <ProviderLogin />} />
+      <Route path="/provider" element={providerUser ? <ProviderLayout /> : <Navigate to="/provider/login" replace />}>
+        <Route path="dashboard" element={<ProviderDashboard />} />
+        <Route path="organizations" element={<ProviderOrganizations />} />
+        <Route path="users" element={<ProviderClientUsers />} />
+        <Route index element={<Navigate to="dashboard" replace />} />
+      </Route>
+      <Route path="/provider/*" element={<Navigate to="/provider/login" replace />} />
+    </Routes>
+  );
+}
+
+function AppRouter() {
+  const location = useLocation();
+  const isProviderPath = location.pathname.startsWith('/provider');
+
+  if (isProviderPath) {
+    return <ProviderRoutesWrapper />;
+  }
+
+  return <ClientApp />;
+}
+
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppContent />
+        <ProviderAuthProvider>
+          <AppRouter />
+        </ProviderAuthProvider>
       </AuthProvider>
     </BrowserRouter>
   );

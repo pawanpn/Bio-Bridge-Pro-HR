@@ -7,7 +7,7 @@ interface User {
   username: string;
   email: string;
   full_name?: string;
-  role: 'SUPER_ADMIN' | 'ADMIN' | 'MANAGER' | 'SUPERVISOR' | 'EMPLOYEE' | 'OPERATOR' | 'VIEWER';
+  role: 'SUPER_ADMIN' | 'PROVIDER' | 'ADMIN' | 'MANAGER' | 'SUPERVISOR' | 'EMPLOYEE' | 'OPERATOR' | 'VIEWER';
   branch_id?: string;
   department_id?: string;
   designation_id?: string;
@@ -172,16 +172,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { success: false, error: error.message };
       }
 
-      // Check if user is deleted after successful auth
+      // Check if user is deleted or locked after successful auth
       const { data: profileCheck } = await supabase
         .from('users')
-        .select('status')
+        .select('status, is_active')
         .eq('auth_id', data.user.id)
         .single();
 
       if (profileCheck?.status === 'deleted') {
         await supabase.auth.signOut();
         return { success: false, error: 'User does not exist or contact administrator' };
+      }
+
+      if (profileCheck?.is_active === false) {
+        await supabase.auth.signOut();
+        return { success: false, error: 'Your account has been locked. Contact your administrator.' };
       }
 
       if (data.user) {
