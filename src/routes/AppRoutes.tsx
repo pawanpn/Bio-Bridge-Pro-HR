@@ -348,8 +348,8 @@ export const AppRoutes: React.FC = () => {
       <Routes>
         <Route path="/" element={<Navigate to={`/${runtimePortal}/login`} replace />} />
         <Route path="/login" element={<Navigate to={`/${runtimePortal}/login`} replace />} />
-        <Route path="/provider/login" element={runtimePortal === 'provider' ? <Login portal="provider" /> : <Navigate to="/admin/login" replace />} />
-        <Route path="/admin/login" element={runtimePortal === 'admin' ? <Login portal="admin" /> : <Navigate to="/provider/login" replace />} />
+        <Route path="/provider/login" element={<Login portal="provider" />} />
+        <Route path="/admin/login" element={<Login portal="admin" />} />
         <Route path="/staff/login" element={<Navigate to={`/${runtimePortal}/login`} replace />} />
         <Route path="*" element={<Navigate to={`/${runtimePortal}/login`} replace />} />
       </Routes>

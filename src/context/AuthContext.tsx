@@ -243,7 +243,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch (localError: any) {
           console.log('Local login fallback unavailable or rejected:', localError?.message || localError);
         }
-      }
 
       if (!isEmailInput) {
         if (loginEmail.toLowerCase() === 'admin') {
