@@ -239,8 +239,8 @@ const FunctionalityControl: React.FC = () => {
                     variant="ghost" 
                     size="sm"
                     onClick={async () => {
-                        const url = configs.find(c => c.key === 'supabase_url')?.value;
-                        const key = configs.find(c => c.key === 'supabase_key')?.value;
+                        const url = configs.find(c => c.setting_key === 'supabase_url')?.setting_value;
+                        const key = configs.find(c => c.setting_key === 'supabase_key')?.setting_value;
                         if (!url || !key) { setStatus('❌ Config missing'); return; }
                         setStatus('⌛ Testing...');
                         try {

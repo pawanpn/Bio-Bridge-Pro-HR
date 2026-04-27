@@ -43,6 +43,7 @@ interface PermissionModule {
 // Your schema's role types
 const ROLE_TYPES = [
   { code: 'SUPER_ADMIN', name: 'Super Admin', description: 'Full system access', level: 10 },
+  { code: 'PROVIDER', name: 'Provider', description: 'Provider control panel access', level: 9 },
   { code: 'ADMIN', name: 'Admin', description: 'Administrative access', level: 8 },
   { code: 'MANAGER', name: 'Manager', description: 'Department manager', level: 6 },
   { code: 'SUPERVISOR', name: 'Supervisor', description: 'Team supervisor', level: 4 },
