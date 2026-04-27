@@ -27,7 +27,6 @@ interface UserRecord {
   is_active: boolean;
   organization_id: string;
   organization_name?: string;
-  last_login_at: string | null;
   created_at: string;
 }
 
@@ -239,7 +238,7 @@ export const ProviderClientUsers: React.FC = () => {
                 <th className="p-3 hidden md:table-cell">Organization</th>
                 <th className="p-3">Role</th>
                 <th className="p-3 hidden sm:table-cell">Status</th>
-                <th className="p-3 hidden lg:table-cell">Last Login</th>
+                 <th className="p-3 hidden lg:table-cell">Created</th>
                 <th className="p-3 pr-4 text-right">Action</th>
               </tr>
             </thead>
@@ -290,7 +289,7 @@ export const ProviderClientUsers: React.FC = () => {
                   </td>
                   <td className="p-3 hidden lg:table-cell">
                     <span className="text-xs text-slate-500">
-                      {user.last_login_at ? new Date(user.last_login_at).toLocaleDateString() : 'Never'}
+                      {user.created_at ? new Date(user.created_at).toLocaleDateString() : '—'}
                     </span>
                   </td>
                   <td className="p-3 pr-4 text-right">

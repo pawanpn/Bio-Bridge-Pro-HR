@@ -37,8 +37,8 @@ export const ProviderMonitoring: React.FC = () => {
 
       // Parallel fetches
       const [orgsR, usersR, providersR] = await Promise.all([
-        supabase.from('organizations').select('id,name,is_active,created_at').order('created_at', { ascending: false }),
-        supabase.from('users').select('id,role,organization_id,is_active,last_login_at,created_at').order('created_at', { ascending: false }),
+        supabase.from('organizations').select('*').order('name', { ascending: false }),
+        supabase.from('users').select('*').order('created_at', { ascending: false }),
         supabase.from('users').select('id', { count: 'exact', head: true }).eq('role', 'PROVIDER'),
       ]);
 
@@ -71,15 +71,6 @@ export const ProviderMonitoring: React.FC = () => {
           time: o.created_at,
           type: 'org_created',
           detail: `🏢 "${o.name}" registered`,
-        });
-      });
-
-      // recently logged in users
-      users.filter((u: any) => u.last_login_at).slice(0, 15).forEach((u: any) => {
-        logs.push({
-          time: u.last_login_at,
-          type: 'login',
-          detail: `👤 Login: ${u.role?.replace('_', ' ')}`,
         });
       });
 

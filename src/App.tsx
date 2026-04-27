@@ -30,6 +30,8 @@ import { ProviderDashboard } from './pages/ProviderDashboard';
 import { ProviderOrganizations } from './pages/ProviderOrganizations';
 import { ProviderClientUsers } from './pages/ProviderClientUsers';
 import { ProviderMonitoring } from './pages/ProviderMonitoring';
+import { ProviderBilling } from './pages/ProviderBilling';
+import { ProviderCRM } from './pages/ProviderCRM';
 import { ProviderSetup } from './pages/ProviderSetup';
 
 function ClientApp() {
@@ -108,6 +110,8 @@ function ProviderRoutesWrapper() {
         <Route path="organizations" element={<ProviderOrganizations />} />
         <Route path="users" element={<ProviderClientUsers />} />
         <Route path="monitoring" element={<ProviderMonitoring />} />
+        <Route path="billing" element={<ProviderBilling />} />
+        <Route path="crm" element={<ProviderCRM />} />
         <Route index element={<Navigate to="dashboard" replace />} />
       </Route>
       <Route path="/provider/*" element={<Navigate to="/provider/login" replace />} />
