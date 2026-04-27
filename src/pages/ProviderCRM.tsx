@@ -14,16 +14,15 @@ import {
 interface OrgRecord { id: number | string; name: string; }
 interface Ticket {
   id: number; organization_id: number | string; title: string;
-  description: string; priority: 'low' | 'medium' | 'high' | 'urgent';
-  status: 'open' | 'in_progress' | 'resolved' | 'closed';
+  description: string; priority: string; status: string;
   category: string; assigned_to: string; created_by_name: string;
   created_by_email: string; resolution: string; resolved_at: string | null;
   created_at: string; updated_at: string; organization_name?: string;
 }
 
 const emptyTicket = {
-  organization_id: '' as any, title: '', description: '', priority: 'medium' as const,
-  status: 'open' as const, category: 'general', assigned_to: '', created_by_name: '',
+  organization_id: '' as any, title: '', description: '', priority: 'medium',
+  status: 'open', category: 'general', assigned_to: '', created_by_name: '',
   created_by_email: '', resolution: '',
 };
 

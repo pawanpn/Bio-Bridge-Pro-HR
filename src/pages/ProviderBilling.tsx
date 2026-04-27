@@ -14,14 +14,14 @@ import {
 interface OrgRecord { id: number | string; name: string; is_active: boolean; }
 interface Payment {
   id: number; organization_id: number | string; invoice_number: string;
-  description: string; amount: number; status: 'pending' | 'claimed' | 'received';
+  description: string; amount: number; status: string;
   payment_method: string; payment_date: string | null; due_date: string | null;
   notes: string; created_at: string; organization_name?: string;
 }
 
 const emptyPayment = {
   organization_id: '' as any, invoice_number: '', description: '', amount: 0,
-  status: 'pending' as const, payment_method: 'bank_transfer', payment_date: '',
+  status: 'pending', payment_method: 'bank_transfer', payment_date: '',
   due_date: '', notes: '',
 };
 
