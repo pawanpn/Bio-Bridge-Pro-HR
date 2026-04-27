@@ -29,6 +29,7 @@ import { ProviderLayout } from './layout/ProviderLayout';
 import { ProviderDashboard } from './pages/ProviderDashboard';
 import { ProviderOrganizations } from './pages/ProviderOrganizations';
 import { ProviderClientUsers } from './pages/ProviderClientUsers';
+import { ProviderSetup } from './pages/ProviderSetup';
 
 function ClientApp() {
   const { user, loading } = useAuth();
@@ -99,6 +100,7 @@ function ProviderRoutesWrapper() {
 
   return (
     <Routes>
+      <Route path="/provider/setup" element={<ProviderSetup />} />
       <Route path="/provider/login" element={providerUser ? <Navigate to="/provider/dashboard" replace /> : <ProviderLogin />} />
       <Route path="/provider" element={providerUser ? <ProviderLayout /> : <Navigate to="/provider/login" replace />}>
         <Route path="dashboard" element={<ProviderDashboard />} />
