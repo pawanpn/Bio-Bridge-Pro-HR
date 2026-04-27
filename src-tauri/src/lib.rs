@@ -85,6 +85,7 @@ pub fn run() {
             commands::add_manual_attendance,
             commands::import_csv_attendance,
             commands::get_system_configs,
+            commands::get_organization_status,
             commands::get_all_system_configs,
             commands::save_system_config,
             commands::delete_system_config,
@@ -97,6 +98,7 @@ pub fn run() {
             commands::delete_gate,
             commands::push_employee_to_device,
             commands::pull_employee_biometric,
+            commands::authenticate_local_user,
             // From crud.rs (ERP Modules)
             crud::create_item,
             crud::list_items,

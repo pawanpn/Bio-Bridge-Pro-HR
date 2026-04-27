@@ -1,6 +1,93 @@
+use bcrypt::{hash, DEFAULT_COST};
 use rusqlite::{Connection, Result};
 use std::fs;
 use std::path::Path;
+
+fn recreate_users_table_if_needed(conn: &Connection) -> Result<()> {
+    let schema: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'Users'",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+
+    if schema
+        .as_deref()
+        .map(|sql| sql.contains("ORG_SUPERADMIN"))
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+
+    conn.execute("PRAGMA foreign_keys = OFF", [])?;
+    conn.execute("ALTER TABLE Users RENAME TO Users_legacy", [])?;
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS Users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            full_name TEXT,
+            email TEXT,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL CHECK(role IN ('SUPER_ADMIN', 'ORG_SUPERADMIN', 'ADMIN', 'BRANCH_HEAD', 'ORG_MANAGER', 'MANAGER', 'SUPERVISOR', 'HR', 'EMPLOYEE', 'OPERATOR', 'VIEWER')),
+            branch_id INTEGER,
+            organization_id INTEGER DEFAULT 1,
+            is_active INTEGER DEFAULT 1,
+            must_change_password INTEGER DEFAULT 0,
+            FOREIGN KEY(branch_id) REFERENCES Branches(id)
+        )",
+        [],
+    )?;
+    conn.execute(
+        "INSERT INTO Users (id, username, full_name, email, password_hash, role, branch_id, organization_id, is_active, must_change_password)
+         SELECT id, username, full_name, email, password_hash, role, branch_id, organization_id, is_active, must_change_password FROM Users_legacy",
+        [],
+    )?;
+    conn.execute("DROP TABLE Users_legacy", [])?;
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
+
+    Ok(())
+}
+
+fn seed_default_local_users(conn: &Connection) -> Result<()> {
+    recreate_users_table_if_needed(conn)?;
+
+    let master_hash = hash("masterpassword", DEFAULT_COST)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+    let client_hash = hash("clientpassword", DEFAULT_COST)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+
+    conn.execute(
+        "INSERT INTO Users (username, full_name, email, password_hash, role, branch_id, organization_id, is_active, must_change_password)
+         VALUES (?1, 'Master Admin', 'master_admin@biobridge.com', ?2, 'SUPER_ADMIN', NULL, 1, 1, 0)
+         ON CONFLICT(username) DO UPDATE SET
+            full_name = excluded.full_name,
+            email = excluded.email,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            organization_id = excluded.organization_id,
+            is_active = excluded.is_active,
+            must_change_password = excluded.must_change_password",
+        rusqlite::params!["master_admin", master_hash],
+    )?;
+
+    conn.execute(
+        "INSERT INTO Users (username, full_name, email, password_hash, role, branch_id, organization_id, is_active, must_change_password)
+         VALUES (?1, 'Client HR', 'client_hr@biobridge.com', ?2, 'ORG_SUPERADMIN', 1, 1, 1, 0)
+         ON CONFLICT(username) DO UPDATE SET
+            full_name = excluded.full_name,
+            email = excluded.email,
+            password_hash = excluded.password_hash,
+            role = excluded.role,
+            branch_id = excluded.branch_id,
+            organization_id = excluded.organization_id,
+            is_active = excluded.is_active,
+            must_change_password = excluded.must_change_password",
+        rusqlite::params!["client_hr", client_hash],
+    )?;
+
+    Ok(())
+}
 
 pub fn init_db(app_dir: &Path) -> Result<Connection> {
     if !app_dir.exists() {
@@ -209,6 +296,8 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     let _ = conn.execute("ALTER TABLE Devices ADD COLUMN organization_id INTEGER DEFAULT 1", []);
     let _ = conn.execute("ALTER TABLE AttendanceLogs ADD COLUMN organization_id INTEGER DEFAULT 1", []);
     let _ = conn.execute("ALTER TABLE Users ADD COLUMN organization_id INTEGER DEFAULT 1", []);
+    let _ = conn.execute("ALTER TABLE Users ADD COLUMN full_name TEXT", []);
+    let _ = conn.execute("ALTER TABLE Users ADD COLUMN email TEXT", []);
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Devices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -295,7 +384,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('SUPER_ADMIN', 'ADMIN', 'BRANCH_HEAD', 'MANAGER', 'SUPERVISOR', 'HR', 'EMPLOYEE', 'OPERATOR', 'VIEWER')),
+            role TEXT NOT NULL CHECK(role IN ('SUPER_ADMIN', 'ORG_SUPERADMIN', 'ADMIN', 'BRANCH_HEAD', 'ORG_MANAGER', 'MANAGER', 'SUPERVISOR', 'HR', 'EMPLOYEE', 'OPERATOR', 'VIEWER')),
             branch_id INTEGER,
             organization_id INTEGER DEFAULT 1,
             is_active INTEGER DEFAULT 1,
@@ -808,9 +897,10 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     // bcrypt hash for 'admin123'
     let admin_pass_hash = "$2b$10$hmwXr.AU9waNfqdDwBPMwurCdtk5VT2mKSN4eqach.HlnACpNxv0y";
     let _ = conn.execute(
-        "INSERT OR IGNORE INTO Users (username, password_hash, role, organization_id, must_change_password) VALUES ('admin', ?1, 'SUPER_ADMIN', 1, 1)",
+        "INSERT OR IGNORE INTO Users (username, full_name, email, password_hash, role, organization_id, must_change_password) VALUES ('admin', 'System Administrator', 'admin@biobridge.com', ?1, 'SUPER_ADMIN', 1, 1)",
         [admin_pass_hash]
     );
+    let _ = seed_default_local_users(&conn);
 
     // Seed corporate dummy data
     let branches = vec![

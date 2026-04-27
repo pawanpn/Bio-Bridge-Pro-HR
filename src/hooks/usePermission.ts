@@ -20,8 +20,8 @@ export const usePermission = (userId?: string): UsePermissionReturn => {
     if (stored) {
       try {
         const user = JSON.parse(stored);
-        if (user?.role === 'SUPER_ADMIN') {
-          setUserRole('SUPER_ADMIN');
+        if (user?.role === 'SUPER_ADMIN' || user?.role === 'ORG_SUPERADMIN') {
+          setUserRole(user?.role);
           setPermissions(['*']);
           setLoading(false);
           return;
@@ -59,7 +59,7 @@ export const usePermission = (userId?: string): UsePermissionReturn => {
 
       setUserRole(userData.role);
 
-      if (userData.role === 'SUPER_ADMIN') {
+      if (userData.role === 'SUPER_ADMIN' || userData.role === 'ORG_SUPERADMIN') {
         setPermissions(['*']);
         setLoading(false);
         return;
@@ -94,7 +94,7 @@ export const usePermission = (userId?: string): UsePermissionReturn => {
   }, [loadPermissions]);
 
   const hasPermission = useCallback((permission: string): boolean => {
-    if (userRole === 'SUPER_ADMIN') return true;
+    if (userRole === 'SUPER_ADMIN' || userRole === 'ORG_SUPERADMIN') return true;
 
     // Format: "module:permission" or just "permission"
     if (permission.includes(':')) {

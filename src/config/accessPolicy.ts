@@ -1,7 +1,11 @@
 export type AppRole =
+  | 'PROVIDER'
   | 'SUPER_ADMIN'
+  | 'ORG_SUPERADMIN'
   | 'ADMIN'
+  | 'ORG_ADMIN'
   | 'BRANCH_HEAD'
+  | 'ORG_MANAGER'
   | 'MANAGER'
   | 'SUPERVISOR'
   | 'HR'
@@ -54,9 +58,13 @@ const ALL_MODULES: AppModule[] = [
 ];
 
 const ROLE_MODULES: Record<AppRole, AppModule[]> = {
+  PROVIDER: ALL_MODULES,
   SUPER_ADMIN: ALL_MODULES,
+  ORG_SUPERADMIN: ALL_MODULES,
   ADMIN: ALL_MODULES,
+  ORG_ADMIN: ALL_MODULES,
   BRANCH_HEAD: ['dashboard', 'employees', 'attendance', 'leave', 'reports', 'organization', 'notifications'],
+  ORG_MANAGER: ['dashboard', 'employees', 'attendance', 'leave', 'reports', 'notifications'],
   MANAGER: ['dashboard', 'employees', 'attendance', 'leave', 'reports', 'notifications'],
   SUPERVISOR: ['dashboard', 'employees', 'attendance', 'reports', 'notifications'],
   HR: ['dashboard', 'employees', 'attendance', 'leave', 'reports', 'organization', 'notifications'],
@@ -68,9 +76,13 @@ const ROLE_MODULES: Record<AppRole, AppModule[]> = {
 export const normalizeRole = (role?: string | null): AppRole => {
   const value = (role || '').toUpperCase();
   if (
+    value === 'PROVIDER' ||
     value === 'SUPER_ADMIN' ||
+    value === 'ORG_SUPERADMIN' ||
     value === 'ADMIN' ||
+    value === 'ORG_ADMIN' ||
     value === 'BRANCH_HEAD' ||
+    value === 'ORG_MANAGER' ||
     value === 'MANAGER' ||
     value === 'SUPERVISOR' ||
     value === 'HR' ||
@@ -83,7 +95,10 @@ export const normalizeRole = (role?: string | null): AppRole => {
   return 'EMPLOYEE';
 };
 
-export const isSuperAdmin = (role?: string | null): boolean => normalizeRole(role) === 'SUPER_ADMIN';
+export const isSuperAdmin = (role?: string | null): boolean => {
+  const normalized = normalizeRole(role);
+  return normalized === 'SUPER_ADMIN' || normalized === 'PROVIDER';
+};
 
 export const getAccessibleBranchIds = (user: ScopedUser | null | undefined): string[] => {
   if (!user) return [];
@@ -119,10 +134,18 @@ export const getRoleLabel = (role?: string | null): string => {
   switch (normalizeRole(role)) {
     case 'SUPER_ADMIN':
       return 'Super Admin';
+    case 'PROVIDER':
+      return 'Provider';
+    case 'ORG_SUPERADMIN':
+      return 'Org Super Admin';
     case 'ADMIN':
       return 'Admin';
+    case 'ORG_ADMIN':
+      return 'Org Admin';
     case 'BRANCH_HEAD':
       return 'Branch Head';
+    case 'ORG_MANAGER':
+      return 'Org Manager';
     case 'MANAGER':
       return 'Manager';
     case 'SUPERVISOR':

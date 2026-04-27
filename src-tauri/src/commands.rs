@@ -1435,3 +1435,104 @@ pub async fn pull_employee_biometric(
 
     Ok(bio_data)
 }
+
+#[tauri::command]
+pub async fn get_organization_status(
+    organizationId: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let result: Option<Value> = conn
+        .query_row(
+            "SELECT provider_approved, payment_status, license_expiry
+             FROM Organizations WHERE id = ?1",
+            params![organizationId],
+            |row| {
+                let provider_approved: i64 = row.get(0)?;
+                let payment_status: Option<String> = row.get(1)?;
+                let license_expiry: Option<String> = row.get(2)?;
+                Ok(json!({
+                    "org_status": "active",
+                    "status": "active",
+                    "payment_status": payment_status.unwrap_or_else(|| "Paid".to_string()),
+                    "provider_approved": provider_approved,
+                    "license_expiry": license_expiry
+                }))
+            },
+        )
+        .optional()?;
+
+    Ok(result.unwrap_or(json!({
+        "org_status": "active",
+        "status": "active",
+        "payment_status": "Paid",
+}
+    )))
+}
+
+#[tauri::command]
+pub async fn authenticate_local_user(
+    identifier: String,
+    password: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, AppError> {
+    let db_guard = state
+        .db
+        .lock()
+        .map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard
+        .as_ref()
+        .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+    let user_data: Option<(i64, String, String, Option<String>, String, String, Option<i64>, Option<i64>, i32)> = conn
+        .query_row(
+            "SELECT id, username, email, full_name, password_hash, role, branch_id, organization_id, must_change_password 
+             FROM Users 
+             WHERE username = ?1 OR email = ?1",
+            params![identifier],
+            |r| Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+                r.get(6)?,
+                r.get(7)?,
+                r.get(8)?,
+            ))
+        )
+        .optional()
+        .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
+
+    if let Some((id, username, email, full_name, hash, role, branch_id, org_id, must_change)) = user_data {
+        if crate::security::verify_bcrypt_password(&password, &hash) {
+            let mut stmt = conn.prepare("SELECT branch_id FROM UserBranchAccess WHERE user_id = ?1").unwrap();
+            let branch_ids: Vec<i64> = stmt.query_map(params![id], |row| row.get(0)).unwrap().filter_map(|r| r.ok()).collect();
+            
+            return Ok(json!({
+                "success": true,
+                "user": {
+                    "id": id,
+                    "username": username,
+                    "email": email,
+                    "full_name": full_name,
+                    "role": role,
+                    "branch_id": branch_id,
+                    "organization_id": org_id,
+                    "must_change_password": must_change == 1,
+                    "branch_ids": branch_ids
+                }
+            }));
+        }
+    }
+
+    Ok(json!({ "success": false, "error": "Invalid credentials" }))
+}
