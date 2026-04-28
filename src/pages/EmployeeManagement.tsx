@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '@/config/supabase';
 import { Switch } from '@/components/ui/switch';
 import {
   Users, UserPlus, Search, Filter, Download, Upload,
@@ -290,17 +291,39 @@ export const EmployeeManagement: React.FC = () => {
   };
 
   const handleAddEmployee = () => {
-    // Auto-calculate the next sequential Employee ID (BB-00XX) 
-    const maxId = employees.reduce((max, emp) => Math.max(max, parseInt(emp.id) || 0), 0);
-    const nextCode = `BB-${String(maxId + 1).padStart(4, '0')}`;
-    
-    setFormData({
-      ...emptyForm,
-      employee_code: nextCode
+    const checkLimit = async () => {
+      try {
+        const userId = (window as any).__biobridge_user?.id;
+        if (!userId) return null;
+
+        const { data: userData } = await supabase.from('users').select('organization_id').eq('id', userId).single();
+        if (!userData?.organization_id) return null;
+
+        const orgId = userData.organization_id;
+        const [{ data: org }, { count }] = await Promise.all([
+          supabase.from('organizations').select('max_users').eq('id', orgId).single(),
+          supabase.from('users').select('*', { count: 'exact', head: true }).eq('organization_id', orgId)
+        ]);
+
+        if (org?.max_users && count && count >= org.max_users) {
+          return `User limit reached (${count}/${org.max_users}). Contact your provider to upgrade.`;
+        }
+        return null;
+      } catch { return null; }
+    };
+
+    checkLimit().then(limitMsg => {
+      if (limitMsg) {
+        setFormStatus(`❌ ${limitMsg}`);
+        return;
+      }
+      const maxId = employees.reduce((max, emp) => Math.max(max, parseInt(emp.id) || 0), 0);
+      const nextCode = `BB-${String(maxId + 1).padStart(4, '0')}`;
+      setFormData({ ...emptyForm, employee_code: nextCode });
+      setFormStep(1);
+      setFormStatus('');
+      setFormDialog({ open: true, editing: null });
     });
-    setFormStep(1);
-    setFormStatus('');
-    setFormDialog({ open: true, editing: null });
   };
 
   const handleEditEmployee = (emp: any) => {
