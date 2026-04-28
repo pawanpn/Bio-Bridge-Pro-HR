@@ -2822,10 +2822,17 @@ pub async fn migrate_branch_data(
 }
 
 #[tauri::command]
-pub async fn list_departments(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+pub async fn list_departments(organization_id: Option<i64>, state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    let mut stmt = conn.prepare("SELECT id, name, description, branch_id FROM Departments ORDER BY name")
+
+    let mut query = String::from("SELECT id, name, description, branch_id FROM Departments WHERE 1=1");
+    if let Some(org_id) = organization_id {
+        query.push_str(&format!(" AND organization_id = {}", org_id));
+    }
+    query.push_str(" ORDER BY name");
+
+    let mut stmt = conn.prepare(&query)
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     let results = stmt.query_map([], |row| {
         Ok(serde_json::json!({ 
@@ -2839,10 +2846,17 @@ pub async fn list_departments(state: tauri::State<'_, AppState>) -> Result<Vec<s
 }
 
 #[tauri::command]
-pub async fn list_designations(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+pub async fn list_designations(organization_id: Option<i64>, state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    let mut stmt = conn.prepare("SELECT id, name, description, branch_id FROM Designations ORDER BY name")
+
+    let mut query = String::from("SELECT id, name, description, branch_id FROM Designations WHERE 1=1");
+    if let Some(org_id) = organization_id {
+        query.push_str(&format!(" AND organization_id = {}", org_id));
+    }
+    query.push_str(" ORDER BY name");
+
+    let mut stmt = conn.prepare(&query)
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     let results = stmt.query_map([], |row| {
         Ok(serde_json::json!({ 
@@ -2856,19 +2870,19 @@ pub async fn list_designations(state: tauri::State<'_, AppState>) -> Result<Vec<
 }
 
 #[tauri::command]
-pub async fn create_department(name: String, branch_id: Option<i64>, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+pub async fn create_department(name: String, branch_id: Option<i64>, organization_id: Option<i64>, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    conn.execute("INSERT INTO Departments (name, branch_id) VALUES (?1, ?2)", rusqlite::params![name, branch_id])
+    conn.execute("INSERT INTO Departments (name, branch_id, organization_id) VALUES (?1, ?2, ?3)", rusqlite::params![name, branch_id, organization_id.unwrap_or(1)])
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn create_designation(name: String, branch_id: Option<i64>, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+pub async fn create_designation(name: String, branch_id: Option<i64>, organization_id: Option<i64>, state: tauri::State<'_, AppState>) -> Result<(), AppError> {
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    conn.execute("INSERT INTO Designations (name, branch_id) VALUES (?1, ?2)", rusqlite::params![name, branch_id])
+    conn.execute("INSERT INTO Designations (name, branch_id, organization_id) VALUES (?1, ?2, ?3)", rusqlite::params![name, branch_id, organization_id.unwrap_or(1)])
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     Ok(())
 }

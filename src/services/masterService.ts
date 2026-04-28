@@ -213,7 +213,7 @@ export async function getDashboardStats(orgId?: number | string): Promise<any> {
 // ============================================================================
 
 export async function listDepartments(orgId?: number | string): Promise<any[]> {
-  const result = await callBackend('list_departments');
+  const result = await callBackend('list_departments', { organizationId: getOrgId(orgId) });
   if (result !== null) return result;
 
   const organization_id = getOrgId(orgId);
@@ -224,7 +224,7 @@ export async function listDepartments(orgId?: number | string): Promise<any[]> {
 }
 
 export async function listDesignations(orgId?: number | string): Promise<any[]> {
-  const result = await callBackend('list_designations');
+  const result = await callBackend('list_designations', { organizationId: getOrgId(orgId) });
   if (result !== null) return result;
 
   const organization_id = getOrgId(orgId);

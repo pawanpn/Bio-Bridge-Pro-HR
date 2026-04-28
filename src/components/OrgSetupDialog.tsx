@@ -28,12 +28,15 @@ export const OrgSetupDialog: React.FC<OrgSetupDialogProps> = ({ open, onOpenChan
         const orgId = organizationId || 1;
         await addBranch(newName, null, Number(orgId));
       } else if (activeTab === 'departments') {
-         await invoke('create_department', { name: newName, branchId: selectedBranchId ? parseInt(selectedBranchId) : null });
+         const orgId = organizationId || 1;
+         await invoke('create_department', { name: newName, branchId: selectedBranchId ? parseInt(selectedBranchId) : null, organizationId: Number(orgId) });
       } else {
-         await invoke('create_designation', { name: newName, branchId: selectedBranchId ? parseInt(selectedBranchId) : null });
+         const orgId = organizationId || 1;
+         await invoke('create_designation', { name: newName, branchId: selectedBranchId ? parseInt(selectedBranchId) : null, organizationId: Number(orgId) });
       }
       setNewName('');
       onRefresh();
+      window.dispatchEvent(new CustomEvent('org-structure-changed'));
     } catch(err) {
       alert('Failed to add: ' + err);
     }

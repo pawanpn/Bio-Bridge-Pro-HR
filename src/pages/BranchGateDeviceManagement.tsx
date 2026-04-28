@@ -107,48 +107,56 @@ export const BranchGateDeviceManagement: React.FC = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      // Load branches with counts
+      // Phase 1: Load branches immediately (so they always render)
       const branchData = await listBranches(user?.organization_id);
+      setBranches(branchData);
+
+      // Phase 2: Enhance with counts (non-blocking, per-branch try/catch)
       const enhancedBranches = await Promise.all(
         branchData.map(async (b: any) => {
-          const gates = await invoke<any[]>('list_gates', { branchId: b.id });
-          const allDevices = await invoke<any[]>('list_all_devices');
-          const branchDevices = allDevices.filter((d: any) => d.branch_id === b.id);
-          return {
-            ...b,
-            gate_count: gates.length,
-            device_count: branchDevices.length,
-          };
+          try {
+            const gates = await invoke<any[]>('list_gates', { branchId: b.id });
+            const allDevices = await invoke<any[]>('list_all_devices');
+            const branchDevices = allDevices.filter((d: any) => d.branch_id === b.id);
+            return { ...b, gate_count: gates.length, device_count: branchDevices.length };
+          } catch {
+            return { ...b, gate_count: 0, device_count: 0 };
+          }
         })
       );
       setBranches(enhancedBranches);
 
-      // Load ALL gates for dropdowns and enhanced views
-      const gateData = await invoke<any[]>('list_gates', { branchId: null });
-      const allDevicesForGates = await invoke<any[]>('list_all_devices');
-      const enhancedGates = await Promise.all(
-        gateData.map(async (g: any) => {
-          const gateDevices = allDevicesForGates.filter((d: any) => d.gate_id === g.id);
-          return {
-            ...g,
-            device_count: gateDevices.length,
-          };
-        })
-      );
-      setGates(enhancedGates);
+      // Phase 3: Load gates and devices
+      try {
+        const gateData = await invoke<any[]>('list_gates', { branchId: null });
+        const allDevicesForGates = await invoke<any[]>('list_all_devices');
+        const enhancedGates = await Promise.all(
+          gateData.map(async (g: any) => {
+            try {
+              const gateDevices = allDevicesForGates.filter((d: any) => d.gate_id === g.id);
+              return { ...g, device_count: gateDevices.length };
+            } catch { return { ...g, device_count: 0 }; }
+          })
+        );
+        setGates(enhancedGates);
 
-      // Load all devices
-      const deviceData = await invoke<any[]>('list_all_devices');
-      setDevices(deviceData);
+        const deviceData = await invoke<any[]>('list_all_devices');
+        setDevices(deviceData);
+      } catch (err) {
+        console.error('Failed to load gates/devices:', err);
+      }
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
       setLoading(false);
     }
-  }, [selectedBranchId]);
+  }, [user?.organization_id]);
 
   useEffect(() => {
     loadData();
+    const handler = () => loadData();
+    window.addEventListener('org-structure-changed', handler);
+    return () => window.removeEventListener('org-structure-changed', handler);
   }, [loadData]);
 
   // Branch handlers

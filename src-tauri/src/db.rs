@@ -694,6 +694,7 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
     let org_migrations = vec![
         "Employees", "Items", "Projects", "Leads", "Assets",
         "AttendanceLogs", "LeaveRequests",
+        "Departments", "Designations",
     ];
     for table in &org_migrations {
         let _ = conn.execute(
