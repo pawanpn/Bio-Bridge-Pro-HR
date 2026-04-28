@@ -50,6 +50,77 @@ const emptyOrg: Organization = {
 type SortField = 'name' | 'username' | 'created_at' | 'user_count';
 type SortDir = 'asc' | 'desc';
 
+function getAdminClient() {
+  const serviceKey = localStorage.getItem('supabaseServiceKey') || '';
+  const supabaseUrl = localStorage.getItem('supabaseUrl') || import.meta.env.VITE_SUPABASE_URL || '';
+  if (!serviceKey || !supabaseUrl) return null;
+  return createClient(supabaseUrl, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
+}
+
+function generateUsername(orgName: string, orgId: number): string {
+  const base = 'sa_' + orgName.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .replace(/\s+/g, '_')
+    .substring(0, 35);
+  return `${base}_${orgId}`;
+}
+
+function generateEmail(orgName: string, orgId: number, orgEmail?: string): string {
+  if (orgEmail) return orgEmail;
+  const slug = orgName.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 15);
+  return `${slug}${orgId}@biobridge.com`;
+}
+
+async function createSuperAdminUser(orgId: number, orgName: string, orgEmail?: string, password?: string): Promise<{ userId?: string; authId?: string; email: string; username: string; error?: string }> {
+  const username = generateUsername(orgName, orgId);
+  const email = generateEmail(orgName, orgId, orgEmail);
+  const defaultPassword = password || 'org123456';
+
+  const adminClient = getAdminClient();
+  let authUserId: string | undefined;
+
+  if (adminClient) {
+    try {
+      const { data: authUser, error: authErr } = await adminClient.auth.admin.createUser({
+        email,
+        password: defaultPassword,
+        email_confirm: true,
+        user_metadata: { username, role: 'SUPER_ADMIN', organization_id: orgId }
+      });
+      if (authErr) throw authErr;
+      authUserId = authUser.user?.id;
+    } catch (e: any) {
+      console.warn('Failed to create auth user:', e.message);
+    }
+  }
+
+  const { data: userRecord, error: userErr } = await supabase
+    .from('users')
+    .insert({
+      username,
+      email,
+      full_name: `Super Admin - ${orgName}`,
+      role: 'SUPER_ADMIN',
+      organization_id: orgId,
+      auth_id: authUserId || null,
+      is_active: true,
+      must_change_password: true
+    })
+    .select('id')
+    .single();
+
+  if (userErr) {
+    return { email, username, error: userErr.message };
+  }
+
+  return {
+    userId: userRecord?.id,
+    authId: authUserId,
+    email,
+    username
+  };
+}
+
 export const ProviderOrganizations: React.FC = () => {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [loading, setLoading] = useState(true);
@@ -163,14 +234,26 @@ export const ProviderOrganizations: React.FC = () => {
         if (updErr) throw updErr;
         setSuccess('Organization updated');
       } else {
-        const { error: insErr } = await supabase.from('organizations').insert(payload);
+        const { data: newOrg, error: insErr } = await supabase
+          .from('organizations')
+          .insert(payload)
+          .select('id')
+          .single();
         if (insErr) throw insErr;
-        setSuccess('Organization created');
+
+        const saResult = await createSuperAdminUser(newOrg.id, form.name, form.email || undefined);
+        if (saResult.error) {
+          setSuccess('Organization created. Super Admin: ' + saResult.username + ' / ' + saResult.email + ' (manual auth setup needed)');
+        } else if (!saResult.authId) {
+          setSuccess('Organization created. Use "Set SA Password" to activate login for ' + saResult.username);
+        } else {
+          setSuccess('Organization created with Super Admin: ' + saResult.username);
+        }
       }
 
       setShowForm(false);
       await loadData();
-      setTimeout(() => setSuccess(''), 3000);
+      setTimeout(() => setSuccess(''), 8000);
     } catch (err: any) { setError(err.message); }
     finally { setSaving(false); }
   };
@@ -233,26 +316,60 @@ export const ProviderOrganizations: React.FC = () => {
     }
     setPasswordSaving(true); setError(''); setSuccess('');
     try {
-      const authId = showPasswordModal.superadmin_auth_id || showPasswordModal.superadmin_id;
-      if (!authId) { setError('No auth ID found for this org superadmin'); setPasswordSaving(false); return; }
-      const { error: updErr } = await supabase.auth.admin.updateUserById(authId, { password: newOrgPassword });
-      if (updErr) throw updErr;
-
       const saId = showPasswordModal.superadmin_id || '';
+      let authId = showPasswordModal.superadmin_auth_id || '';
+
+      if (!saId) {
+        setError('No SUPER_ADMIN user found for this organization. Create one first.');
+        setPasswordSaving(false);
+        return;
+      }
+
+      if (!authId) {
+        const adminClient = getAdminClient();
+        if (!adminClient) {
+          setError('Service key not configured. Cannot create auth user.');
+          setPasswordSaving(false);
+          return;
+        }
+        const email = showPasswordModal.superadmin_email || generateEmail(showPasswordModal.name, Number(showPasswordModal.id), undefined);
+        const { data: authUser, error: createErr } = await adminClient.auth.admin.createUser({
+          email,
+          password: newOrgPassword,
+          email_confirm: true,
+          user_metadata: { role: 'SUPER_ADMIN', organization_id: showPasswordModal.id }
+        });
+        if (createErr) throw createErr;
+        authId = authUser.user?.id;
+        if (!authId) { setError('Failed to get auth user ID'); setPasswordSaving(false); return; }
+
+        await supabase.from('users').update({ auth_id: authId, email }).eq('id', saId);
+        setSuccess('Auth user created and password set for ' + showPasswordModal.superadmin_username);
+      } else {
+        const adminClient = getAdminClient();
+        if (!adminClient) {
+          setError('Service key not configured. Cannot update password.');
+          setPasswordSaving(false);
+          return;
+        }
+        const { error: updErr } = await adminClient.auth.admin.updateUserById(authId, { password: newOrgPassword });
+        if (updErr) throw updErr;
+        setSuccess('Password updated for ' + showPasswordModal.superadmin_username);
+      }
+
       const updatedPasswords = { ...storedPasswords, [saId]: newOrgPassword };
       setStoredPasswords(updatedPasswords);
       localStorage.setItem('biobridge_user_passwords', JSON.stringify(updatedPasswords));
 
       setOrganizations(prev => prev.map(o =>
         o.id === showPasswordModal.id
-          ? { ...o, superadmin_password: newOrgPassword, superadmin_last_sign_in_at: null }
+          ? { ...o, superadmin_password: newOrgPassword, superadmin_last_sign_in_at: null, superadmin_auth_id: authId || o.superadmin_auth_id }
           : o
       ));
 
-      setSuccess(`Password set for ${showPasswordModal.superadmin_username || showPasswordModal.name}'s superadmin`);
       setShowPasswordModal(null);
       setNewOrgPassword('');
-      setTimeout(() => setSuccess(''), 3000);
+      setTimeout(() => setSuccess(''), 5000);
     } catch (err: any) { setError(err.message); }
     finally { setPasswordSaving(false); }
   };
@@ -669,13 +786,23 @@ export const ProviderOrganizations: React.FC = () => {
               <div className="flex items-center gap-3">
                 <Key size={20} className="text-blue-400" />
                 <div>
-                  <h3 className="text-lg font-semibold text-white">Set Super Admin Password</h3>
+                  <h3 className="text-lg font-semibold text-white">
+                    {showPasswordModal.superadmin_auth_id ? 'Update Super Admin Password' : 'Create Super Admin Login'}
+                  </h3>
                   <p className="text-sm text-slate-400">{showPasswordModal.name}</p>
-                  <p className="text-xs text-slate-500">@{showPasswordModal.superadmin_username || 'no superadmin'}</p>
+                  <p className="text-xs text-slate-500">
+                    @{showPasswordModal.superadmin_username || 'no superadmin'}
+                    {showPasswordModal.superadmin_email && <span className="ml-2 text-slate-600">{showPasswordModal.superadmin_email}</span>}
+                  </p>
                 </div>
               </div>
+              {!showPasswordModal.superadmin_auth_id && (
+                <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded text-xs text-amber-300">
+                  No login yet. Set a password to create their Super Admin account.
+                </div>
+              )}
               <div className="space-y-1">
-                <label className="text-xs text-slate-400">New Password (min 6 chars)</label>
+                <label className="text-xs text-slate-400">Password (min 6 chars)</label>
                 <Input
                   type="text"
                   value={newOrgPassword}
@@ -689,7 +816,7 @@ export const ProviderOrganizations: React.FC = () => {
                 <Button variant="ghost" onClick={() => setShowPasswordModal(null)} className="text-slate-400">Cancel</Button>
                 <Button onClick={handleOrgPasswordSave} disabled={passwordSaving || !newOrgPassword} className="bg-blue-600 hover:bg-blue-700">
                   {passwordSaving ? <Loader2 size={14} className="animate-spin mr-1" /> : null}
-                  Set Password
+                  {showPasswordModal.superadmin_auth_id ? 'Update Password' : 'Create & Set Password'}
                 </Button>
               </div>
             </div>

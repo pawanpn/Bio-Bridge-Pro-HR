@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Lock, ShieldAlert, AlertCircle, CheckCircle2, User, Info } from 'lucide-react';
+import { Lock, ShieldAlert, AlertCircle, CheckCircle2, User, Info, Eye, EyeOff } from 'lucide-react';
 
 export const ProviderLogin: React.FC = () => {
   const { providerLogin } = useProviderAuth();
@@ -16,6 +16,7 @@ export const ProviderLogin: React.FC = () => {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [logoutReason, setLogoutReason] = useState('');
+  const [showPin, setShowPin] = useState(false);
 
   useEffect(() => {
     const reason = localStorage.getItem('biobridge_provider_logout_reason');
@@ -65,8 +66,16 @@ export const ProviderLogin: React.FC = () => {
               <Label htmlFor="pin" className="text-slate-300">PIN</Label>
               <div className="relative">
                 <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <Input id="pin" type="password" value={pin} onChange={e => setPin(e.target.value)}
-                  placeholder="Enter PIN" className="pl-10 bg-slate-700 border-slate-600 text-white placeholder:text-slate-500 text-lg tracking-widest" />
+                <Input id="pin" type={showPin ? "text" : "password"} value={pin} onChange={e => setPin(e.target.value)}
+                  placeholder="Enter PIN" className="pl-10 pr-10 bg-slate-700 border-slate-600 text-white placeholder:text-slate-500 text-lg tracking-widest" />
+                <button
+                  type="button"
+                  onClick={() => setShowPin(!showPin)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 transition-colors"
+                  tabIndex={-1}
+                >
+                  {showPin ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
             </div>
 
