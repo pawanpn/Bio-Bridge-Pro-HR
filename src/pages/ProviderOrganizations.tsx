@@ -94,23 +94,65 @@ async function createSuperAdminUser(orgId: number, orgName: string, orgEmail?: s
     }
   }
 
-  const { data: userRecord, error: userErr } = await supabase
+  const db = adminClient || supabase;
+
+  const userPayload: Record<string, any> = {
+    username,
+    email,
+    full_name: `Super Admin - ${orgName}`,
+    role: 'SUPER_ADMIN',
+    auth_id: authUserId || null,
+    is_active: true,
+    must_change_password: true
+  };
+
+  let { data: userRecord, error: userErr } = await db
     .from('users')
-    .insert({
-      username,
-      email,
-      full_name: `Super Admin - ${orgName}`,
-      role: 'SUPER_ADMIN',
-      organization_id: orgId,
-      auth_id: authUserId || null,
-      is_active: true,
-      must_change_password: true
-    })
+    .insert({ ...userPayload, organization_id: orgId })
     .select('id')
     .single();
 
   if (userErr) {
-    return { email, username, error: userErr.message };
+    if (userErr.message?.includes('duplicate key') || userErr.code === '23505') {
+      const { data: existing } = await db
+        .from('users')
+        .select('id, username, email, auth_id')
+        .eq('username', username)
+        .single();
+      if (existing) {
+        return {
+          userId: existing.id,
+          authId: existing.auth_id || authUserId || undefined,
+          email: existing.email || email,
+          username: existing.username
+        };
+      }
+    }
+    console.warn('Insert with organization_id failed, retrying without it:', userErr.message);
+    const { data: retryRecord, error: retryErr } = await db
+      .from('users')
+      .insert(userPayload)
+      .select('id')
+      .single();
+    if (retryErr) {
+      if (retryErr.message?.includes('duplicate key') || retryErr.code === '23505') {
+        const { data: existing } = await db
+          .from('users')
+          .select('id, username, email, auth_id')
+          .eq('username', username)
+          .single();
+        if (existing) {
+          return {
+            userId: existing.id,
+            authId: existing.auth_id || authUserId || undefined,
+            email: existing.email || email,
+            username: existing.username
+          };
+        }
+      }
+      return { email, username, error: retryErr.message };
+    }
+    userRecord = retryRecord;
   }
 
   return {
@@ -146,6 +188,7 @@ export const ProviderOrganizations: React.FC = () => {
     try { return JSON.parse(localStorage.getItem('biobridge_user_passwords') || '{}'); }
     catch { return {}; }
   });
+  const [serviceKeyInput, setServiceKeyInput] = useState(() => localStorage.getItem('supabaseServiceKey') || '');
 
   useEffect(() => { loadData(); }, []);
 
@@ -159,17 +202,43 @@ export const ProviderOrganizations: React.FC = () => {
       const passwords: Record<string, string> = {};
       try { Object.assign(passwords, JSON.parse(localStorage.getItem('biobridge_user_passwords') || '{}')); } catch {}
 
+      const saCache: Record<string, { username?: string; email?: string; authId?: string; userId?: string }> = {};
+      try { Object.assign(saCache, JSON.parse(localStorage.getItem('biobridge_org_sa_cache') || '{}')); } catch {}
+
       const adminIds: string[] = [];
       const withExtras = await Promise.all((orgs || []).map(async (org) => {
-        const [{ count }, { data: admins }] = await Promise.all([
-          supabase.from('users').select('*', { count: 'exact', head: true }).eq('organization_id', org.id),
-          supabase.from('users').select('id, username, auth_id, email').eq('organization_id', org.id).eq('role', 'SUPER_ADMIN').limit(1)
-        ]);
-        const admin = admins?.[0];
-        if (admin?.auth_id || admin?.id) adminIds.push(admin.auth_id || admin.id);
+        let count = 0;
+        let admin: { id?: string; username?: string; auth_id?: string; email?: string } | undefined;
+        try {
+          const [{ count: c }, { data: admins }] = await Promise.all([
+            supabase.from('users').select('*', { count: 'exact', head: true }).eq('organization_id', org.id),
+            supabase.from('users').select('id, username, auth_id, email').eq('organization_id', org.id).eq('role', 'SUPER_ADMIN').limit(1)
+          ]);
+          count = c || 0;
+          admin = admins?.[0];
+        } catch {}
+
+        if (!admin) {
+          const cached = saCache[String(org.id)];
+          if (cached) {
+            admin = { id: cached.userId, username: cached.username, auth_id: cached.authId, email: cached.email };
+          }
+        }
+
+        if (!admin) {
+          const email = (org as any).superadmin_email;
+          if (email) {
+            try {
+              const { data: byEmail } = await supabase.from('users').select('id, username, auth_id, email').eq('email', email).eq('role', 'SUPER_ADMIN').limit(1);
+              admin = byEmail?.[0];
+            } catch {}
+          }
+        }
+
+        if (admin?.auth_id || admin?.id) adminIds.push((admin.auth_id || admin.id)!);
         const saId = admin?.id || '';
         return {
-          ...org, user_count: count || 0,
+          ...org, user_count: count,
           superadmin_username: admin?.username || '',
           superadmin_id: saId,
           superadmin_auth_id: admin?.auth_id || '',
@@ -242,6 +311,13 @@ export const ProviderOrganizations: React.FC = () => {
         if (insErr) throw insErr;
 
         const saResult = await createSuperAdminUser(newOrg.id, form.name, form.email || undefined);
+        if (saResult.userId) {
+          try {
+            const saCacheUpdate = JSON.parse(localStorage.getItem('biobridge_org_sa_cache') || '{}');
+            saCacheUpdate[String(newOrg.id)] = { username: saResult.username, email: saResult.email, authId: saResult.authId || '', userId: saResult.userId };
+            localStorage.setItem('biobridge_org_sa_cache', JSON.stringify(saCacheUpdate));
+          } catch {}
+        }
         if (saResult.error) {
           setSuccess('Organization created. Super Admin: ' + saResult.username + ' / ' + saResult.email + ' (manual auth setup needed)');
         } else if (!saResult.authId) {
@@ -282,7 +358,7 @@ export const ProviderOrganizations: React.FC = () => {
 
   const handleLoginAs = async (org: Organization) => {
     try {
-      const { data: users, error: uErr } = await supabase
+      let { data: users, error: uErr } = await supabase
         .from('users')
         .select('id, username, email, role')
         .eq('organization_id', org.id)
@@ -291,6 +367,22 @@ export const ProviderOrganizations: React.FC = () => {
         .order('created_at', { ascending: true })
         .limit(1);
       if (uErr) throw uErr;
+
+      if (!users || users.length === 0) {
+        const email = org.superadmin_email;
+        if (email) {
+          const { data: usersByEmail, error: eErr } = await supabase
+            .from('users')
+            .select('id, username, email, role')
+            .eq('email', email)
+            .eq('role', 'SUPER_ADMIN')
+            .eq('is_active', true)
+            .limit(1);
+          if (eErr) throw eErr;
+          users = usersByEmail;
+        }
+      }
+
       if (!users || users.length === 0) {
         setError(`No active SUPER_ADMIN found in ${org.name}. Create one first.`);
         return;
@@ -316,12 +408,40 @@ export const ProviderOrganizations: React.FC = () => {
     }
     setPasswordSaving(true); setError(''); setSuccess('');
     try {
-      const saId = showPasswordModal.superadmin_id || '';
+      let saId = showPasswordModal.superadmin_id || '';
       let authId = showPasswordModal.superadmin_auth_id || '';
 
       if (!saId) {
-        setError('No SUPER_ADMIN user found for this organization. Create one first.');
+        const saResult = await createSuperAdminUser(
+          Number(showPasswordModal.id),
+          showPasswordModal.name,
+          showPasswordModal.superadmin_email || undefined,
+          newOrgPassword
+        );
+        if (saResult.error) throw new Error(saResult.error);
+        saId = saResult.userId || '';
+        authId = saResult.authId || '';
+
+        const updatedPasswords = { ...storedPasswords, [saId]: newOrgPassword };
+        setStoredPasswords(updatedPasswords);
+        localStorage.setItem('biobridge_user_passwords', JSON.stringify(updatedPasswords));
+
+        let saCacheUpdate: any = {};
+        try { saCacheUpdate = JSON.parse(localStorage.getItem('biobridge_org_sa_cache') || '{}'); } catch {}
+        saCacheUpdate[String(showPasswordModal.id)] = { username: saResult.username, email: saResult.email, authId, userId: saId };
+        localStorage.setItem('biobridge_org_sa_cache', JSON.stringify(saCacheUpdate));
+
+        setOrganizations(prev => prev.map(o =>
+          o.id === showPasswordModal.id
+            ? { ...o, superadmin_id: saId, superadmin_username: saResult.username, superadmin_email: saResult.email, superadmin_auth_id: authId, superadmin_password: newOrgPassword, superadmin_last_sign_in_at: null }
+            : o
+        ));
+
+        setShowPasswordModal(null);
+        setNewOrgPassword('');
+        setSuccess('Super Admin created: ' + saResult.email + ' | Password: ' + newOrgPassword);
         setPasswordSaving(false);
+        setTimeout(() => setSuccess(''), 8000);
         return;
       }
 
@@ -343,7 +463,7 @@ export const ProviderOrganizations: React.FC = () => {
         authId = authUser.user?.id;
         if (!authId) { setError('Failed to get auth user ID'); setPasswordSaving(false); return; }
 
-        await supabase.from('users').update({ auth_id: authId, email }).eq('id', saId);
+        await adminClient.from('users').update({ auth_id: authId, email }).eq('id', saId);
         setSuccess('Auth user created and password set for ' + showPasswordModal.superadmin_username);
       } else {
         const adminClient = getAdminClient();
@@ -363,7 +483,7 @@ export const ProviderOrganizations: React.FC = () => {
 
       setOrganizations(prev => prev.map(o =>
         o.id === showPasswordModal.id
-          ? { ...o, superadmin_password: newOrgPassword, superadmin_last_sign_in_at: null, superadmin_auth_id: authId || o.superadmin_auth_id }
+          ? { ...o, superadmin_password: newOrgPassword, superadmin_last_sign_in_at: null, superadmin_auth_id: authId }
           : o
       ));
 
@@ -440,6 +560,35 @@ export const ProviderOrganizations: React.FC = () => {
       {/* Messages */}
       {error && <div className="flex items-center gap-2 p-3 bg-red-500/10 border border-red-500/30 text-red-400 rounded-md text-sm"><AlertCircle size={16} />{error}<button onClick={() => setError('')} className="ml-auto">Dismiss</button></div>}
       {success && <div className="flex items-center gap-2 p-3 bg-green-500/10 border border-green-500/30 text-green-400 rounded-md text-sm"><CheckCircle2 size={16} />{success}</div>}
+
+      {/* Service Key Setup */}
+      <div className={`p-3 rounded-md border ${serviceKeyInput ? 'bg-slate-800/50 border-slate-700' : 'bg-amber-500/10 border-amber-500/30'}`}>
+        <div className="flex items-center justify-between mb-2">
+          <span className={`text-sm font-medium ${serviceKeyInput ? 'text-green-400' : 'text-amber-400'}`}>
+            {serviceKeyInput ? 'Service Key: Configured' : 'Service Key: Not Set'}
+          </span>
+        </div>
+        <div className="flex gap-2">
+          <Input
+            type="password"
+            value={serviceKeyInput}
+            onChange={e => setServiceKeyInput(e.target.value)}
+            placeholder="Paste Supabase service_role key..."
+            className="bg-slate-700 border-slate-600 text-white h-8 text-xs flex-1"
+          />
+          <Button
+            size="sm"
+            onClick={() => { localStorage.setItem('supabaseServiceKey', serviceKeyInput); setSuccess('Service key saved!'); setTimeout(() => setSuccess(''), 3000); }}
+            disabled={!serviceKeyInput}
+            className="bg-amber-600 hover:bg-amber-700 h-8 text-xs"
+          >
+            Save
+          </Button>
+        </div>
+        <p className="text-slate-500 text-xs mt-2">
+          Supabase → Project Settings → API → <code className="text-amber-400">service_role</code> key
+        </p>
+      </div>
 
       {/* Toolbar: Search, Sort, Filters, View Toggle */}
       <div className="flex flex-wrap items-center gap-2">
@@ -642,6 +791,11 @@ export const ProviderOrganizations: React.FC = () => {
                         <p className="text-xs text-slate-400">
                           <span className="text-slate-600">SA:</span> @{org.superadmin_username}
                         </p>
+                        {org.superadmin_email && (
+                          <p className="text-[11px] text-blue-400 truncate">
+                            <span className="text-slate-600">Email:</span> {org.superadmin_email}
+                          </p>
+                        )}
                         {org.superadmin_password && (
                           <p className="text-xs font-mono">
                             {org.superadmin_last_sign_in_at
@@ -727,6 +881,9 @@ export const ProviderOrganizations: React.FC = () => {
                     <td className="py-3 px-4">
                       <div className="space-y-0.5">
                         <span className="text-slate-300 text-xs">{org.superadmin_username || <span className="text-slate-600">—</span>}</span>
+                        {org.superadmin_email && (
+                          <p className="text-[10px] text-blue-400 truncate">{org.superadmin_email}</p>
+                        )}
                         {org.superadmin_password && (
                           <p className="text-[11px] font-mono">
                             {org.superadmin_last_sign_in_at
