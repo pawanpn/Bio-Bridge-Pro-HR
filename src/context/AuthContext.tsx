@@ -67,6 +67,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const checkSession = async () => {
     try {
+      const impersonateData = localStorage.getItem('biobridge_impersonate_user');
+      if (impersonateData) {
+        const impUser = JSON.parse(impersonateData);
+        console.log('🔑 Loading impersonated user:', impUser.username);
+        const userData: User = {
+          id: impUser.id,
+          username: impUser.username,
+          email: impUser.email,
+          full_name: impUser.full_name,
+          role: impUser.role || 'SUPER_ADMIN',
+          organization_id: impUser.organization_id,
+        };
+        setUser(userData);
+        return;
+      }
+
       console.log('🔍 Checking existing session...');
       const { data: { session } } = await supabase.auth.getSession();
       
@@ -266,10 +282,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
+      const isImpersonating = !!localStorage.getItem('biobridge_impersonate_user');
       await supabase.auth.signOut();
       setUser(null);
       setSupabaseUser(null);
       localStorage.removeItem('biobridge_user');
+      localStorage.removeItem('biobridge_impersonate_user');
+      if (isImpersonating) {
+        window.location.href = '/provider/dashboard';
+        return;
+      }
       console.log('👋 Logged out successfully');
     } catch (error) {
       console.error('Logout error:', error);

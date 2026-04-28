@@ -35,7 +35,8 @@ import {
   X,
   ChevronRight,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Eye
 } from 'lucide-react';
 
 export const MainLayout: React.FC = () => {
@@ -43,6 +44,7 @@ export const MainLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const isImpersonating = !!localStorage.getItem('biobridge_impersonate_user');
   const [calendarMode, setCalendarMode] = useState(localStorage.getItem('calendarMode') || 'BS');
   const [activeTab, setActiveTab] = useState('Overview');
   const [branches, setBranches] = useState<{id: number, name: string}[]>([]);
@@ -495,6 +497,20 @@ export const MainLayout: React.FC = () => {
 
         {/* Page Content - Scrollable */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden bg-muted/20 p-3 sm:p-4 lg:p-6">
+          {isImpersonating && (
+            <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-md flex items-center justify-between text-sm">
+              <div className="flex items-center gap-2 text-amber-400">
+                <Eye size={16} />
+                <span>Viewing as <strong>{user?.organization_id ? 'Organization' : 'User'}: {user?.username}</strong></span>
+              </div>
+              <button
+                onClick={() => { logout(); }}
+                className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white text-xs rounded"
+              >
+                Exit Impersonation
+              </button>
+            </div>
+          )}
           <Outlet />
         </main>
 
