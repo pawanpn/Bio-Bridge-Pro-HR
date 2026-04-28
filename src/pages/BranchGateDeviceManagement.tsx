@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import { listBranches, addBranch, listAllDevices, listGates } from '@/services/masterService';
 import { Building2, DoorOpen, Monitor, Plus, Edit2, Trash2, Eye, Shield, AlertCircle, Download, Upload, Wifi, WifiOff, Info } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -107,7 +108,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
     setLoading(true);
     try {
       // Load branches with counts
-      const branchData = await invoke<any[]>('list_branches');
+      const branchData = await listBranches(user?.organization_id);
       const enhancedBranches = await Promise.all(
         branchData.map(async (b: any) => {
           const gates = await invoke<any[]>('list_gates', { branchId: b.id });
@@ -490,10 +491,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
                 location: data.location 
               });
             } else {
-              await invoke('add_branch', { 
-                name: data.name, 
-                location: data.location 
-              });
+              await addBranch(data.name, data.location, user?.organization_id);
             }
             setBranchDialog({ open: false, editing: null });
             loadData();

@@ -6,6 +6,7 @@ import { ConnectivityBadge } from '../components/ConnectivityBadge';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { useAuth } from '../context/AuthContext';
 import { syncService } from '../services/syncService';
+import { listBranches } from '@/services/masterService';
 import { AppConfig } from '../config/appConfig';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -117,7 +118,7 @@ export const MainLayout: React.FC = () => {
   }, [location.pathname]);
 
   useEffect(() => {
-    invoke<any[]>('list_branches', { organizationId: user?.organization_id }).then(setBranches).catch(console.error);
+    listBranches(user?.organization_id).then(setBranches).catch(console.error);
 
     // Set initial branch if user is branch-locked
     if (user?.branch_id) {

@@ -648,6 +648,7 @@ pub async fn scan_network(_base_ip: String) -> Result<(), AppError> {
 pub async fn add_branch(
     name: String,
     location: Option<String>,
+    organization_id: i64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -658,10 +659,9 @@ pub async fn add_branch(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    // Default org_id = 1 for now
     conn.execute(
-        "INSERT INTO Branches (org_id, name, location) VALUES (1, ?1, ?2)",
-        params![name, location],
+        "INSERT INTO Branches (org_id, name, location) VALUES (?1, ?2, ?3)",
+        params![organization_id, name, location],
     )?;
 
     Ok(serde_json::json!({"success": true}))

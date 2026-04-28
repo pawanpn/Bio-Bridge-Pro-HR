@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { DeviceScanner } from '../components/DeviceScanner';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import { getDashboardStats } from '@/services/masterService';
 import { 
   Users, UserCheck, UserMinus, Cloud, CloudOff, Clock, X, CalendarCheck, 
   Fingerprint, ScanFace, ArrowLeft, DollarSign, TrendingUp, TrendingDown,
@@ -205,7 +206,7 @@ export const Dashboard: React.FC = () => {
   useEffect(() => { isDeviceOnlineRef.current = isDeviceOnline; }, [isDeviceOnline]);
 
   const refreshStats = () => {
-    invoke<Stats>('get_dashboard_stats', { organizationId: user?.organization_id }).then(s => { 
+    getDashboardStats(user?.organization_id).then(s => { 
       setStats(s as unknown as ERPStats); 
       buildWeeklyChart(s); 
     });
@@ -246,7 +247,7 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => {
     // Initial data load — runs ONCE on mount
-    invoke<Stats>('get_dashboard_stats', { organizationId: user?.organization_id }).then(s => { 
+    getDashboardStats(user?.organization_id).then(s => { 
       // Cast Stats to ERPStats
       setStats(s as unknown as ERPStats); 
       buildWeeklyChart(s); 
@@ -351,7 +352,7 @@ export const Dashboard: React.FC = () => {
         targetGateId: 1,
       });
       setSyncProgress(null);
-      invoke<Stats>('get_dashboard_stats', { organizationId: user?.organization_id }).then(s => { 
+      getDashboardStats(user?.organization_id).then(s => { 
         setStats(s as unknown as ERPStats); 
         buildWeeklyChart(s); 
       });
@@ -383,7 +384,7 @@ export const Dashboard: React.FC = () => {
         brand: device.brand,
       });
       setSyncProgress(null);
-      invoke<Stats>('get_dashboard_stats', { organizationId: user?.organization_id }).then(s => { 
+      getDashboardStats(user?.organization_id).then(s => { 
         setStats(s as unknown as ERPStats); 
         buildWeeklyChart(s); 
       });

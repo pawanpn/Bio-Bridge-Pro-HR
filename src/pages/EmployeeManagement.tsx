@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '@/config/supabase';
+import { listEmployees, listBranches, listDepartments, listDesignations, listAllDevices, createEmployee } from '@/services/masterService';
 import { Switch } from '@/components/ui/switch';
 import {
   Users, UserPlus, Search, Filter, Download, Upload,
@@ -209,11 +210,11 @@ export const EmployeeManagement: React.FC = () => {
     try {
       console.log('[EmployeeManagement] Loading data...');
       const [empResult, branchData, deviceData, deptData, desigData] = await Promise.all([
-        invoke<any>('list_employees', { statusFilter: viewMode === 'deleted' ? 'deleted' : 'active', organizationId: user?.organization_id }),
-        invoke<any[]>('list_branches', { organizationId: user?.organization_id }),
-        invoke<any[]>('list_all_devices'),
-        invoke<any[]>('list_departments'),
-        invoke<any[]>('list_designations'),
+        listEmployees({ status: viewMode === 'deleted' ? 'deleted' : 'active', orgId: user?.organization_id }),
+        listBranches(user?.organization_id),
+        listAllDevices(),
+        listDepartments(user?.organization_id),
+        listDesignations(user?.organization_id),
       ]);
       
       console.log('[EmployeeManagement] Raw branch data:', branchData);
@@ -403,6 +404,7 @@ export const EmployeeManagement: React.FC = () => {
         biometric_id: formData.biometric_id ? parseInt(String(formData.biometric_id)) : undefined,
         shift_start_time: formData.shift_start_time || undefined,
         shift_end_time: formData.shift_end_time || undefined,
+        organization_id: user?.organization_id,
       };
 
       // Save using the crud commands (local SQLite first)
@@ -412,7 +414,7 @@ export const EmployeeManagement: React.FC = () => {
           request,
         });
       } else {
-        await invoke('create_employee', { request });
+        await createEmployee(request);
       }
 
       setFormStatus('✅ Employee saved successfully!');
@@ -1730,6 +1732,7 @@ export const EmployeeManagement: React.FC = () => {
          departments={departments}
          designations={designations}
          onRefresh={loadData}
+         organizationId={user?.organization_id}
       />
     </div>
   );

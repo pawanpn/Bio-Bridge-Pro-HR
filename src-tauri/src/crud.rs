@@ -357,6 +357,7 @@ pub struct CreateEmployeeRequest {
     pub whatsapp_punch: Option<bool>,
     pub supervisor_mobile: Option<String>,
     pub biometric_id: Option<i32>,
+    pub organization_id: Option<i64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -476,6 +477,7 @@ pub async fn create_employee(
     let full_name = format!("{} {} {}", first_name, request.middle_name.as_deref().unwrap_or(""), last_name).trim().replace("  ", " ");
 
     // Insert employee with all fields
+    let org_id_val = request.organization_id.unwrap_or(1);
     let _id = conn.execute(
         "INSERT INTO Employees (
             employee_code, first_name, middle_name, last_name, name, full_name,
@@ -491,12 +493,13 @@ pub async fn create_employee(
             bio_photo, enable_attendance, enable_holiday, outdoor_management,
             workflow_role, mobile_punch, app_role, whatsapp_alert,
             whatsapp_exception, whatsapp_punch, supervisor_mobile, biometric_id,
+            organization_id,
             status, created_at, updated_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
             ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
             ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44,
-            ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53, ?54, ?55,
+            ?45, ?46, ?47, ?48, ?49, ?50, ?51, ?52, ?53, ?54, ?55, ?56,
             'active', datetime('now'), datetime('now')
         )",
         params![
@@ -555,6 +558,7 @@ pub async fn create_employee(
             &(request.whatsapp_punch.unwrap_or(false) as i32),
             &request.supervisor_mobile,
             &request.biometric_id,
+            &org_id_val,
         ],
     ).map_err(|e| AppError::DatabaseError(format!("Failed to create employee: {}", e)))?;
 

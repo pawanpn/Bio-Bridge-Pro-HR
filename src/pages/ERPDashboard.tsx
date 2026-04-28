@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import { listEmployees, listLeaveRequests, listItems, listProjects, listLeads, getDashboardStats } from '@/services/masterService';
 import { 
   Users, UserCheck, UserMinus, Cloud, Clock, CalendarCheck, 
   DollarSign, TrendingUp, TrendingDown, ShoppingCart, Package, FileText, 
@@ -160,12 +160,12 @@ export const ERPDashboard: React.FC = () => {
         const orgId = user?.organization_id;
         // Fetch real data from local database
         const [empResult, leaveResult, itemResult, projectResult, leadResult, dashStats] = await Promise.all([
-          invoke<any>('list_employees', { organizationId: orgId }).catch(() => ({ data: [] })),
-          invoke<any>('list_leave_requests', { organizationId: orgId }).catch(() => ({ data: [] })),
-          invoke<any[]>('list_items', { organizationId: orgId }).catch(() => []),
-          invoke<any[]>('list_projects', { organizationId: orgId }).catch(() => []),
-          invoke<any[]>('list_leads', { organizationId: orgId }).catch(() => []),
-          invoke<any>('get_dashboard_stats', { organizationId: orgId }).catch(() => null),
+          listEmployees({ orgId }).catch(() => ({ data: [] })),
+          listLeaveRequests({ orgId }).catch(() => ({ data: [] })),
+          listItems(orgId).catch(() => []),
+          listProjects(orgId).catch(() => []),
+          listLeads(orgId).catch(() => []),
+          getDashboardStats(orgId).catch(() => null),
         ]);
 
         // Parse employees

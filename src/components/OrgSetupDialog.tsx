@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { addBranch } from '@/services/masterService';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,9 +13,10 @@ interface OrgSetupDialogProps {
   departments: any[];
   designations: any[];
   onRefresh: () => void;
+  organizationId?: number | string;
 }
 
-export const OrgSetupDialog: React.FC<OrgSetupDialogProps> = ({ open, onOpenChange, branches, departments, designations, onRefresh }) => {
+export const OrgSetupDialog: React.FC<OrgSetupDialogProps> = ({ open, onOpenChange, branches, departments, designations, onRefresh, organizationId }) => {
   const [activeTab, setActiveTab] = useState<'branches'|'departments'|'designations'>('branches');
   const [newName, setNewName] = useState('');
   const [selectedBranchId, setSelectedBranchId] = useState('');
@@ -23,7 +25,8 @@ export const OrgSetupDialog: React.FC<OrgSetupDialogProps> = ({ open, onOpenChan
     if(!newName.trim()) return;
     try {
       if(activeTab === 'branches') {
-        await invoke('add_branch', { name: newName, location: null });
+        const orgId = organizationId || 1;
+        await addBranch(newName, null, Number(orgId));
       } else if (activeTab === 'departments') {
          await invoke('create_department', { name: newName, branchId: selectedBranchId ? parseInt(selectedBranchId) : null });
       } else {
