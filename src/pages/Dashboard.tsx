@@ -205,7 +205,7 @@ export const Dashboard: React.FC = () => {
   useEffect(() => { isDeviceOnlineRef.current = isDeviceOnline; }, [isDeviceOnline]);
 
   const refreshStats = () => {
-    invoke<Stats>('get_dashboard_stats').then(s => { 
+    invoke<Stats>('get_dashboard_stats', { organizationId: user?.organization_id }).then(s => { 
       setStats(s as unknown as ERPStats); 
       buildWeeklyChart(s); 
     });
@@ -246,7 +246,7 @@ export const Dashboard: React.FC = () => {
 
   useEffect(() => {
     // Initial data load — runs ONCE on mount
-    invoke<Stats>('get_dashboard_stats').then(s => { 
+    invoke<Stats>('get_dashboard_stats', { organizationId: user?.organization_id }).then(s => { 
       // Cast Stats to ERPStats
       setStats(s as unknown as ERPStats); 
       buildWeeklyChart(s); 
@@ -351,7 +351,7 @@ export const Dashboard: React.FC = () => {
         targetGateId: 1,
       });
       setSyncProgress(null);
-      invoke<Stats>('get_dashboard_stats').then(s => { 
+      invoke<Stats>('get_dashboard_stats', { organizationId: user?.organization_id }).then(s => { 
         setStats(s as unknown as ERPStats); 
         buildWeeklyChart(s); 
       });
@@ -383,7 +383,7 @@ export const Dashboard: React.FC = () => {
         brand: device.brand,
       });
       setSyncProgress(null);
-      invoke<Stats>('get_dashboard_stats').then(s => { 
+      invoke<Stats>('get_dashboard_stats', { organizationId: user?.organization_id }).then(s => { 
         setStats(s as unknown as ERPStats); 
         buildWeeklyChart(s); 
       });

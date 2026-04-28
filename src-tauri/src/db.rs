@@ -689,9 +689,30 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     );
 
+    // === ORGANIZATION-LEVEL DATA ISOLATION MIGRATION ===
+    // Add organization_id to all data tables for multi-tenant filtering
+    let org_migrations = vec![
+        "Employees", "Items", "Projects", "Leads", "Assets",
+        "AttendanceLogs", "LeaveRequests",
+    ];
+    for table in &org_migrations {
+        let _ = conn.execute(
+            &format!("ALTER TABLE {} ADD COLUMN organization_id INTEGER", table),
+            [],
+        );
+    }
+
+    // Set existing rows to default org (1)
+    for table in &org_migrations {
+        let _ = conn.execute(
+            &format!("UPDATE {} SET organization_id = 1 WHERE organization_id IS NULL", table),
+            [],
+        );
+    }
+
     // Seed test employee for hardware bio-id 1
     conn.execute(
-        "INSERT OR IGNORE INTO Employees (id, name, department, branch_id, status) VALUES (1, 'Admin Staff', 'Operations', 1, 'active')",
+        "INSERT OR IGNORE INTO Employees (id, name, department, branch_id, organization_id, status) VALUES (1, 'Admin Staff', 'Operations', 1, 1, 'active')",
         []
     )?;
 
@@ -776,13 +797,13 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
        DUMMY DATA SEEDING (Restored per user request)
     */
     conn.execute(
-        "INSERT OR IGNORE INTO Employees (id, name, first_name, last_name, employee_code, department_id, branch_id, status) 
-         VALUES (101, 'Suman Shrestha', 'Suman', 'Shrestha', 'EMP-101', 1, 1, 'active')",
+        "INSERT OR IGNORE INTO Employees (id, name, first_name, last_name, employee_code, department_id, branch_id, organization_id, status) 
+         VALUES (101, 'Suman Shrestha', 'Suman', 'Shrestha', 'EMP-101', 1, 1, 1, 'active')",
         []
     )?;
     conn.execute(
-        "INSERT OR IGNORE INTO Employees (id, name, first_name, last_name, employee_code, department_id, branch_id, status) 
-         VALUES (102, 'Dilip Kumar', 'Dilip', 'Kumar', 'EMP-102', 2, 1, 'active')",
+        "INSERT OR IGNORE INTO Employees (id, name, first_name, last_name, employee_code, department_id, branch_id, organization_id, status) 
+         VALUES (102, 'Dilip Kumar', 'Dilip', 'Kumar', 'EMP-102', 2, 1, 1, 'active')",
         []
     )?;
 

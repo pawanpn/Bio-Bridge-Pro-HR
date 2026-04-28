@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
+import { useAuth } from '../context/AuthContext';
 import { 
   Users, UserCheck, UserMinus, Cloud, Clock, CalendarCheck, 
   DollarSign, TrendingUp, TrendingDown, ShoppingCart, Package, FileText, 
@@ -142,6 +143,7 @@ const ModuleSection: React.FC<{
 
 export const ERPDashboard: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [stats, setStats] = useState<ERPStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -155,14 +157,15 @@ export const ERPDashboard: React.FC = () => {
       if (!silent) setIsLoading(true);
       else setIsRefreshing(true);
       try {
+        const orgId = user?.organization_id;
         // Fetch real data from local database
         const [empResult, leaveResult, itemResult, projectResult, leadResult, dashStats] = await Promise.all([
-          invoke<any>('list_employees').catch(() => ({ data: [] })),
-          invoke<any>('list_leave_requests').catch(() => ({ data: [] })),
-          invoke<any[]>('list_items').catch(() => []),
-          invoke<any[]>('list_projects').catch(() => []),
-          invoke<any[]>('list_leads').catch(() => []),
-          invoke<any>('get_dashboard_stats').catch(() => null),
+          invoke<any>('list_employees', { organizationId: orgId }).catch(() => ({ data: [] })),
+          invoke<any>('list_leave_requests', { organizationId: orgId }).catch(() => ({ data: [] })),
+          invoke<any[]>('list_items', { organizationId: orgId }).catch(() => []),
+          invoke<any[]>('list_projects', { organizationId: orgId }).catch(() => []),
+          invoke<any[]>('list_leads', { organizationId: orgId }).catch(() => []),
+          invoke<any>('get_dashboard_stats', { organizationId: orgId }).catch(() => null),
         ]);
 
         // Parse employees
@@ -244,7 +247,7 @@ export const ERPDashboard: React.FC = () => {
     // Refresh silently every 5 minutes (no blink)
     const interval = setInterval(() => loadStats(true), 300000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user?.organization_id]);
 
   // Chart data
   const attendanceData = stats ? [

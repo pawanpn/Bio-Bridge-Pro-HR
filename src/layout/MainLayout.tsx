@@ -117,7 +117,7 @@ export const MainLayout: React.FC = () => {
   }, [location.pathname]);
 
   useEffect(() => {
-    invoke<any[]>('list_branches').then(setBranches).catch(console.error);
+    invoke<any[]>('list_branches', { organizationId: user?.organization_id }).then(setBranches).catch(console.error);
 
     // Set initial branch if user is branch-locked
     if (user?.branch_id) {

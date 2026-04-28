@@ -130,8 +130,8 @@ export const AttendanceManagement: React.FC = () => {
     setLoading(true);
     try {
       const [branchData, empResult, deviceData, gateData, localId] = await Promise.all([
-        invoke<any[]>('list_branches'),
-        invoke<any>('list_employees'),
+        invoke<any[]>('list_branches', { organizationId: user?.organization_id }),
+        invoke<any>('list_employees', { organizationId: user?.organization_id }),
         invoke<any[]>('list_all_devices', { branchId: selectedBranch }),
         invoke<any[]>('list_gates', { branchId: selectedBranch }),
         invoke<number | null>('get_local_sync_target'),

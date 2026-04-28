@@ -209,8 +209,8 @@ export const EmployeeManagement: React.FC = () => {
     try {
       console.log('[EmployeeManagement] Loading data...');
       const [empResult, branchData, deviceData, deptData, desigData] = await Promise.all([
-        invoke<any>('list_employees', { statusFilter: viewMode === 'deleted' ? 'deleted' : 'active' }),
-        invoke<any[]>('list_branches'),
+        invoke<any>('list_employees', { statusFilter: viewMode === 'deleted' ? 'deleted' : 'active', organizationId: user?.organization_id }),
+        invoke<any[]>('list_branches', { organizationId: user?.organization_id }),
         invoke<any[]>('list_all_devices'),
         invoke<any[]>('list_departments'),
         invoke<any[]>('list_designations'),

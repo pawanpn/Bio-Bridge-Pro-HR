@@ -81,6 +81,7 @@ pub async fn create_item(
 /// READ: Get all inventory items
 #[tauri::command]
 pub async fn list_items(
+    organization_id: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state
@@ -91,10 +92,18 @@ pub async fn list_items(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let mut stmt = conn.prepare(
+    let mut query = String::from(
         "SELECT id, item_code, name, description, category, quantity, unit_price, reorder_level, supplier, location, is_active, created_at
-         FROM Items WHERE is_active = 1 ORDER BY item_code"
-    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+         FROM Items WHERE is_active = 1"
+    );
+
+    if let Some(org_id) = organization_id {
+        query.push_str(&format!(" AND organization_id = {}", org_id));
+    }
+    query.push_str(" ORDER BY item_code");
+
+    let mut stmt = conn.prepare(&query)
+        .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let items: Vec<serde_json::Value> = stmt
         .query_map([], |row| {
@@ -248,6 +257,7 @@ pub async fn update_stock(
 /// GET INVENTORY STATS
 #[tauri::command]
 pub async fn get_inventory_stats(
+    organization_id: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -258,18 +268,20 @@ pub async fn get_inventory_stats(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
+    let org_filter = organization_id.map(|id| format!(" AND organization_id = {}", id)).unwrap_or_default();
+
     let total_items: i64 =
-        conn.query_row("SELECT COUNT(*) FROM Items WHERE is_active = 1", [], |r| {
+        conn.query_row(&format!("SELECT COUNT(*) FROM Items WHERE is_active = 1{}", org_filter), [], |r| {
             r.get(0)
         })?;
     let total_value: f64 = conn.query_row(
-        "SELECT COALESCE(SUM(quantity * unit_price), 0) FROM Items WHERE is_active = 1",
+        &format!("SELECT COALESCE(SUM(quantity * unit_price), 0) FROM Items WHERE is_active = 1{}", org_filter),
         [],
         |r| r.get(0),
     )?;
-    let low_stock: i64 = conn.query_row("SELECT COUNT(*) FROM Items WHERE quantity <= reorder_level AND quantity > 0 AND is_active = 1", [], |r| r.get(0))?;
+    let low_stock: i64 = conn.query_row(&format!("SELECT COUNT(*) FROM Items WHERE quantity <= reorder_level AND quantity > 0 AND is_active = 1{}", org_filter), [], |r| r.get(0))?;
     let out_of_stock: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM Items WHERE quantity = 0 AND is_active = 1",
+        &format!("SELECT COUNT(*) FROM Items WHERE quantity = 0 AND is_active = 1{}", org_filter),
         [],
         |r| r.get(0),
     )?;
@@ -727,6 +739,7 @@ pub async fn list_employees(
     branch_id: Option<String>,
     status_filter: Option<String>,
     _filters: Option<serde_json::Value>,
+    organization_id: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -769,6 +782,11 @@ pub async fn list_employees(
             query.push_str(&format!(" AND (e.branch_id = ?{} OR CAST(e.branch_id AS TEXT) = ?{})", param_index, param_index));
             params.push(Box::new(bid.clone()));
         }
+    }
+
+    if let Some(org_id) = organization_id {
+        query.push_str(" AND e.organization_id = ?");
+        params.push(Box::new(org_id));
     }
 
     query.push_str(" ORDER BY e.id DESC");
@@ -1274,6 +1292,7 @@ pub async fn create_leave_request(
 pub async fn list_leave_requests(
     employee_id: Option<i64>,
     status: Option<String>,
+    organization_id: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -1299,6 +1318,10 @@ pub async fn list_leave_requests(
     }
     if let Some(st) = status {
         query.push_str(&format!(" AND lr.status = '{}'", sanitize_input(&st)));
+    }
+
+    if let Some(org_id) = organization_id {
+        query.push_str(&format!(" AND lr.organization_id = {}", org_id));
     }
 
     query.push_str(" ORDER BY lr.applied_at DESC");
@@ -1891,6 +1914,7 @@ pub async fn create_project(
 
 #[tauri::command]
 pub async fn list_projects(
+    organization_id: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state
@@ -1901,10 +1925,18 @@ pub async fn list_projects(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let mut stmt = conn.prepare(
+    let mut query = String::from(
         "SELECT id, project_code, name, description, status, priority, start_date, end_date, budget, progress, team_size, created_at
-         FROM Projects ORDER BY created_at DESC"
-    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+         FROM Projects WHERE 1=1"
+    );
+
+    if let Some(org_id) = organization_id {
+        query.push_str(&format!(" AND organization_id = {}", org_id));
+    }
+    query.push_str(" ORDER BY created_at DESC");
+
+    let mut stmt = conn.prepare(&query)
+        .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let projects: Vec<serde_json::Value> = stmt
         .query_map([], |row| {
@@ -2128,6 +2160,7 @@ pub async fn create_lead(
 
 #[tauri::command]
 pub async fn list_leads(
+    organization_id: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state
@@ -2138,11 +2171,17 @@ pub async fn list_leads(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, lead_code, name, company, email, phone, status, source, value, created_at
-         FROM Leads ORDER BY created_at DESC",
-        )
+    let mut query = String::from(
+        "SELECT id, lead_code, name, company, email, phone, status, source, value, created_at
+         FROM Leads WHERE 1=1"
+    );
+
+    if let Some(org_id) = organization_id {
+        query.push_str(&format!(" AND organization_id = {}", org_id));
+    }
+    query.push_str(" ORDER BY created_at DESC");
+
+    let mut stmt = conn.prepare(&query)
         .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let leads: Vec<serde_json::Value> = stmt
@@ -2514,6 +2553,7 @@ fn get_employee_for_audit(
 /// GET DASHBOARD STATS
 #[tauri::command]
 pub async fn get_dashboard_stats(
+    organization_id: Option<i64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
     let db_guard = state
@@ -2524,17 +2564,19 @@ pub async fn get_dashboard_stats(
         .as_ref()
         .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
 
+    let org_filter = organization_id.map(|id| format!(" AND organization_id = {}", id)).unwrap_or_default();
+
     let total_staff: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM Employees WHERE (status IS NULL OR status != 'deleted')",
+        &format!("SELECT COUNT(*) FROM Employees WHERE (status IS NULL OR status != 'deleted'){}", org_filter),
         [],
         |r| r.get(0),
     )?;
 
     // Count distinct employees who have logged today using local time conversion logic
     let present_today: i64 = conn.query_row(
-        "SELECT COUNT(DISTINCT employee_id) FROM AttendanceLogs 
+        &format!("SELECT COUNT(DISTINCT employee_id) FROM AttendanceLogs 
          WHERE (CASE WHEN punch_method = 'Manual' OR device_id = 999 THEN date(timestamp)
-                     ELSE date(timestamp, 'localtime') END) = date('now', 'localtime')",
+                     ELSE date(timestamp, 'localtime') END) = date('now', 'localtime'){}", org_filter),
         [],
         |r| r.get(0)
     ).unwrap_or_else(|_| 0);
@@ -2546,16 +2588,18 @@ pub async fn get_dashboard_stats(
     };
 
     // Get present staff list for the side panel
-    let mut stmt = conn.prepare(
+    let present_sql = format!(
         "SELECT DISTINCT e.id, e.first_name || ' ' || e.last_name, 
                 CASE WHEN al.punch_method = 'Manual' OR al.device_id = 999 THEN strftime('%H:%M', al.timestamp)
                      ELSE strftime('%H:%M', al.timestamp, 'localtime') END as punch_time
          FROM AttendanceLogs al
          JOIN Employees e ON al.employee_id = e.id
          WHERE (CASE WHEN al.punch_method = 'Manual' OR al.device_id = 999 THEN date(al.timestamp)
-                     ELSE date(al.timestamp, 'localtime') END) = date('now', 'localtime')
-         ORDER BY punch_time DESC"
-    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+                     ELSE date(al.timestamp, 'localtime') END) = date('now', 'localtime'){}
+         ORDER BY punch_time DESC", org_filter
+    );
+    let mut stmt = conn.prepare(&present_sql)
+        .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let present_staff: Vec<serde_json::Value> = stmt
         .query_map([], |row| {
@@ -2570,16 +2614,18 @@ pub async fn get_dashboard_stats(
         .collect();
 
     // Get absent staff list
-    let mut stmt = conn.prepare(
+    let absent_sql = format!(
         "SELECT id, first_name || ' ' || last_name 
          FROM Employees 
-         WHERE status != 'deleted' 
+         WHERE status != 'deleted'{}
          AND id NOT IN (
              SELECT DISTINCT employee_id FROM AttendanceLogs 
              WHERE (CASE WHEN punch_method = 'Manual' OR device_id = 999 THEN date(timestamp)
-                         ELSE date(timestamp, 'localtime') END) = date('now', 'localtime')
-         )"
-    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+                         ELSE date(timestamp, 'localtime') END) = date('now', 'localtime'){}
+         )", org_filter, org_filter
+    );
+    let mut stmt = conn.prepare(&absent_sql)
+        .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let absent_staff: Vec<serde_json::Value> = stmt
         .query_map([], |row| {
@@ -2592,14 +2638,17 @@ pub async fn get_dashboard_stats(
         .filter_map(|r| r.ok())
         .collect();
 
-    // Get branch summary
-    let mut stmt = conn.prepare(
+    // Get branch summary (with org filter on Branches.org_id)
+    let branch_org_filter = organization_id.map(|id| format!(" WHERE b.org_id = {}", id)).unwrap_or_default();
+    let branch_sql = format!(
         "SELECT b.id, b.name, b.location,
                 (SELECT COUNT(*) FROM Employees e WHERE e.branch_id = b.id AND e.status != 'deleted') as emp_count,
                 (SELECT COUNT(*) FROM Gates g WHERE g.branch_id = b.id) as gate_count,
                 (SELECT COUNT(*) FROM Devices d WHERE d.branch_id = b.id) as dev_count
-         FROM Branches b"
-    ).map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
+         FROM Branches b{}", branch_org_filter
+    );
+    let mut stmt = conn.prepare(&branch_sql)
+        .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let branches: Vec<serde_json::Value> = stmt
         .query_map([], |row| {
@@ -2640,10 +2689,18 @@ pub async fn get_dashboard_stats(
 // ============================================================================
 
 #[tauri::command]
-pub async fn list_branches(state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
+pub async fn list_branches(organization_id: Option<i64>, state: tauri::State<'_, AppState>) -> Result<Vec<serde_json::Value>, AppError> {
     let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
     let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
-    let mut stmt = conn.prepare("SELECT id, name, location FROM Branches ORDER BY name")
+
+    let mut query = String::from("SELECT id, name, location FROM Branches WHERE 1=1");
+
+    if let Some(org_id) = organization_id {
+        query.push_str(&format!(" AND org_id = {}", org_id));
+    }
+    query.push_str(" ORDER BY name");
+
+    let mut stmt = conn.prepare(&query)
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     let branches = stmt.query_map([], |row| {
         Ok(serde_json::json!({ "id": row.get::<_, i64>(0)?, "name": row.get::<_, String>(1)?, "location": row.get::<_, Option<String>>(2)? }))

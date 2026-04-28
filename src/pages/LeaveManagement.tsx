@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { useAuth } from '../context/AuthContext';
 import {
   Check, X as XIcon, Plus, Trash2,
   Clock, AlertCircle, Filter, CalendarDays
@@ -54,6 +55,7 @@ const leaveTypeIcons: Record<string, string> = {
 };
 
 export const LeaveManagement: React.FC = () => {
+  const { user } = useAuth();
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [stats, setStats] = useState<LeaveStats>({ pending: 0, approvedToday: 0, currentlyOnLeave: 0 });
   const [leaveTypes, setLeaveTypes] = useState<string[]>([]);
@@ -74,10 +76,10 @@ export const LeaveManagement: React.FC = () => {
     setLoading(true);
     try {
       const [leavesData, statsData, typesData, empsData] = await Promise.all([
-        invoke<LeaveRequest[]>('list_leave_requests', { status: filterStatus }),
+        invoke<LeaveRequest[]>('list_leave_requests', { status: filterStatus, organizationId: user?.organization_id }),
         invoke<LeaveStats>('get_leave_stats'),
         invoke<string[]>('get_leave_types'),
-        invoke<{ id: number; name: string }[]>('list_employees'),
+        invoke<{ id: number; name: string }[]>('list_employees', { organizationId: user?.organization_id }),
       ]);
       setLeaves(leavesData || []);
       setStats(statsData);
