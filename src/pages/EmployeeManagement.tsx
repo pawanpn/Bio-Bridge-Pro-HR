@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '@/config/supabase';
@@ -8,7 +9,8 @@ import {
   Users, UserPlus, Search, Filter, Download, Upload,
   Edit2, Trash2, Eye, FileText, Calendar, MapPin, Phone, Mail,
   HardDrive, Loader2, AlertCircle, CheckCircle, Info,
-  Settings, User, Shield, Clock, FileStack, Smartphone, Fingerprint, MessageSquare, Plus, X, Key
+  Settings, User, Shield, Clock, FileStack, Smartphone, Fingerprint, MessageSquare, Plus, X, Key,
+  Briefcase, Building, IdCard
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -159,8 +161,22 @@ const emptyForm: EmployeeForm = {
   shift_end_time: '',
 };
 
+const Row: React.FC<{ l: string; v?: any; bool?: boolean; long?: boolean }> = ({ l, v, bool, long }) => {
+  const has = v !== undefined && v !== null && v !== '';
+  const display = bool ? (v ? 'Yes' : 'No') : (has ? String(v) : '—');
+  return (
+    <div className={`flex gap-2 ${long ? '' : 'justify-between'}`}>
+      <span className="text-muted-foreground flex-shrink-0">{l}:</span>
+      <span className={has ? 'font-medium text-right' : 'text-muted-foreground/40 italic text-right'}>
+        {display}{has && !bool ? <span className="ml-1 text-[10px] text-green-600 align-top">&#10003;</span> : ''}
+      </span>
+    </div>
+  );
+};
+
 export const EmployeeManagement: React.FC = () => {
   const { user, resetPassword } = useAuth();
+  const navigate = useNavigate();
   
   // State
   const [employees, setEmployees] = useState<any[]>([]);
@@ -175,6 +191,8 @@ export const EmployeeManagement: React.FC = () => {
   // Dialogs
   const [formDialog, setFormDialog] = useState({ open: false, editing: null as any });
   const [viewDialog, setViewDialog] = useState({ open: false, employee: null as any });
+  const [viewProfile, setViewProfile] = useState<any>(null);
+  const [viewLoading, setViewLoading] = useState(false);
   const [deleteDialog, setDeleteDialog] = useState({ open: false, employee: null as any });
   const [importDialog, setImportDialog] = useState({ open: false });
   const [orgSetupOpen, setOrgSetupOpen] = useState(false);
@@ -802,7 +820,16 @@ export const EmployeeManagement: React.FC = () => {
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => setViewDialog({ open: true, employee: emp })}>
+                        <Button variant="ghost" size="icon" onClick={async () => {
+                          setViewProfile(null);
+                          setViewLoading(true);
+                          setViewDialog({ open: true, employee: emp });
+                          try {
+                            const result: any = await invoke('get_employee', { employeeId: emp.id });
+                            setViewProfile(result?.data || result);
+                          } catch { setViewProfile(null); }
+                          finally { setViewLoading(false); }
+                        }}>
                           <Eye className="w-4 h-4" />
                         </Button>
                         {viewMode === 'setup' && (
@@ -1519,44 +1546,164 @@ export const EmployeeManagement: React.FC = () => {
 
       {/* View Employee Dialog */}
       <Dialog open={viewDialog.open} onOpenChange={(open) => !open && setViewDialog({ open: false, employee: null })}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Employee Details</DialogTitle>
+            <DialogTitle className="flex items-center justify-between">
+              <span>Employee Profile</span>
+              <Button variant="outline" size="sm" onClick={() => { setViewDialog({ open: false, employee: null }); navigate(`/employee/${viewDialog.employee?.id}`); }}>
+                Open Full Page
+              </Button>
+            </DialogTitle>
           </DialogHeader>
-          {viewDialog.employee && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-4 mb-6">
-                <div className="w-16 h-16 rounded-full bg-primary flex items-center justify-center text-white text-2xl font-bold">
-                  {viewDialog.employee.name?.charAt(0) || '?'}
+          {viewLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </div>
+          ) : viewProfile ? (
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="flex items-center gap-4 pb-4 border-b">
+                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center text-white text-2xl font-bold flex-shrink-0">
+                  {(viewProfile.first_name || viewProfile.name || '?').charAt(0)}
                 </div>
-                <div>
-                  <h3 className="text-xl font-bold">{viewDialog.employee.name}</h3>
-                  <p className="text-muted-foreground font-medium text-primary">Employee ID: {viewDialog.employee.employee_code || `#${viewDialog.employee.id}`}</p>
-                  <p className="text-xs text-muted-foreground font-mono mt-1">Attendance Device ID: {viewDialog.employee.biometric_id || 'Not Assigned'}</p>
+                <div className="flex-1">
+                  <h3 className="text-xl font-bold">{viewProfile.full_name || viewProfile.name || '—'}</h3>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-sm text-muted-foreground">
+                    <span>Code: <strong className="text-foreground">{viewProfile.employee_code || `#${viewProfile.id}`}</strong></span>
+                    {viewProfile.department_name && <span>Dept: <strong className="text-foreground">{viewProfile.department_name}</strong></span>}
+                    {viewProfile.branch_name && <span>Branch: <strong className="text-foreground">{viewProfile.branch_name}</strong></span>}
+                    <Badge variant={viewProfile.employment_status === 'Active' ? 'default' : 'secondary'} className="text-[11px]">{viewProfile.employment_status || 'Active'}</Badge>
+                    {viewProfile.biometric_id != null && <Badge variant="outline" className="text-[11px]">Device ID: {viewProfile.biometric_id}</Badge>}
+                  </div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Department</p>
-                  <p className="font-medium">{viewDialog.employee.department || '—'}</p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Personal */}
+                <div className="border rounded-lg p-4">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2"><User className="w-4 h-4 text-primary" />Personal</h4>
+                  <div className="space-y-2 text-sm">
+                    <Row l="DOB" v={viewProfile.date_of_birth} />
+                    <Row l="Gender" v={viewProfile.gender} />
+                    <Row l="Marital Status" v={viewProfile.marital_status} />
+                    <Row l="Nationality" v={viewProfile.nationality} />
+                    <Row l="Religion" v={viewProfile.religion} />
+                    <Row l="City" v={viewProfile.city} />
+                    <Row l="Postcode" v={viewProfile.postcode} />
+                    <Row l="Local Name" v={viewProfile.local_name} />
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Branch</p>
-                  <p className="font-medium">{viewDialog.employee.branch_name || '—'}</p>
+
+                {/* Contact */}
+                <div className="border rounded-lg p-4">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2"><Phone className="w-4 h-4 text-primary" />Contact</h4>
+                  <div className="space-y-2 text-sm">
+                    <Row l="Email" v={viewProfile.personal_email} />
+                    <Row l="Phone" v={viewProfile.personal_phone} />
+                    <Row l="Contact Tel" v={viewProfile.contact_tel} />
+                    <Row l="Office Tel" v={viewProfile.office_tel} />
+                    <Row l="Current Address" v={viewProfile.current_address} long />
+                    <Row l="Permanent Address" v={viewProfile.permanent_address} long />
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Status</p>
-                  <Badge>{viewDialog.employee.status || 'Active'}</Badge>
+
+                {/* Identification */}
+                <div className="border rounded-lg p-4">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2"><IdCard className="w-4 h-4 text-primary" />ID & Licenses</h4>
+                  <div className="space-y-2 text-sm">
+                    <Row l="Citizenship No" v={viewProfile.citizenship_number} />
+                    <Row l="PAN Number" v={viewProfile.pan_number} />
+                    <Row l="Passport No" v={viewProfile.passport_no} />
+                    <Row l="National ID" v={viewProfile.national_id} />
+                    <Row l="Motorcycle Lic" v={viewProfile.motorcycle_license} />
+                    <Row l="Automobile Lic" v={viewProfile.automobile_license} />
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Joining Date</p>
-                  <p className="font-medium">{viewDialog.employee.date_of_joining || '—'}</p>
+
+                {/* Employment */}
+                <div className="border rounded-lg p-4">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2"><Briefcase className="w-4 h-4 text-primary" />Employment</h4>
+                  <div className="space-y-2 text-sm">
+                    <Row l="Branch" v={viewProfile.branch_name} />
+                    <Row l="Department" v={viewProfile.department_name} />
+                    <Row l="Designation" v={viewProfile.designation_name} />
+                    <Row l="Joining Date" v={viewProfile.date_of_joining} />
+                    <Row l="Type" v={viewProfile.employment_type} />
+                    <Row l="Workflow Role" v={viewProfile.workflow_role} />
+                  </div>
+                </div>
+
+                {/* Bank & Emergency */}
+                <div className="border rounded-lg p-4">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2"><Building className="w-4 h-4 text-primary" />Bank</h4>
+                  <div className="space-y-2 text-sm">
+                    <Row l="Bank Name" v={viewProfile.bank_name} />
+                    <Row l="Account No" v={viewProfile.account_number} />
+                  </div>
+                  <h4 className="font-semibold text-sm mb-3 mt-4 flex items-center gap-2"><AlertCircle className="w-4 h-4 text-red-500" />Emergency</h4>
+                  <div className="space-y-2 text-sm">
+                    <Row l="Name" v={viewProfile.emergency_contact_name} />
+                    <Row l="Phone" v={viewProfile.emergency_contact_phone} />
+                    <Row l="Relation" v={viewProfile.emergency_contact_relation} />
+                  </div>
+                </div>
+
+                {/* Device */}
+                <div className="border rounded-lg p-4">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2"><Fingerprint className="w-4 h-4 text-primary" />Device</h4>
+                  <div className="space-y-2 text-sm">
+                    <Row l="Verification" v={viewProfile.verification_mode ? {FP:'Fingerprint', Face:'Face', PW:'Password', RF:'RFID Card', 'FP/PW/RF':'FP/PW/RF', 'Face/FP/PW':'Face/FP/PW'}[viewProfile.verification_mode] || viewProfile.verification_mode : null} />
+                    <Row l="Privilege" v={viewProfile.device_privilege} />
+                    <Row l="Password" v={viewProfile.device_password} />
+                    <Row l="Card No" v={viewProfile.card_no} />
+                    <Row l="Biometric ID" v={viewProfile.biometric_id} />
+                  </div>
+                  <h4 className="font-semibold text-sm mb-3 mt-4 flex items-center gap-2"><Clock className="w-4 h-4 text-primary" />Attendance Config</h4>
+                  <div className="space-y-2 text-sm">
+                    <Row l="Attendance" v={viewProfile.enable_attendance} bool />
+                    <Row l="Holiday" v={viewProfile.enable_holiday} bool />
+                    <Row l="Outdoor Mgmt" v={viewProfile.outdoor_management} bool />
+                    <Row l="Shift Start" v={viewProfile.shift_start_time} />
+                    <Row l="Shift End" v={viewProfile.shift_end_time} />
+                  </div>
+                </div>
+
+                {/* Mobile & Notifications */}
+                <div className="border rounded-lg p-4">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2"><Smartphone className="w-4 h-4 text-primary" />Mobile</h4>
+                  <div className="space-y-2 text-sm">
+                    <Row l="Self Service" v={viewProfile.enable_self_service} bool />
+                    <Row l="Mobile Access" v={viewProfile.enable_mobile_access} bool />
+                    <Row l="Mobile Punch" v={viewProfile.mobile_punch} bool />
+                    <Row l="App Role" v={viewProfile.app_role} />
+                  </div>
+                  <h4 className="font-semibold text-sm mb-3 mt-4 flex items-center gap-2"><MessageSquare className="w-4 h-4 text-green-600" />WhatsApp</h4>
+                  <div className="space-y-2 text-sm">
+                    <Row l="Alert" v={viewProfile.whatsapp_alert} bool />
+                    <Row l="Exception" v={viewProfile.whatsapp_exception} bool />
+                    <Row l="Punch" v={viewProfile.whatsapp_punch} bool />
+                    <Row l="Sup. Mobile" v={viewProfile.supervisor_mobile} />
+                  </div>
+                </div>
+
+                {/* Timestamps */}
+                <div className="border rounded-lg p-4">
+                  <h4 className="font-semibold text-sm mb-3 flex items-center gap-2"><Clock className="w-4 h-4 text-primary" />Record Info</h4>
+                  <div className="space-y-2 text-sm">
+                    <Row l="Created" v={viewProfile.created_at} long />
+                    <Row l="Updated" v={viewProfile.updated_at} long />
+                  </div>
                 </div>
               </div>
             </div>
+          ) : (
+            <div className="text-center py-10 text-muted-foreground">
+              <AlertCircle className="w-10 h-10 mx-auto mb-2" />
+              <p>Failed to load employee profile.</p>
+            </div>
           )}
           <DialogFooter>
-            <Button onClick={() => setViewDialog({ open: false, employee: null })}>Close</Button>
+            <Button variant="outline" onClick={() => setViewDialog({ open: false, employee: null })}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

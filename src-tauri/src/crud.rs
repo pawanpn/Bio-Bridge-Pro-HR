@@ -631,7 +631,11 @@ pub async fn get_employee(
                 e.nationality, e.verification_mode, e.device_privilege, e.device_password, e.card_no,
                 e.bio_photo, e.enable_attendance, e.enable_holiday, e.outdoor_management, e.workflow_role,
                 e.mobile_punch, e.app_role, e.whatsapp_alert, e.whatsapp_exception, e.whatsapp_punch,
-                e.supervisor_mobile, e.biometric_id
+                e.supervisor_mobile, e.biometric_id,
+                e.marital_status, e.emergency_contact_name, e.emergency_contact_phone, e.emergency_contact_relation,
+                e.citizenship_number, e.pan_number, e.permanent_address, e.account_number,
+                e.reporting_manager_id, e.shift_start_time, e.shift_end_time,
+                e.created_at, e.updated_at
         FROM Employees e
         LEFT JOIN Departments d ON e.department_id = d.id
         LEFT JOIN Designations des ON e.designation_id = des.id
@@ -641,18 +645,19 @@ pub async fn get_employee(
         .map_err(|e| AppError::DatabaseError(format!("Prepare failed: {}", e)))?;
 
     let employee = stmt.query_row(params![employee_id], |row| {
+        let first: String = row.get::<_, Option<String>>(2)?.unwrap_or_default();
+        let middle: String = row.get::<_, Option<String>>(3)?.unwrap_or_default();
+        let last: String = row.get::<_, Option<String>>(4)?.unwrap_or_default();
+        let full_name = format!("{} {} {}", first, middle, last).trim().replace("  ", " ").to_string();
+        let eid = row.get::<_, i64>(0)?;
+
         Ok(serde_json::json!({
-            "id": row.get::<_, i64>(0)?,
-            "employee_code": row.get::<_, String>(1)?,
-            "first_name": row.get::<_, String>(2)?,
+            "id": eid,
+            "employee_code": row.get::<_, Option<String>>(1)?.unwrap_or_else(|| format!("BB-{:04}", eid)),
+            "first_name": first,
             "middle_name": row.get::<_, Option<String>>(3)?,
-            "last_name": row.get::<_, String>(4)?,
-            "full_name": format!(
-                "{} {} {}",
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                row.get::<_, String>(4)?
-            ).trim().to_string(),
+            "last_name": last,
+            "full_name": full_name,
             "date_of_birth": row.get::<_, Option<String>>(5)?,
             "gender": row.get::<_, Option<String>>(6)?,
             "personal_email": decrypt_data(&row.get::<_, Option<String>>(7)?.unwrap_or_default()).ok(),
@@ -662,14 +667,14 @@ pub async fn get_employee(
             "designation_id": row.get::<_, Option<i64>>(11)?,
             "branch_id": row.get::<_, Option<i64>>(12)?,
             "date_of_joining": row.get::<_, Option<String>>(13)?,
-            "employment_type": row.get::<_, String>(14)?,
-            "employment_status": row.get::<_, String>(15)?,
+            "employment_type": row.get::<_, Option<String>>(14)?.unwrap_or_else(|| "Full-time".to_string()),
+            "employment_status": row.get::<_, Option<String>>(15)?.unwrap_or_else(|| "Active".to_string()),
             "bank_name": row.get::<_, Option<String>>(16)?,
             "department_name": row.get::<_, Option<String>>(17)?,
             "designation_name": row.get::<_, Option<String>>(18)?,
             "branch_name": row.get::<_, Option<String>>(19)?,
-            "area_id": row.get::<_, Option<String>>(20)?,
-            "location_id": row.get::<_, Option<String>>(21)?,
+            "area_id": row.get::<_, Option<i64>>(20)?.map(|v| v.to_string()),
+            "location_id": row.get::<_, Option<i64>>(21)?.map(|v| v.to_string()),
             "photo": row.get::<_, Option<String>>(22)?,
             "enable_self_service": row.get::<_, Option<i32>>(23)?.unwrap_or(0) != 0,
             "enable_mobile_access": row.get::<_, Option<i32>>(24)?.unwrap_or(0) != 0,
@@ -684,8 +689,22 @@ pub async fn get_employee(
             "postcode": row.get::<_, Option<String>>(33)?,
             "passport_no": row.get::<_, Option<String>>(34)?,
             "nationality": row.get::<_, Option<String>>(35)?,
-            "verification_mode": row.get::<_, Option<String>>(36)?,
-            "device_privilege": row.get::<_, Option<String>>(37)?,
+            "verification_mode": row.get::<_, Option<i32>>(36)?.map(|v| match v {
+                1 => "FP".to_string(),
+                2 => "Face".to_string(),
+                3 => "PW".to_string(),
+                4 => "RF".to_string(),
+                5 => "FP/PW/RF".to_string(),
+                6 => "Face/FP/PW".to_string(),
+                _ => v.to_string()
+            }),
+            "device_privilege": row.get::<_, Option<i32>>(37)?.map(|v| match v {
+                0 => "Normal User".to_string(),
+                1 => "Registrar".to_string(),
+                2 => "Admin".to_string(),
+                3 => "Super Admin".to_string(),
+                _ => v.to_string()
+            }),
             "device_password": row.get::<_, Option<String>>(38)?,
             "card_no": row.get::<_, Option<String>>(39)?,
             "bio_photo": row.get::<_, Option<String>>(40)?,
@@ -699,6 +718,20 @@ pub async fn get_employee(
             "whatsapp_exception": row.get::<_, Option<i32>>(48)?.unwrap_or(0) != 0,
             "whatsapp_punch": row.get::<_, Option<i32>>(49)?.unwrap_or(0) != 0,
             "supervisor_mobile": row.get::<_, Option<String>>(50)?,
+            "biometric_id": row.get::<_, Option<i32>>(51)?,
+            "marital_status": row.get::<_, Option<String>>(52)?,
+            "emergency_contact_name": row.get::<_, Option<String>>(53)?,
+            "emergency_contact_phone": row.get::<_, Option<String>>(54)?,
+            "emergency_contact_relation": row.get::<_, Option<String>>(55)?,
+            "citizenship_number": row.get::<_, Option<String>>(56)?,
+            "pan_number": row.get::<_, Option<String>>(57)?,
+            "permanent_address": row.get::<_, Option<String>>(58)?,
+            "account_number": row.get::<_, Option<String>>(59)?,
+            "reporting_manager_id": row.get::<_, Option<i64>>(60)?,
+            "shift_start_time": row.get::<_, Option<String>>(61)?,
+            "shift_end_time": row.get::<_, Option<String>>(62)?,
+            "created_at": row.get::<_, Option<String>>(63)?,
+            "updated_at": row.get::<_, Option<String>>(64)?,
         }))
     }).optional()
     .map_err(|e| AppError::DatabaseError(format!("Query failed: {}", e)))?;
