@@ -14,7 +14,7 @@ pub struct UserInfo {
     pub name: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub enum DeviceBrand {
     ZKTeco,
     Hikvision,
