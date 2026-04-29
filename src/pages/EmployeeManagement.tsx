@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '@/config/supabase';
 import { Switch } from '@/components/ui/switch';
@@ -188,8 +189,26 @@ export const EmployeeManagement: React.FC = () => {
   // Form state
   const [formData, setFormData] = useState<EmployeeForm>(emptyForm);
   const [formStep, setFormStep] = useState(1);
-  const [formStatus, setFormStatus] = useState('');
   const [debugInfo, setDebugInfo] = useState<any>(null);
+  const loadingToastRef = useRef<string | null>(null);
+
+  const notify = (msg: string) => {
+    if (loadingToastRef.current) {
+      toast.dismiss(loadingToastRef.current);
+      loadingToastRef.current = null;
+    }
+    if (!msg) return;
+    const clean = msg.replace(/^[✅❌🔄⚠️]/u, '').trim();
+    if (msg.startsWith('❌')) {
+      toast.error(clean, { duration: 6000 });
+    } else if (msg.startsWith('✅')) {
+      toast.success(clean);
+    } else if (msg.startsWith('🔄')) {
+      loadingToastRef.current = toast.loading(clean);
+    } else {
+      toast(clean);
+    }
+  };
 
   // Load data
   useEffect(() => {
@@ -314,14 +333,14 @@ export const EmployeeManagement: React.FC = () => {
 
     checkLimit().then(limitMsg => {
       if (limitMsg) {
-        setFormStatus(`❌ ${limitMsg}`);
+        notify(`❌ ${limitMsg}`);
         return;
       }
       const maxId = employees.reduce((max, emp) => Math.max(max, parseInt(emp.id) || 0), 0);
       const nextCode = `BB-${String(maxId + 1).padStart(4, '0')}`;
       setFormData({ ...emptyForm, employee_code: nextCode });
       setFormStep(1);
-      setFormStatus('');
+      notify('');
       setFormDialog({ open: true, editing: null });
     });
   };
@@ -332,17 +351,17 @@ export const EmployeeManagement: React.FC = () => {
       ...emp,
     });
     setFormStep(1);
-    setFormStatus('');
+    notify('');
     setFormDialog({ open: true, editing: emp });
   };
 
   const handleSaveEmployee = async () => {
     if (!formData.first_name || !formData.last_name || !formData.employee_code) {
-      setFormStatus('❌ First name, last name, and employee code are required');
+      notify('❌ First name, last name, and employee code are required');
       return;
     }
 
-    setFormStatus('');
+    notify('');
     try {
       // Build full request with all fields from the form
       const request = {
@@ -360,17 +379,17 @@ export const EmployeeManagement: React.FC = () => {
         citizenship_number: formData.citizenship_number || undefined,
         pan_number: formData.pan_number || undefined,
         branch_id: formData.branch_id ? String(formData.branch_id) : undefined,
-        department_id: formData.department_id || undefined,
-        designation_id: formData.designation_id || undefined,
+        department_id: formData.department_id ? String(formData.department_id) : undefined,
+        designation_id: formData.designation_id ? String(formData.designation_id) : undefined,
         employment_type: formData.employment_type || undefined,
         employment_status: formData.employment_status || 'Active',
         date_of_joining: formData.date_of_joining || undefined,
-        reporting_manager_id: formData.reporting_manager_id || undefined,
+        reporting_manager_id: formData.reporting_manager_id ? String(formData.reporting_manager_id) : undefined,
         bank_name: formData.bank_name || undefined,
         account_number: formData.account_number || undefined,
         emergency_contact_relation: formData.emergency_contact_relation || undefined,
-        area_id: formData.area_id || undefined,
-        location_id: formData.location_id || undefined,
+        area_id: formData.area_id ? String(formData.area_id) : undefined,
+        location_id: formData.location_id ? String(formData.location_id) : undefined,
         photo: formData.photo || undefined,
         enable_self_service: formData.enable_self_service,
         enable_mobile_access: formData.enable_mobile_access,
@@ -400,7 +419,7 @@ export const EmployeeManagement: React.FC = () => {
         whatsapp_exception: formData.whatsapp_exception,
         whatsapp_punch: formData.whatsapp_punch,
         supervisor_mobile: formData.supervisor_mobile || undefined,
-        biometric_id: formData.biometric_id ? parseInt(String(formData.biometric_id)) : undefined,
+        biometric_id: formData.biometric_id != null && formData.biometric_id !== '' ? parseInt(String(formData.biometric_id)) : undefined,
         shift_start_time: formData.shift_start_time || undefined,
         shift_end_time: formData.shift_end_time || undefined,
       };
@@ -418,86 +437,95 @@ export const EmployeeManagement: React.FC = () => {
         savedEmployeeId = result?.employee_id || null;
       }
 
-      setFormStatus('✅ Employee saved successfully!');
+      notify('✅ Employee saved successfully!');
       loadData();
 
       // Auto-sync to device if employee has biometric_id and devices exist
-      const savedBiometricId = formData.biometric_id ? parseInt(String(formData.biometric_id)) : undefined;
+      const savedBiometricId = formData.biometric_id != null && formData.biometric_id !== ''
+        ? parseInt(String(formData.biometric_id))
+        : null;
       const targetDeviceId = devices.length > 0
         ? (parseInt(selectedDeviceId) || devices.find((d: any) => d.is_default)?.id || devices[0].id)
         : null;
 
-      if (savedBiometricId && targetDeviceId && savedEmployeeId) {
+      if (savedBiometricId != null && targetDeviceId && savedEmployeeId) {
         try {
+          notify('🔄 Syncing to device...');
           await invoke('push_employee_to_device', {
             deviceId: targetDeviceId,
             employeeId: savedEmployeeId,
           });
-          setFormStatus('✅ Employee saved and synced to device!');
+          notify('✅ Employee saved and synced to device!');
         } catch (syncErr: any) {
           console.warn('Device sync failed:', syncErr);
-          setFormStatus('✅ Employee saved! (Device sync failed: ' + (syncErr?.message || 'check connection') + ')');
+          notify('✅ Employee saved! (Device sync failed: ' + (syncErr?.message || 'check connection') + ')');
         }
+      } else if (savedBiometricId == null) {
+        notify('✅ Employee saved! (No biometric ID set, skipped device sync)');
+      } else if (!devices.length) {
+        notify('✅ Employee saved! (No devices available, skipped sync)');
       }
 
       setTimeout(() => {
         setFormDialog({ open: false, editing: null });
       }, 1500);
     } catch (error: any) {
-      setFormStatus('❌ Failed to save: ' + (error?.message || error));
+      notify('❌ Failed to save: ' + (error?.message || error));
     }
   };
 
   const handleSyncToDevice = async () => {
-    if (!formDialog.editing || !formData.biometric_id) {
-      setFormStatus('❌ Biometric ID is required to sync to device');
+    const bioId = formData.biometric_id != null && formData.biometric_id !== '' ? parseInt(String(formData.biometric_id)) : null;
+    if (!formDialog.editing || bioId == null) {
+      notify('❌ Biometric ID is required to sync to device');
       return;
     }
 
     if (devices.length === 0) {
-      setFormStatus('❌ No devices available to sync');
+      notify('❌ No devices available to sync');
       return;
     }
 
     setLoading(true);
-    setFormStatus('🔄 Syncing user to device...');
+    notify('🔄 Syncing user to device...');
     try {
       await invoke('push_employee_to_device', {
         deviceId: parseInt(selectedDeviceId) || devices.find((d: any) => d.is_default)?.id || devices[0].id,
         employeeId: formDialog.editing.id,
       });
-      setFormStatus('✅ Employee name synced to device successfully!');
+      notify('✅ Employee name synced to device successfully!');
     } catch (error: any) {
       console.error('Sync error:', error);
-      setFormStatus('❌ Sync failed: ' + (error?.message || error));
+      notify('❌ Sync failed: ' + (error?.message || error));
     } finally {
       setLoading(false);
     }
   };
 
   const handlePullBiometric = async () => {
-    if (!formDialog.editing || !formData.biometric_id) {
-      setFormStatus('❌ Biometric ID is required to pull data');
+    const bioId = formData.biometric_id != null && formData.biometric_id !== '' ? parseInt(String(formData.biometric_id)) : null;
+    if (!formDialog.editing || bioId == null) {
+      notify('❌ Biometric ID is required to pull data');
       return;
     }
 
     if (devices.length === 0) {
-      setFormStatus('❌ No devices available');
+      notify('❌ No devices available');
       return;
     }
 
     setLoading(true);
-    setFormStatus('🔄 Pulling biometric from device...');
+    notify('🔄 Pulling biometric from device...');
     try {
       const data = await invoke('pull_employee_biometric', {
         deviceId: parseInt(selectedDeviceId) || devices.find((d: any) => d.is_default)?.id || devices[0].id,
         employeeId: formDialog.editing.id,
       });
       console.log('Pulled biometric data:', data);
-      setFormStatus('✅ Biometric pulled successfully! (Verified ' + (Array.isArray(data) ? data.length : 0) + ' templates)');
+      notify('✅ Biometric pulled successfully! (Verified ' + (Array.isArray(data) ? data.length : 0) + ' templates)');
     } catch (error: any) {
       console.error('Pull error:', error);
-      setFormStatus('❌ Pull failed: ' + (error?.message || error));
+      notify('❌ Pull failed: ' + (error?.message || error));
     } finally {
       setLoading(false);
     }
@@ -879,14 +907,6 @@ export const EmployeeManagement: React.FC = () => {
 
             {/* Main Form Content */}
             <div className="flex-1 overflow-y-auto p-8">
-              {formStatus && (
-                <div className={`mb-6 p-4 rounded-lg flex items-center gap-3 ${
-                  formStatus.includes('❌') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'
-                }`}>
-                  {formStatus.includes('❌') ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
-                  <p className="text-sm font-medium">{formStatus}</p>
-                </div>
-              )}
 
               {/* Section 1: Profile */}
               {formStep === 1 && (
