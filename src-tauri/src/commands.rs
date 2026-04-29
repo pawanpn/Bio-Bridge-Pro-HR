@@ -1,5 +1,5 @@
 use crate::errors::AppError;
-use crate::hardware::{sync_device, test_device, push_user_info, pull_user_biometric};
+use crate::hardware::{sync_device, test_device, push_user_info, pull_user_biometric, get_device_user_count as hw_get_device_user_count, enroll_user_on_device};
 use crate::models::DeviceBrand;
 use crate::sync_service;
 use crate::AppState;
@@ -899,4 +899,104 @@ pub async fn pull_employee_biometric(
     ).await?;
 
     Ok(bio_data)
+}
+
+/// Query device for user count, max ID, next available ID
+#[tauri::command]
+pub async fn get_device_user_count(
+    device_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let (ip, port, comm_key, machine_number, brand) = {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        let (ip, port, comm_key, machine_number, brand_str) = conn.query_row(
+            "SELECT ip_address, port, comm_key, machine_number, brand FROM Devices WHERE id = ?1",
+            params![device_id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i32>(1)? as u16, r.get::<_, i32>(2)?, r.get::<_, i32>(3)?, r.get::<_, String>(4)?))
+        ).map_err(|e| AppError::DatabaseError(format!("Device not found: {}", e)))?;
+
+        let brand = match brand_str.as_str() {
+            "ZKTeco" => DeviceBrand::ZKTeco,
+            "Hikvision" => DeviceBrand::Hikvision,
+            _ => DeviceBrand::Unknown,
+        };
+        (ip, port, comm_key, machine_number, brand)
+    };
+
+    hw_get_device_user_count(&ip, port, comm_key, machine_number, brand).await
+}
+
+/// Enroll (push) employee to device and prepare for fingerprint enrollment
+#[tauri::command]
+pub async fn enroll_fingerprint_on_device(
+    device_id: i64,
+    employee_id: i64,
+    auto_assign_id: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    // Phase 1: Fetch all data from DB, drop guard before any await
+    let (ip, port, comm_key, machine_number, brand, mut biometric_id, first, last, card_no, privilege) = {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        let (ip, port, comm_key, machine_number, brand_str) = conn.query_row(
+            "SELECT ip_address, port, comm_key, machine_number, brand FROM Devices WHERE id = ?1",
+            params![device_id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i32>(1)? as u16, r.get::<_, i32>(2)?, r.get::<_, i32>(3)?, r.get::<_, String>(4)?))
+        ).map_err(|e| AppError::DatabaseError(format!("Device not found: {}", e)))?;
+
+        let brand = match brand_str.as_str() {
+            "ZKTeco" => DeviceBrand::ZKTeco,
+            "Hikvision" => DeviceBrand::Hikvision,
+            _ => DeviceBrand::Unknown,
+        };
+
+        let (bid, first_name, last_name, card, privl) = conn.query_row(
+            "SELECT biometric_id, first_name, last_name, card_no, device_privilege FROM Employees WHERE id = ?1",
+            params![employee_id],
+            |r| Ok((r.get::<_, Option<i32>>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, Option<String>>(3)?, r.get::<_, Option<String>>(4)?))
+        ).map_err(|e| AppError::DatabaseError(format!("Employee not found: {}", e)))?;
+
+        (ip, port, comm_key, machine_number, brand, bid, first_name, last_name, card, privl)
+    };
+
+    // Phase 2: Auto-assign next available ID if needed (async device query)
+    if biometric_id.is_none() && auto_assign_id {
+        match hw_get_device_user_count(&ip, port, comm_key, machine_number, brand.clone()).await {
+            Ok(result) => {
+                let next_id = result.get("nextAvailableId").and_then(|v| v.as_i64()).unwrap_or(1) as i32;
+                biometric_id = Some(next_id);
+
+                let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+                let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+                conn.execute("UPDATE Employees SET biometric_id = ?1, updated_at = datetime('now') WHERE id = ?2",
+                    params![next_id, employee_id],
+                ).map_err(|e| AppError::DatabaseError(format!("Failed to update biometric_id: {}", e)))?;
+            }
+            Err(_) => {
+                biometric_id = Some(1);
+            }
+        }
+    }
+
+    let bio_id = biometric_id.ok_or_else(|| AppError::ValidationError("No biometric ID. Enable auto-assign or enter one manually.".into()))?;
+    let full_name = format!("{} {}", first, last).trim().to_string();
+    let role = match privilege.as_deref() {
+        Some("Normal User") => 0,
+        Some("Registrar") => 1,
+        Some("Admin") => 2,
+        Some("Super Admin") => 3,
+        _ => 0
+    };
+
+    // Phase 3: Push to device
+    enroll_user_on_device(&ip, port, comm_key, machine_number, brand, bio_id, &full_name, role, &card_no.unwrap_or_default()).await?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "biometric_id": bio_id,
+        "message": format!("User {} ({}) pushed to device. Go to device and enroll fingerprint.", bio_id, full_name)
+    }))
 }

@@ -24,6 +24,8 @@ pub trait DeviceDriver: Send + Sync {
     async fn listen_realtime(&self, ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError>;
     async fn push_user_info(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32, user_id: i32, name: &str, role: i32, card_no: &str) -> Result<(), AppError>;
     async fn pull_user_biometric(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32, user_id: i32) -> Result<serde_json::Value, AppError>;
+    async fn get_device_user_count(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32) -> Result<serde_json::Value, AppError>;
+    async fn enroll_user_on_device(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32, user_id: i32, name: &str, role: i32, card_no: &str) -> Result<(), AppError>;
     fn brand_name(&self) -> &'static str;
 }
 
@@ -123,4 +125,16 @@ pub async fn push_user_info(ip: &str, port: u16, comm_key: i32, machine_number: 
 pub async fn pull_user_biometric(ip: &str, port: u16, comm_key: i32, machine_number: i32, brand: DeviceBrand, user_id: i32) -> Result<serde_json::Value, AppError> {
     let driver = get_driver(&brand)?;
     driver.pull_user_biometric(ip, port, comm_key, machine_number, user_id).await
+}
+
+/// Public device user count facade: returns total users, max ID, next available ID
+pub async fn get_device_user_count(ip: &str, port: u16, comm_key: i32, machine_number: i32, brand: DeviceBrand) -> Result<serde_json::Value, AppError> {
+    let driver = get_driver(&brand)?;
+    driver.get_device_user_count(ip, port, comm_key, machine_number).await
+}
+
+/// Public enroll facade: sets user on device and prepares for fingerprint enrollment
+pub async fn enroll_user_on_device(ip: &str, port: u16, comm_key: i32, machine_number: i32, brand: DeviceBrand, user_id: i32, name: &str, role: i32, card_no: &str) -> Result<(), AppError> {
+    let driver = get_driver(&brand)?;
+    driver.enroll_user_on_device(ip, port, comm_key, machine_number, user_id, name, role, card_no).await
 }

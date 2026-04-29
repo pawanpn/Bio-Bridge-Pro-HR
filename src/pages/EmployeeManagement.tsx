@@ -190,6 +190,16 @@ export const EmployeeManagement: React.FC = () => {
   const [formData, setFormData] = useState<EmployeeForm>(emptyForm);
   const [formStep, setFormStep] = useState(1);
   const [formStatus, setFormStatus] = useState('');
+
+  useEffect(() => {
+    if (!formStatus) return;
+    const timeout = setTimeout(() => setFormStatus(''), formStatus.includes('✅') ? 4000 : 8000);
+    return () => clearTimeout(timeout);
+  }, [formStatus]);
+
+  useEffect(() => {
+    if (!formDialog.open) setFormStatus('');
+  }, [formDialog.open]);
   const [debugInfo, setDebugInfo] = useState<any>(null);
 
   // Load data
@@ -478,6 +488,56 @@ export const EmployeeManagement: React.FC = () => {
     } catch (error: any) {
       console.error('Pull error:', error);
       setFormStatus('❌ Pull failed: ' + (error?.message || error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAutoAssignDeviceId = async () => {
+    if (devices.length === 0) {
+      setFormStatus('❌ No devices available. Add a device first.');
+      return;
+    }
+    setFormStatus('🔄 Querying device for next available ID...');
+    try {
+      const deviceId = parseInt(selectedDeviceId) || devices[0].id;
+      const result = await invoke<any>('get_device_user_count', { deviceId });
+      const nextId = result?.nextAvailableId || 1;
+      setFormData({ ...formData, biometric_id: String(nextId) });
+      setFormStatus(`✅ Device ID #${nextId} assigned (next available on device)`);
+    } catch (error: any) {
+      console.error('Auto-assign error:', error);
+      setFormStatus('❌ Failed: ' + (error?.message || error));
+    }
+  };
+
+  const handleEnrollFingerprint = async () => {
+    if (!formDialog.editing) {
+      setFormStatus('❌ Save employee first before enrolling.');
+      return;
+    }
+    if (devices.length === 0) {
+      setFormStatus('❌ No devices available. Add a device first.');
+      return;
+    }
+    const autoAssign = !formData.biometric_id;
+
+    setLoading(true);
+    setFormStatus('🔄 Pushing user to device...');
+    try {
+      const deviceId = parseInt(selectedDeviceId) || devices[0].id;
+      const result = await invoke<any>('enroll_fingerprint_on_device', {
+        deviceId,
+        employeeId: formDialog.editing.id,
+        autoAssignId: autoAssign,
+      });
+      if (result?.biometric_id) {
+        setFormData({ ...formData, biometric_id: String(result.biometric_id) });
+      }
+      setFormStatus('✅ ' + (result?.message || 'User pushed to device. Go to the device and enroll fingerprint now.'));
+    } catch (error: any) {
+      console.error('Enroll error:', error);
+      setFormStatus('❌ Enroll failed: ' + (error?.message || error));
     } finally {
       setLoading(false);
     }
@@ -829,6 +889,19 @@ export const EmployeeManagement: React.FC = () => {
             </div>
           </DialogHeader>
 
+          {formStatus && (
+            <div className={`shrink-0 px-6 py-3 flex items-center gap-3 border-b text-sm font-medium ${
+              formStatus.includes('❌') ? 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:border-red-800 dark:text-red-400' :
+              formStatus.includes('🔄') ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-400' :
+              'bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400'
+            }`}>
+              {formStatus.includes('❌') ? <AlertCircle className="w-5 h-5 shrink-0" /> : 
+               formStatus.includes('🔄') ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> :
+               <CheckCircle className="w-5 h-5 shrink-0" />}
+              <span>{formStatus}</span>
+            </div>
+          )}
+
           <div className="flex flex-1 overflow-hidden">
             {/* Sidebar Navigation */}
             <div className="w-64 border-r bg-muted/30 overflow-y-auto p-4 space-y-1">
@@ -859,15 +932,6 @@ export const EmployeeManagement: React.FC = () => {
 
             {/* Main Form Content */}
             <div className="flex-1 overflow-y-auto p-8">
-              {formStatus && (
-                <div className={`mb-6 p-4 rounded-lg flex items-center gap-3 ${
-                  formStatus.includes('❌') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'
-                }`}>
-                  {formStatus.includes('❌') ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
-                  <p className="text-sm font-medium">{formStatus}</p>
-                </div>
-              )}
-
               {/* Section 1: Profile */}
               {formStep === 1 && (
                 <div className="space-y-8 animate-in fade-in duration-300">
@@ -1166,14 +1230,26 @@ export const EmployeeManagement: React.FC = () => {
                     </div>
                     <div className="space-y-2">
                        <Label className="text-xs font-bold uppercase text-muted-foreground">Attendance Device ID</Label>
+                       <div className="flex gap-2">
                        <Input 
                          type="number" 
                          value={formData.biometric_id} 
                          onChange={(e) => setFormData({ ...formData, biometric_id: e.target.value })} 
                          placeholder="Bio Device ID (e.g. 101)" 
-                         className="border-primary/30"
+                         className="border-primary/30 flex-1"
                        />
-                       <p className="text-[10px] text-muted-foreground">This ID must match the ID on your hardware device for log linking.</p>
+                       <Button
+                         variant="outline"
+                         size="sm"
+                         onClick={handleAutoAssignDeviceId}
+                         disabled={devices.length === 0}
+                         className="h-10 text-xs whitespace-nowrap border-blue-300 text-blue-600 hover:bg-blue-50"
+                       >
+                         <Smartphone className="w-3 h-3 mr-1" />
+                         Auto-Assign
+                       </Button>
+                       </div>
+                       <p className="text-[10px] text-muted-foreground">This ID must match the user ID on your hardware device for log linking.</p>
                     </div>
                     <div className="col-span-2 space-y-4 py-4">
                       <div className="grid grid-cols-2 gap-4 items-end">
@@ -1192,14 +1268,19 @@ export const EmployeeManagement: React.FC = () => {
                         </div>
                         <Button 
                           variant="default" 
-                          onClick={handleSyncToDevice}
-                          disabled={!formData.biometric_id || devices.length === 0}
-                          className="h-10 bg-blue-600 hover:bg-blue-700 text-white font-bold gap-2"
+                          onClick={handleEnrollFingerprint}
+                          disabled={devices.length === 0 || !formDialog.editing}
+                          className="h-10 bg-green-600 hover:bg-green-700 text-white font-bold gap-2"
                         >
-                          <Smartphone className="w-4 h-4" />
-                          Push Name to Device
+                          <Fingerprint className="w-4 h-4" />
+                          Enroll Fingerprint
                         </Button>
                       </div>
+
+                      <p className="text-xs text-muted-foreground bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 p-3 rounded-md">
+                        <strong>How to enroll:</strong> Click "Enroll Fingerprint" → App pushes user to device → 
+                        On device: press <strong>M/OK</strong> → <strong>User Mgmt</strong> → <strong>Enroll User</strong> → select user #{formData.biometric_id || '—'} → place finger on scanner.
+                      </p>
 
                       <Button 
                         variant="outline" 
@@ -1210,9 +1291,6 @@ export const EmployeeManagement: React.FC = () => {
                         <Fingerprint className="w-5 h-5" />
                          Pull Biometric (Fingerprint/Face) from Device
                       </Button>
-                      <p className="text-[10px] text-center text-muted-foreground italic">
-                        Note: User must already be added to the device with ID #{formData.biometric_id}
-                      </p>
                     </div>
                   </div>
                 </div>

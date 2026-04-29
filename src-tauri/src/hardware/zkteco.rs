@@ -403,6 +403,66 @@ impl DeviceDriver for ZKTecoDriver {
             Err(AppError::ConnectionError(format!("Script reported error: {}", msg)))
         }
     }
+
+    async fn get_device_user_count(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32) -> Result<serde_json::Value, AppError> {
+        verify_node_available()?;
+        let script_path = get_script_path();
+        if !script_path.exists() { return Err(AppError::ConnectionError(format!("zk_fetch.cjs not found"))); }
+
+        let output = tokio::process::Command::new("node")
+            .arg(&script_path)
+            .arg("getUserCount")
+            .arg(ip)
+            .arg(port.to_string())
+            .arg("10000")
+            .output()
+            .await
+            .map_err(|e| AppError::ConnectionError(format!("Failed to execute: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AppError::ConnectionError(format!("Failed to get user count:\n{}", stderr)));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parsed = extract_json_from_stdout(&stdout);
+        Ok(parsed)
+    }
+
+    async fn enroll_user_on_device(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32, user_id: i32, name: &str, role: i32, card_no: &str) -> Result<(), AppError> {
+        verify_node_available()?;
+        let script_path = get_script_path();
+        if !script_path.exists() { return Err(AppError::ConnectionError(format!("zk_fetch.cjs not found"))); }
+
+        let output = tokio::process::Command::new("node")
+            .arg(&script_path)
+            .arg("enroll")
+            .arg(ip)
+            .arg(port.to_string())
+            .arg("10000")
+            .arg(user_id.to_string())
+            .arg(name)
+            .arg(role.to_string())
+            .arg(card_no)
+            .output()
+            .await
+            .map_err(|e| AppError::ConnectionError(format!("Failed to execute: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AppError::ConnectionError(format!("Failed to enroll:\n{}", stderr)));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parsed = extract_json_from_stdout(&stdout);
+
+        if parsed.get("status").and_then(|s| s.as_str()) == Some("success") {
+            Ok(())
+        } else {
+            let msg = parsed.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown script error");
+            Err(AppError::ConnectionError(format!("Script reported error: {}", msg)))
+        }
+    }
 }
 
 #[cfg(test)]
