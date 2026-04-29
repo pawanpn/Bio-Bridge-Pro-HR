@@ -1,5 +1,5 @@
 use crate::errors::AppError;
-use crate::hardware::{sync_device, test_device, push_user_info, pull_user_biometric};
+use crate::hardware::{sync_device, test_device, push_user_info, pull_user_biometric, get_all_user_info};
 use crate::models::DeviceBrand;
 use crate::sync_service;
 use crate::AppState;
@@ -899,4 +899,200 @@ pub async fn pull_employee_biometric(
     ).await?;
 
     Ok(bio_data)
+}
+
+#[tauri::command]
+pub async fn update_device_status(
+    ip: String,
+    status: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), AppError> {
+    let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+    let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+    conn.execute(
+        "UPDATE Devices SET status = ?1 WHERE ip_address = ?2",
+        params![status, ip],
+    ).map_err(|e| AppError::DatabaseError(format!("Failed to update device status: {}", e)))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn sync_employees_to_device(
+    device_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let device_info = {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        let (ip, port, comm_key, machine_number, brand_str) = conn.query_row(
+            "SELECT ip_address, port, comm_key, machine_number, brand FROM Devices WHERE id = ?1",
+            params![device_id],
+            |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i32>(1)? as u16,
+                r.get::<_, i32>(2)?,
+                r.get::<_, i32>(3)?,
+                r.get::<_, String>(4)?
+            ))
+        ).map_err(|e| AppError::DatabaseError(format!("Device not found: {}", e)))?;
+
+        let brand = match brand_str.as_str() {
+            "ZKTeco" => DeviceBrand::ZKTeco,
+            "Hikvision" => DeviceBrand::Hikvision,
+            _ => DeviceBrand::Unknown,
+        };
+
+        (ip, port, comm_key, machine_number, brand)
+    };
+
+    let employees = {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, first_name, last_name, biometric_id, card_no, device_privilege
+             FROM Employees WHERE biometric_id IS NOT NULL AND status != 'deleted' AND enable_attendance = 1"
+        )?;
+        let rows: Vec<(i64, String, String, i32, Option<String>, Option<String>)> = stmt
+            .query_map([], |r| Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?
+            )))?
+            .filter_map(|r| r.ok())
+            .collect();
+        rows
+    };
+
+    let mut synced = 0;
+    let mut failed = 0;
+
+    for (_, first_name, last_name, bio_id, card_no, privilege) in &employees {
+        let full_name = format!("{} {}", first_name, last_name).trim().to_string();
+        let role = match privilege.as_deref() {
+            Some("Normal User") => 0,
+            Some("Registrar") => 1,
+            Some("Admin") => 2,
+            Some("Super Admin") => 3,
+            _ => 0,
+        };
+        let card = card_no.as_deref().unwrap_or("");
+
+        match push_user_info(
+            &device_info.0,
+            device_info.1,
+            device_info.2,
+            device_info.3,
+            device_info.4,
+            *bio_id,
+            &full_name,
+            role,
+            card,
+        ).await {
+            Ok(()) => synced += 1,
+            Err(e) => {
+                eprintln!("Failed to push employee {bio_id}: {e}");
+                failed += 1;
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "success": true,
+        "synced": synced,
+        "failed": failed
+    }))
+}
+
+#[tauri::command]
+pub async fn import_device_employees(
+    device_id: i64,
+    branch_id: i64,
+    state: tauri::State<'_, AppState>,
+) -> Result<serde_json::Value, AppError> {
+    let (ip, port, comm_key, machine_number, brand) = {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        let (ip, port, comm_key, machine_number, brand_str) = conn.query_row(
+            "SELECT ip_address, port, comm_key, machine_number, brand FROM Devices WHERE id = ?1",
+            params![device_id],
+            |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i32>(1)? as u16,
+                r.get::<_, i32>(2)?,
+                r.get::<_, i32>(3)?,
+                r.get::<_, String>(4)?
+            ))
+        ).map_err(|e| AppError::DatabaseError(format!("Device not found: {}", e)))?;
+
+        let brand = match brand_str.as_str() {
+            "ZKTeco" => DeviceBrand::ZKTeco,
+            "Hikvision" => DeviceBrand::Hikvision,
+            _ => DeviceBrand::Unknown,
+        };
+
+        (ip, port, comm_key, machine_number, brand)
+    };
+
+    let users = get_all_user_info(&ip, port, comm_key, machine_number, brand).await?;
+
+    let mut imported = 0;
+    let mut skipped = 0;
+
+    {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        for user in &users {
+            let exists: bool = conn.query_row(
+                "SELECT COUNT(*) FROM Employees WHERE biometric_id = ?1 OR employee_code = ?2",
+                params![user.employee_id, user.employee_id.to_string()],
+                |r| r.get::<_, i64>(0),
+            ).map(|c| c > 0).unwrap_or(false);
+
+            if exists {
+                skipped += 1;
+                continue;
+            }
+
+            let code = format!("DEV{}", user.employee_id);
+            let name = user.name.trim().to_string();
+            let (first_name, last_name): (String, String) = match name.split_once(' ') {
+                Some((f, l)) => (f.to_string(), l.to_string()),
+                None => (name.clone(), String::new()),
+            };
+
+            let res = conn.execute(
+                "INSERT INTO Employees (name, first_name, last_name, employee_code, biometric_id, branch_id, status, employment_status, enable_attendance)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'active', 'Permanent', 1)",
+                params![name, first_name, last_name, code, user.employee_id, branch_id],
+            );
+
+            if res.is_ok() {
+                imported += 1;
+                let new_id = conn.last_insert_rowid();
+                let _ = crate::sync_service::_queue_for_sync(
+                    conn,
+                    "Employees",
+                    "INSERT",
+                    &new_id.to_string(),
+                    &serde_json::json!({"name": user.name, "employee_code": code, "biometric_id": user.employee_id}),
+                    "HIGH",
+                );
+            } else {
+                skipped += 1;
+            }
+        }
+    }
+
+    Ok(serde_json::json!({
+        "success": true,
+        "imported": imported,
+        "skipped": skipped
+    }))
 }

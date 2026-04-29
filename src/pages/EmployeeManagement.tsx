@@ -406,17 +406,39 @@ export const EmployeeManagement: React.FC = () => {
       };
 
       // Save using the crud commands (local SQLite first)
+      let savedEmployeeId: number | null = null;
       if (formDialog.editing) {
         await invoke('update_employee', {
           employeeId: formDialog.editing.id,
           request,
         });
+        savedEmployeeId = formDialog.editing.id;
       } else {
-        await invoke('create_employee', { request });
+        const result: any = await invoke('create_employee', { request });
+        savedEmployeeId = result?.employee_id || null;
       }
 
       setFormStatus('✅ Employee saved successfully!');
       loadData();
+
+      // Auto-sync to device if employee has biometric_id and devices exist
+      const savedBiometricId = formData.biometric_id ? parseInt(String(formData.biometric_id)) : undefined;
+      const targetDeviceId = devices.length > 0
+        ? (parseInt(selectedDeviceId) || devices.find((d: any) => d.is_default)?.id || devices[0].id)
+        : null;
+
+      if (savedBiometricId && targetDeviceId && savedEmployeeId) {
+        try {
+          await invoke('push_employee_to_device', {
+            deviceId: targetDeviceId,
+            employeeId: savedEmployeeId,
+          });
+          setFormStatus('✅ Employee saved and synced to device!');
+        } catch (syncErr: any) {
+          console.warn('Device sync failed:', syncErr);
+          setFormStatus('✅ Employee saved! (Device sync failed: ' + (syncErr?.message || 'check connection') + ')');
+        }
+      }
 
       setTimeout(() => {
         setFormDialog({ open: false, editing: null });
@@ -441,7 +463,7 @@ export const EmployeeManagement: React.FC = () => {
     setFormStatus('🔄 Syncing user to device...');
     try {
       await invoke('push_employee_to_device', {
-        deviceId: parseInt(selectedDeviceId) || devices[0].id,
+        deviceId: parseInt(selectedDeviceId) || devices.find((d: any) => d.is_default)?.id || devices[0].id,
         employeeId: formDialog.editing.id,
       });
       setFormStatus('✅ Employee name synced to device successfully!');
@@ -468,7 +490,7 @@ export const EmployeeManagement: React.FC = () => {
     setFormStatus('🔄 Pulling biometric from device...');
     try {
       const data = await invoke('pull_employee_biometric', {
-        deviceId: parseInt(selectedDeviceId) || devices[0].id,
+        deviceId: parseInt(selectedDeviceId) || devices.find((d: any) => d.is_default)?.id || devices[0].id,
         employeeId: formDialog.editing.id,
       });
       console.log('Pulled biometric data:', data);
