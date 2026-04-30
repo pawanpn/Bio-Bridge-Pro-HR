@@ -7,11 +7,12 @@ import {
   MessageSquare, CreditCard, User, FileText, IdCard,
   Car, AlertCircle, CheckCircle, Globe, Home, Key,
   ChevronLeft, ChevronRight, ScanFace, Activity, Hash,
-  Info
+  Info, Printer, Download
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Select } from '@/components/ui/select';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from 'recharts';
 
 interface EmployeeProfile {
@@ -126,6 +127,7 @@ export const EmployeeDetail: React.FC = () => {
   const [dailyChart, setDailyChart] = useState<{ day: string; punches: number; isPresent: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'profile' | 'attendance'>('profile');
+  const [reportType, setReportType] = useState('complete');
 
   useEffect(() => {
     if (!employeeId) return;
@@ -156,6 +158,98 @@ export const EmployeeDetail: React.FC = () => {
   };
   const nextMonth = () => {
     if (month === 12) { setMonth(1); setYear(y => y + 1); } else setMonth(m => m + 1);
+  };
+
+  const val = (v?: string | number | null, fallback: string = '—') =>
+    v !== undefined && v !== null && v !== '' ? String(v) : fallback;
+  const yn = (v?: boolean | null) => v ? 'Yes' : 'No';
+
+  const verificationLabel = (mode?: string) => {
+    switch (mode) {
+      case 'FP': return 'Fingerprint';
+      case 'Face': return 'Face';
+      case 'PW': return 'Password';
+      case 'RF': return 'RFID Card';
+      case 'FP/PW/RF': return 'Fingerprint / Password / Card';
+      case 'Face/FP/PW': return 'Face / Fingerprint / Password';
+      default: return mode || '—';
+    }
+  };
+
+  const handlePrint = () => {
+    const p = profile;
+    const att = attendance;
+    if (!p) return;
+    const nowStr = new Date().toLocaleString();
+    const attDaysInMonth = new Date(year, month, 0).getDate();
+    const attPresent = att?.daysPresent ?? 0;
+    const attRate = attDaysInMonth > 0 ? ((attPresent / attDaysInMonth) * 100).toFixed(1) : '0';
+
+    const dailyGroups: Record<string, AttendanceLog[]> = {};
+    (att?.logs || []).forEach(l => {
+      const dk = l.timestamp.split(' ')[0];
+      if (!dailyGroups[dk]) dailyGroups[dk] = [];
+      dailyGroups[dk].push(l);
+    });
+    const sortedDates = Object.keys(dailyGroups).sort().reverse();
+
+    const type = reportType;
+    const typeLabel = type === 'complete' ? 'Complete Profile' : type === 'hr' ? 'HR Summary' : type === 'device' ? 'Device Access Card' : type === 'contact' ? 'Contact Card' : 'Attendance Report';
+
+    const row = (label: string, value: string, highlight = false) =>
+      `<tr><td style="padding:6px 12px;border-bottom:1px solid #eee;color:#888;font-size:13px;width:180px;">${label}</td><td style="padding:6px 12px;border-bottom:1px solid #eee;font-size:13px;font-weight:${highlight ? '600' : '400'};color:#222;">${value}</td></tr>`;
+    const section = (title: string, fields: [string, string][]) =>
+      `<div style="margin-bottom:20px;"><h3 style="color:#1a237e;font-size:15px;margin:0 0 8px 0;border-bottom:1px solid #1a237e;padding-bottom:4px;">${title}</h3><table style="width:100%;border-collapse:collapse;">${fields.map(([l, v]) => row(l, v)).join('')}</table></div>`;
+
+    const personal: [string, string][] = [['DOB', val(p.date_of_birth)],['Gender', val(p.gender)],['Marital', val(p.marital_status)],['Nationality', val(p.nationality)],['Religion', val(p.religion)],['City', val(p.city)],['Postcode', val(p.postcode)],['Local Name', val(p.local_name)]];
+    const contact: [string, string][] = [['Email', val(p.personal_email)],['Phone', val(p.personal_phone)],['Contact Tel', val(p.contact_tel)],['Office Tel', val(p.office_tel)],['Current Address', val(p.current_address)],['Permanent Address', val(p.permanent_address)]];
+    const ids: [string, string][] = [['Citizenship', val(p.citizenship_number)],['PAN', val(p.pan_number)],['Passport', val(p.passport_no)],['National ID', val(p.national_id)],['Motorcycle Lic', val(p.motorcycle_license)],['Automobile Lic', val(p.automobile_license)]];
+    const emp: [string, string][] = [['Branch', val(p.branch_name)],['Department', val(p.department_name)],['Designation', val(p.designation_name)],['Joining Date', val(p.date_of_joining)],['Type', val(p.employment_type)],['Status', val(p.employment_status)],['Workflow Role', val(p.workflow_role)]];
+    const bank: [string, string][] = [['Bank', val(p.bank_name)],['Account No', val(p.account_number)]];
+    const emerg: [string, string][] = [['Name', val(p.emergency_contact_name)],['Phone', val(p.emergency_contact_phone)],['Relation', val(p.emergency_contact_relation)]];
+    const dev: [string, string][] = [['Verification', val(p.verification_mode)],['Privilege', val(p.device_privilege)],['Password', val(p.device_password)],['Card No', val(p.card_no)],['Biometric ID', val(p.biometric_id)]];
+    const attCfg: [string, string][] = [['Attendance', yn(p.enable_attendance)],['Holiday', yn(p.enable_holiday)],['Outdoor Mgmt', yn(p.outdoor_management)],['Shift Start', val(p.shift_start_time)],['Shift End', val(p.shift_end_time)]];
+    const mob: [string, string][] = [['Self Service', yn(p.enable_self_service)],['Mobile Access', yn(p.enable_mobile_access)],['Mobile Punch', yn(p.mobile_punch)],['App Role', val(p.app_role)]];
+    const wa: [string, string][] = [['WhatsApp Alert', yn(p.whatsapp_alert)],['Exception', yn(p.whatsapp_exception)],['Punch', yn(p.whatsapp_punch)],['Sup. Mobile', val(p.supervisor_mobile)]];
+    const rec: [string, string][] = [['Created', val(p.created_at)],['Updated', val(p.updated_at)]];
+
+    let body = '';
+    if (type === 'complete') body = section('Personal', personal)+section('Contact', contact)+section('ID & Licenses', ids)+section('Employment', emp)+section('Bank', bank)+section('Emergency Contact', emerg)+section('Device', dev)+section('Attendance', attCfg)+section('Mobile', mob)+section('WhatsApp', wa)+section('Record Info', rec);
+    else if (type === 'hr') body = section('Personal', personal)+section('Employment', emp)+section('Emergency Contact', emerg)+section('Record Info', rec);
+    else if (type === 'device') body = section('Device', dev)+section('Attendance', attCfg)+`<table style="width:100%;">${row('Name', val(p.full_name),true)}${row('Code', val(p.employee_code),true)}${row('Dept', val(p.department_name))}</table>`;
+    else if (type === 'contact') body = section('Contact', contact)+section('Emergency Contact', emerg)+`<table>${row('Name', val(p.full_name),true)}${row('Dept', val(p.department_name))}</table>`;
+    else if (type === 'attendance') {
+      body = `<h3 style="color:#1a237e;">Attendance — ${MONTH_NAMES[month - 1]} ${year}</h3><table style="width:100%;margin-bottom:16px;">${row('Rate', `${attRate}%`,true)}${row('Present', `${attPresent}/${attDaysInMonth}`,true)}${row('Late', String(att?.lateDays ?? 0),true)}${row('Punches', String(att?.totalPunches ?? 0),true)}</table>`;
+      if (sortedDates.length > 0) body += '<h4>Daily Log</h4><table style="width:100%;">'+sortedDates.map(d=>{const l=dailyGroups[d];const f=l[0].timestamp.slice(11,16);const g=l[l.length-1].timestamp.slice(11,16);return row(d,`In:${f} | Out:${g} | Punches:${l.length}`,f>'09:15');}).join('')+'</table>';
+    }
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Employee Report</title><style>body{font-family:'Segoe UI',Arial,sans-serif;max-width:800px;margin:0 auto;padding:40px 30px;color:#222;}@media print{body{padding:20px;}}</style></head><body><div style="text-align:center;margin-bottom:20px;"><h1 style="color:#1a237e;margin:0;">BioBridge Pro HR</h1><p style="color:#666;">${typeLabel}</p><p style="color:#999;font-size:12px;">${nowStr}</p></div><div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;border-bottom:2px solid #1a237e;padding-bottom:16px;"><div style="width:56px;height:56px;border-radius:50%;background:#1a237e;color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:bold;">${(p.first_name||'?').charAt(0)}</div><div><h2 style="margin:0;">${p.full_name||'—'}</h2><p style="margin:2px 0;color:#555;">${p.employee_code||'—'} &bull; ${p.department_name||'—'}</p></div></div>${body}<p style="text-align:center;color:#999;font-size:11px;margin-top:30px;border-top:1px solid #eee;padding-top:16px;">Confidential &bull; ${nowStr}</p></body></html>`;
+
+    const w = window.open('', '_blank', 'width=900,height=700');
+    if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 500); }
+  };
+
+  const handleDownload = () => {
+    const p = profile;
+    const att = attendance;
+    if (!p) return;
+    const nowStr = new Date().toLocaleString();
+    const type = reportType;
+    const typeLabel = type === 'complete' ? 'Complete Profile' : type === 'hr' ? 'HR Summary' : type === 'device' ? 'Device Access Card' : type === 'contact' ? 'Contact Card' : 'Attendance Report';
+    const aRate = new Date(year, month, 0).getDate() > 0 ? (((att?.daysPresent??0)/new Date(year,month,0).getDate())*100).toFixed(1) : '0';
+    let rows = '';
+    const add = (t: string, f: [string, string][]) => { rows += `<tr><td colspan="2" style="padding:8px;background:#1a237e;color:#fff;font-weight:bold;">${t}</td></tr>`; f.forEach(([l,v])=>{rows+=`<tr><td style="padding:4px 12px;color:#888;">${l}</td><td style="padding:4px 12px;">${v}</td></tr>`;}); };
+    if (type === 'complete') { add('Personal',[['DOB',val(p.date_of_birth)],['Gender',val(p.gender)],['Marital',val(p.marital_status)],['Nationality',val(p.nationality)]]); add('Contact',[['Email',val(p.personal_email)],['Phone',val(p.personal_phone)]]); add('Employment',[['Branch',val(p.branch_name)],['Dept',val(p.department_name)],['Designation',val(p.designation_name)],['Joining',val(p.date_of_joining)],['Status',val(p.employment_status)]]); add('Device',[['Verification',val(p.verification_mode)],['Card No',val(p.card_no)],['Biometric ID',val(p.biometric_id)]]); }
+    else if (type === 'hr') { add('Personal',[['DOB',val(p.date_of_birth)],['Gender',val(p.gender)],['Nationality',val(p.nationality)]]); add('Employment',[['Branch',val(p.branch_name)],['Dept',val(p.department_name)],['Designation',val(p.designation_name)],['Joining',val(p.date_of_joining)],['Status',val(p.employment_status)]]); }
+    else if (type === 'device') { add('Device',[['Verification',val(p.verification_mode)],['Privilege',val(p.device_privilege)],['Card No',val(p.card_no)],['Biometric ID',val(p.biometric_id)]]); }
+    else if (type === 'contact') { add('Contact',[['Email',val(p.personal_email)],['Phone',val(p.personal_phone)],['Address',val(p.current_address)]]); }
+    else { rows += `<tr><td colspan="2">Rate: ${aRate}% | Present: ${att?.daysPresent??0} | Punches: ${att?.totalPunches??0}</td></tr>`; }
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Employee Report</title><style>body{font-family:'Segoe UI',Arial,sans-serif;max-width:800px;margin:0 auto;padding:40px;color:#222;}table{width:100%;border-collapse:collapse;}</style></head><body><h2 style="color:#1a237e;">${p.full_name||p.name} — ${typeLabel}</h2><p>${p.employee_code} | ${p.department_name||''} | ${p.branch_name||''}</p><table>${rows}</table><p style="text-align:center;color:#999;font-size:11px;margin-top:30px;">Generated ${nowStr}</p></body></html>`;
+    const blob = new Blob([html], { type: 'text/html' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `Employee_${p.employee_code||p.id}_${type}_report.html`;
+    a.click();
   };
 
   if (loading) {
@@ -191,18 +285,6 @@ export const EmployeeDetail: React.FC = () => {
   });
   const sortedDates = Object.keys(dailyGroups).sort().reverse();
 
-  const verificationLabel = (mode?: string) => {
-    switch (mode) {
-      case 'FP': return 'Fingerprint';
-      case 'Face': return 'Face';
-      case 'PW': return 'Password';
-      case 'RF': return 'RFID Card';
-      case 'FP/PW/RF': return 'Fingerprint / Password / Card';
-      case 'Face/FP/PW': return 'Face / Fingerprint / Password';
-      default: return mode || '—';
-    }
-  };
-
   return (
     <div className="p-6 max-w-7xl mx-auto">
       {/* Header */}
@@ -232,6 +314,20 @@ export const EmployeeDetail: React.FC = () => {
           </Button>
           <Button variant={tab === 'attendance' ? 'default' : 'outline'} size="sm" onClick={() => setTab('attendance')}>
             <Calendar className="w-4 h-4 mr-1" /> Attendance
+          </Button>
+          <div className="w-px bg-border mx-1" />
+          <Select value={reportType} onChange={(e) => setReportType(e.target.value)} className="w-[150px] h-9 text-xs">
+            <option value="complete">Complete Profile</option>
+            <option value="hr">HR Summary</option>
+            <option value="device">Device Access Card</option>
+            <option value="contact">Contact Card</option>
+            <option value="attendance">Attendance Report</option>
+          </Select>
+          <Button variant="outline" size="sm" onClick={handlePrint} title="Print Report">
+            <Printer className="w-4 h-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleDownload} title="Download Report">
+            <Download className="w-4 h-4" />
           </Button>
         </div>
       </div>
