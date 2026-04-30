@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import branchService from '../services/branchService';
 import { Wifi, WifiOff, FileText, Plus } from 'lucide-react';
 
 interface Device {
@@ -75,9 +76,9 @@ export const DeviceSettings: React.FC = () => {
 
   const loadDevices = useCallback(async () => {
     try {
-      const data = await invoke<Device[]>('list_all_devices');
+      const data = await branchService.listAllDevices();
       setDevices(data || []);
-      const bs = await invoke<Branch[]>('list_branches');
+      const bs = await branchService.listBranches();
       setBranches(bs || []);
 
       // DYNAMIC STATUS CHECK

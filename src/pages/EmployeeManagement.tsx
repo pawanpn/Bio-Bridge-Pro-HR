@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import branchService from '../services/branchService';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
@@ -247,8 +248,8 @@ export const EmployeeManagement: React.FC = () => {
       console.log('[EmployeeManagement] Loading data...');
       const [empResult, branchData, deviceData, deptData, desigData] = await Promise.all([
         invoke<any>('list_employees', { statusFilter: viewMode === 'deleted' ? 'deleted' : 'active' }),
-        invoke<any[]>('list_branches'),
-        invoke<any[]>('list_all_devices'),
+        branchService.listBranches(),
+        branchService.listAllDevices(),
         invoke<any[]>('list_departments'),
         invoke<any[]>('list_designations'),
       ]);

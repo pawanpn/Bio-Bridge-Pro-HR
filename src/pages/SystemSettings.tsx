@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import branchService from '../services/branchService';
 import { Button } from '@/components/ui/button';
 import { AppConfig } from '../config/appConfig';
 import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, UserPlus, UserCircle, Database } from 'lucide-react';
@@ -750,7 +751,7 @@ const EmployeeDirectory: React.FC = () => {
   const loadData = async () => {
     try {
       const emps = await invoke<any[]>('list_employees');
-      const brs = await invoke<any[]>('list_branches');
+      const brs = await branchService.listBranches();
       setEmployees(emps);
       setBranches(brs);
     } catch (e) { console.error(e); }
@@ -916,7 +917,7 @@ const UserManagement: React.FC = () => {
 
   const loadBranches = async () => {
     try {
-      const data = await invoke<any[]>('list_branches');
+      const data = await branchService.listBranches();
       setBranches(data);
     } catch (e) {
       console.error(e);

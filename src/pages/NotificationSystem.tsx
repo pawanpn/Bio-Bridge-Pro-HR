@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import branchService from '../services/branchService';
 import { useAuth } from '../context/AuthContext';
 import {
   Bell, Send, Trash2, Eye, CheckCheck, AlertCircle, Info,
@@ -82,7 +83,7 @@ export const NotificationSystem: React.FC = () => {
       const [notifications, count, branchData] = await Promise.all([
         invoke<any[]>('get_my_notifications'),
         invoke<number>('get_unread_count'),
-        invoke<any[]>('list_branches'),
+        branchService.listBranches(),
       ]);
       setMyNotifications(notifications);
       setUnreadCount(count);

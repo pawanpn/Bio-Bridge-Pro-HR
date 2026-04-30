@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import branchService from '../services/branchService';
 import { listen } from '@tauri-apps/api/event';
 import { Download, Search, RefreshCw, Calculator, Fingerprint, ScanFace, Database, FolderOpen, Play, CheckCircle2, ChevronRight, FileText, Calendar, Wallet } from 'lucide-react';
 
@@ -122,7 +123,7 @@ export const Reports: React.FC = () => {
     try {
       const depts = await invoke<any[]>('list_departments');
       setDepartments(['All', ...depts.map(d => d.name)]);
-      const brs = await invoke<Branch[]>('list_branches');
+      const brs = await branchService.listBranches();
       setBranches(brs);
       const emps = await invoke<any[]>('list_employees_for_select');
       setEmployees(emps);

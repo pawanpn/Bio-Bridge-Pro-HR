@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import branchService from '../services/branchService';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -79,8 +80,8 @@ export const DeviceManagement: React.FC = () => {
     setLoading(true);
     try {
       const [deviceData, branchData] = await Promise.all([
-        invoke<any[]>('list_all_devices'),
-        invoke<any[]>('list_branches'),
+        branchService.listAllDevices(),
+        branchService.listBranches(),
       ]);
       setDevices(deviceData);
       setBranches(branchData);

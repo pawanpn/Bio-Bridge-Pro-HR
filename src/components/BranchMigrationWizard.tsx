@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import branchService from '../services/branchService';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, Users, Monitor, ArrowRight, Trash2, CheckCircle, Loader2, Building2 } from 'lucide-react';
 
 interface BranchMigrationWizardProps {
   open: boolean;
-  branch: { id: number; name: string } | null;
+  branch: { id: string | number; name: string } | null;
   branches: any[];
   onClose: () => void;
   onDeleted: () => void;
@@ -44,9 +44,10 @@ export const BranchMigrationWizard: React.FC<BranchMigrationWizardProps> = ({
   const loadSummary = async () => {
     if (!branch) return;
     try {
-      const data = await invoke<any>('get_branch_summary', { id: branch.id });
-      setSummary(data);
-      setStep(data.is_empty ? 'confirm' : 'summary');
+      const data = await branchService.getBranchSummary(branch.id);
+      const enhanced = { ...data, is_empty: data.employee_count === 0 && data.device_count === 0 };
+      setSummary(enhanced);
+      setStep(enhanced.is_empty ? 'confirm' : 'summary');
     } catch (e) {
       console.error(e);
       setStep('summary');
@@ -57,19 +58,20 @@ export const BranchMigrationWizard: React.FC<BranchMigrationWizardProps> = ({
     if (!branch) return;
     setWorking(true);
     try {
-      const toEmpBranch = targetBranchIdForEmployees ? parseInt(targetBranchIdForEmployees) : null;
-      const toDevBranch = targetBranchIdForDevices ? parseInt(targetBranchIdForDevices) : null;
+      const toEmpBranch = targetBranchIdForEmployees ? targetBranchIdForEmployees : null;
+      const toDevBranch = targetBranchIdForDevices ? targetBranchIdForDevices : null;
 
-      // If both targets are the same, do in one call
-      const result = await invoke<any>('migrate_branch_data', {
-        fromBranchId: branch.id,
-        toBranchId: toEmpBranch ?? toDevBranch,
-        migrateEmployees,
-        migrateDevices,
-      });
+      const tables: string[] = [];
+      if (migrateEmployees) tables.push('employees');
+      if (migrateDevices) tables.push('devices', 'gates');
+
+      const result = await branchService.migrateBranchData(
+        branch.id,
+        (toEmpBranch ?? toDevBranch) as string | number,
+        tables
+      );
       setMigrationResult(result);
-      // Reload summary to check if now empty
-      const newSummary = await invoke<any>('get_branch_summary', { id: branch.id });
+      const newSummary = await branchService.getBranchSummary(branch.id);
       setFinalSummary(newSummary);
       setStep('confirm');
     } catch (e) {
@@ -83,7 +85,7 @@ export const BranchMigrationWizard: React.FC<BranchMigrationWizardProps> = ({
     if (!branch) return;
     setWorking(true);
     try {
-      await invoke('delete_branch', { id: branch.id });
+      await branchService.deleteBranch(branch.id);
       setStep('done');
       setTimeout(() => {
         onDeleted();

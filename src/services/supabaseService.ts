@@ -705,6 +705,330 @@ export const assetsService = {
 // NOTIFICATIONS SERVICE
 // ============================================================================
 
+// ============================================================================
+// ORGANIZATION SERVICE (Branches, Gates, Devices)
+// ============================================================================
+
+export interface Branch {
+  id: string;
+  organization_id?: string;
+  name: string;
+  code?: string | null;
+  location?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Gate {
+  id: string;
+  branch_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Device {
+  id: string;
+  name: string;
+  brand: string;
+  ip_address: string;
+  port: number;
+  comm_key: number;
+  machine_number: number;
+  branch_id: string;
+  gate_id?: string | null;
+  is_default: boolean;
+  status: string;
+  subnet_mask?: string | null;
+  gateway?: string | null;
+  dns?: string | null;
+  dhcp: boolean;
+  server_mode: string;
+  server_address?: string | null;
+  https_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Department {
+  id: string;
+  organization_id?: string;
+  parent_id?: string | null;
+  name: string;
+  code?: string | null;
+  description?: string | null;
+  head_id?: string | null;
+  budget?: number | null;
+  cost_center?: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Designation {
+  id: string;
+  organization_id?: string;
+  name: string;
+  code?: string | null;
+  level: number;
+  grade?: string | null;
+  description?: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  legal_name?: string | null;
+  registration_number?: string | null;
+  tax_number?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  postal_code?: string | null;
+  is_active: boolean;
+  subscription_plan?: string;
+  max_users?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const organizationService = {
+  async getById(id: string): Promise<Organization | null> {
+    const { data, error } = await supabase
+      .from('organizations')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) { console.error('Failed to fetch organization:', error); return null; }
+    return data;
+  },
+
+  // ── BRANCHES ──────────────────────────────────────────────────────────
+
+  async listBranches(organizationId?: string): Promise<Branch[]> {
+    let query = supabase.from('branches').select('*').eq('is_active', true).order('name');
+    if (organizationId) {
+      query = query.eq('organization_id', organizationId);
+    }
+    const { data, error } = await query;
+    if (error) { console.error('Failed to fetch branches:', error); return []; }
+    return data || [];
+  },
+
+  async createBranch(branch: { name: string; location?: string | null; organization_id: string }): Promise<Branch | null> {
+    const { data, error } = await supabase
+      .from('branches')
+      .insert({ name: branch.name, location: branch.location || null, organization_id: branch.organization_id, is_active: true })
+      .select()
+      .single();
+    if (error) { console.error('Failed to create branch:', error); return null; }
+    return data;
+  },
+
+  async updateBranch(id: string, updates: { name?: string; location?: string | null }): Promise<Branch | null> {
+    const { data, error } = await supabase
+      .from('branches')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) { console.error('Failed to update branch:', error); return null; }
+    return data;
+  },
+
+  async deleteBranch(id: string): Promise<boolean> {
+    const { error } = await supabase
+      .from('branches')
+      .update({ is_active: false, deleted_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) { console.error('Failed to delete branch:', error); return false; }
+    return true;
+  },
+
+  // ── GATES ─────────────────────────────────────────────────────────────
+
+  async listGates(branchId?: string | null): Promise<Gate[]> {
+    let query = supabase.from('gates').select('*').order('name');
+    if (branchId) {
+      query = query.eq('branch_id', branchId);
+    }
+    const { data, error } = await query;
+    if (error) { console.error('Failed to fetch gates:', error); return []; }
+    return data || [];
+  },
+
+  async createGate(gate: { branch_id: string; name: string }): Promise<Gate | null> {
+    const { data, error } = await supabase
+      .from('gates')
+      .insert({ branch_id: gate.branch_id, name: gate.name })
+      .select()
+      .single();
+    if (error) { console.error('Failed to create gate:', error); return null; }
+    return data;
+  },
+
+  async updateGate(id: string, updates: { name?: string; branch_id?: string }): Promise<Gate | null> {
+    const { data, error } = await supabase
+      .from('gates')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) { console.error('Failed to update gate:', error); return null; }
+    return data;
+  },
+
+  async deleteGate(id: string): Promise<boolean> {
+    const { error } = await supabase.from('gates').delete().eq('id', id);
+    if (error) { console.error('Failed to delete gate:', error); return false; }
+    return true;
+  },
+
+  // ── DEVICES ───────────────────────────────────────────────────────────
+
+  async listDevices(): Promise<Device[]> {
+    const { data, error } = await supabase.from('devices').select('*').order('name');
+    if (error) { console.error('Failed to fetch devices:', error); return []; }
+    return data || [];
+  },
+
+  async listDevicesByBranch(branchId: string): Promise<Device[]> {
+    const { data, error } = await supabase
+      .from('devices')
+      .select('*')
+      .eq('branch_id', branchId)
+      .order('name');
+    if (error) { console.error('Failed to fetch devices by branch:', error); return []; }
+    return data || [];
+  },
+
+  async createDevice(device: {
+    name: string; brand: string; ip_address: string; port: number;
+    comm_key: number; machine_number: number; branch_id: string; gate_id?: string | null;
+    subnet_mask?: string; gateway?: string; dns?: string; dhcp?: boolean;
+    server_mode?: string; server_address?: string; https_enabled?: boolean;
+  }): Promise<Device | null> {
+    const { data, error } = await supabase
+      .from('devices')
+      .insert({
+        name: device.name, brand: device.brand || 'ZKTeco',
+        ip_address: device.ip_address, port: device.port || 4370,
+        comm_key: device.comm_key || 0, machine_number: device.machine_number || 1,
+        branch_id: device.branch_id, gate_id: device.gate_id || null,
+        is_default: false, status: 'offline',
+        subnet_mask: device.subnet_mask || '255.255.255.0',
+        gateway: device.gateway || '192.168.1.1',
+        dns: device.dns || '8.8.8.8',
+        dhcp: device.dhcp || false,
+        server_mode: device.server_mode || 'Standalone',
+        server_address: device.server_address || '0.0.0.0',
+        https_enabled: device.https_enabled || false,
+      })
+      .select()
+      .single();
+    if (error) { console.error('Failed to create device:', error); return null; }
+    return data;
+  },
+
+  async updateDevice(id: string, updates: Record<string, any>): Promise<Device | null> {
+    const { data, error } = await supabase
+      .from('devices')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) { console.error('Failed to update device:', error); return null; }
+    return data;
+  },
+
+  async deleteDevice(id: string): Promise<boolean> {
+    const { error } = await supabase.from('devices').delete().eq('id', id);
+    if (error) { console.error('Failed to delete device:', error); return false; }
+    return true;
+  },
+
+  async setDefaultDevice(id: string): Promise<boolean> {
+    const { data: device } = await supabase.from('devices').select('branch_id').eq('id', id).single();
+    if (!device) return false;
+    await supabase.from('devices').update({ is_default: false }).eq('branch_id', device.branch_id);
+    const { error } = await supabase.from('devices').update({ is_default: true }).eq('id', id);
+    return !error;
+  },
+
+  // ── DEPARTMENTS ───────────────────────────────────────────────────────
+
+  async listDepartments(organizationId?: string): Promise<Department[]> {
+    let query = supabase.from('departments').select('*').eq('is_active', true).order('name');
+    if (organizationId) {
+      query = query.eq('organization_id', organizationId);
+    }
+    const { data, error } = await query;
+    if (error) { console.error('Failed to fetch departments:', error); return []; }
+    return data || [];
+  },
+
+  async createDepartment(dept: { name: string; organization_id: string; code?: string; description?: string }): Promise<Department | null> {
+    const { data, error } = await supabase
+      .from('departments')
+      .insert({ name: dept.name, organization_id: dept.organization_id, code: dept.code || null, description: dept.description || null, is_active: true })
+      .select()
+      .single();
+    if (error) { console.error('Failed to create department:', error); return null; }
+    return data;
+  },
+
+  async deleteDepartment(id: string): Promise<boolean> {
+    const { error } = await supabase
+      .from('departments')
+      .update({ is_active: false, deleted_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) { console.error('Failed to delete department:', error); return false; }
+    return true;
+  },
+
+  // ── DESIGNATIONS ──────────────────────────────────────────────────────
+
+  async listDesignations(organizationId?: string): Promise<Designation[]> {
+    let query = supabase.from('designations').select('*').eq('is_active', true).order('name');
+    if (organizationId) {
+      query = query.eq('organization_id', organizationId);
+    }
+    const { data, error } = await query;
+    if (error) { console.error('Failed to fetch designations:', error); return []; }
+    return data || [];
+  },
+
+  async createDesignation(desig: { name: string; organization_id: string; code?: string; level?: number }): Promise<Designation | null> {
+    const { data, error } = await supabase
+      .from('designations')
+      .insert({ name: desig.name, organization_id: desig.organization_id, code: desig.code || null, level: desig.level || 1, is_active: true })
+      .select()
+      .single();
+    if (error) { console.error('Failed to create designation:', error); return null; }
+    return data;
+  },
+
+  async deleteDesignation(id: string): Promise<boolean> {
+    const { error } = await supabase
+      .from('designations')
+      .update({ is_active: false, deleted_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) { console.error('Failed to delete designation:', error); return false; }
+    return true;
+  },
+};
+
 export const notificationsService = {
   /**
    * Get notifications for a user

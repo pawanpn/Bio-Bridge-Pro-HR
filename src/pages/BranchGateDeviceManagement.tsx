@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import branchService from '../services/branchService';
 import { Building2, DoorOpen, Monitor, Plus, Edit2, Trash2, Eye, Shield, AlertCircle, Download, Upload, Wifi, WifiOff, Info } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,7 +28,7 @@ import { BranchMigrationWizard } from '../components/BranchMigrationWizard';
 // ── Types ───────────────────────────────────────────────────────────────────
 
 interface Branch {
-  id: number;
+  id: string | number;
   name: string;
   location?: string;
   gate_count?: number;
@@ -37,23 +37,23 @@ interface Branch {
 }
 
 interface Gate {
-  id: number;
-  branch_id: number;
+  id: string | number;
+  branch_id: string | number;
   name: string;
   device_count?: number;
 }
 
 interface Device {
-  id: number;
+  id: string | number;
   name: string;
   brand: string;
   ip: string;
   port: number;
   comm_key: number;
   machine_number: number;
-  branch_id: number;
+  branch_id: string | number;
   branch_name: string;
-  gate_id: number;
+  gate_id: string | number;
   gate_name: string;
   status: string;
   is_default: boolean;
@@ -78,40 +78,39 @@ export const BranchGateDeviceManagement: React.FC = () => {
   const [branches, setBranches] = useState<Branch[]>([]);
   const [gates, setGates] = useState<Gate[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
-  const [selectedBranchId, setSelectedBranchId] = useState<number | null>(null);
-  const [selectedGateId, setSelectedGateId] = useState<number | null>(null);
+  const [selectedBranchId, setSelectedBranchId] = useState<string | number | null>(null);
+  const [selectedGateId, setSelectedGateId] = useState<string | number | null>(null);
   const [loading, setLoading] = useState(false);
 
   // Dialogs
   const [branchDialog, setBranchDialog] = useState({ open: false, editing: null as Branch | null });
-  const [gateDialog, setGateDialog] = useState({ open: false, editing: null as Gate | null, preselectBranch: null as number | null });
+  const [gateDialog, setGateDialog] = useState({ open: false, editing: null as Gate | null, preselectBranch: null as string | number | null });
   const [deviceDialog, setDeviceDialog] = useState({ 
     open: false, 
     editing: null as Device | null, 
-    preselectBranch: null as number | null,
-    preselectGate: null as number | null 
+    preselectBranch: null as string | number | null,
+    preselectGate: null as string | number | null 
   });
-  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; type: string; id: number; name: string }>({
+  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; type: string; id: string | number; name: string }>({
     open: false, type: '', id: 0, name: ''
   });
-  const [migrationWizard, setMigrationWizard] = useState<{ open: boolean; branch: { id: number; name: string } | null }>({
+  const [migrationWizard, setMigrationWizard] = useState<{ open: boolean; branch: { id: string | number; name: string } | null }>({
     open: false, branch: null
   });
 
   // Sync state
-  const [syncingDevices, setSyncingDevices] = useState<Set<number>>(new Set());
-  const [syncMessages, setSyncMessages] = useState<Record<number, string>>({});
+  const [syncingDevices, setSyncingDevices] = useState<Set<string | number>>(new Set());
+  const [syncMessages, setSyncMessages] = useState<Record<string, string>>({});
 
   // Load data
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      // Load branches with counts
-      const branchData = await invoke<any[]>('list_branches');
+      const branchData = await branchService.listBranches();
       const enhancedBranches = await Promise.all(
         branchData.map(async (b: any) => {
-          const gates = await invoke<any[]>('list_gates', { branchId: b.id });
-          const allDevices = await invoke<any[]>('list_all_devices');
+          const gates = await branchService.listGates(b.id);
+          const allDevices = await branchService.listAllDevices();
           const branchDevices = allDevices.filter((d: any) => d.branch_id === b.id);
           return {
             ...b,
@@ -122,9 +121,8 @@ export const BranchGateDeviceManagement: React.FC = () => {
       );
       setBranches(enhancedBranches);
 
-      // Load ALL gates for dropdowns and enhanced views
-      const gateData = await invoke<any[]>('list_gates', { branchId: null });
-      const allDevicesForGates = await invoke<any[]>('list_all_devices');
+      const gateData = await branchService.listGates(null);
+      const allDevicesForGates = await branchService.listAllDevices();
       const enhancedGates = await Promise.all(
         gateData.map(async (g: any) => {
           const gateDevices = allDevicesForGates.filter((d: any) => d.gate_id === g.id);
@@ -136,8 +134,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
       );
       setGates(enhancedGates);
 
-      // Load all devices
-      const deviceData = await invoke<any[]>('list_all_devices');
+      const deviceData = await branchService.listAllDevices();
       setDevices(deviceData);
     } catch (error) {
       console.error('Failed to load data:', error);
@@ -163,7 +160,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
     const branchId = deleteDialog.id;
     setDeleteDialog({ open: false, type: '', id: 0, name: '' });
     try {
-      await invoke('delete_branch', { id: branchId });
+      await branchService.deleteBranch(branchId);
       await loadData();
     } catch (error) {
       console.error('Failed to delete branch:', error);
@@ -172,9 +169,8 @@ export const BranchGateDeviceManagement: React.FC = () => {
   };
 
   // Gate handlers
-  const handleAddGate = (branchId?: number | any) => {
-    // Safety: ignore if it's a React/DOM event
-    const validId = (typeof branchId === 'number' && branchId > 0) ? branchId : null;
+  const handleAddGate = (branchId?: number | string | any) => {
+    const validId = (typeof branchId === 'number' || typeof branchId === 'string') ? branchId : null;
     setGateDialog({ open: true, editing: null, preselectBranch: validId || selectedBranchId });
   };
 
@@ -186,7 +182,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
     const gateId = deleteDialog.id;
     setDeleteDialog({ open: false, type: '', id: 0, name: '' });
     try {
-      await invoke('delete_gate', { id: gateId });
+      await branchService.deleteGate(gateId);
       await loadData();
     } catch (error) {
       console.error('Failed to delete gate:', error);
@@ -195,10 +191,9 @@ export const BranchGateDeviceManagement: React.FC = () => {
   };
 
   // Device handlers
-  const handleAddDevice = (branchId?: number | any, gateId?: number | any) => {
-    // Safety: ignore if it's a React/DOM event
-    const bId = (typeof branchId === 'number' && branchId > 0) ? branchId : null;
-    const gId = (typeof gateId === 'number' && gateId > 0) ? gateId : null;
+  const handleAddDevice = (branchId?: number | string | any, gateId?: number | string | any) => {
+    const bId = (typeof branchId === 'number' || typeof branchId === 'string') ? branchId : null;
+    const gId = (typeof gateId === 'number' || typeof gateId === 'string') ? gateId : null;
     
     setDeviceDialog({ 
       open: true, 
@@ -221,7 +216,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
     const deviceId = deleteDialog.id;
     setDeleteDialog({ open: false, type: '', id: 0, name: '' });
     try {
-      await invoke('delete_device', { id: deviceId });
+      await branchService.deleteDevice(deviceId);
       await loadData();
     } catch (error) {
       console.error('Failed to delete device:', error);
@@ -229,9 +224,9 @@ export const BranchGateDeviceManagement: React.FC = () => {
     }
   };
 
-  const handleSetDefaultDevice = async (deviceId: number) => {
+  const handleSetDefaultDevice = async (deviceId: string | number) => {
     try {
-      await invoke('set_default_device', { id: deviceId });
+      await branchService.setDefaultDevice(deviceId);
       loadData();
     } catch (error) {
       console.error('Failed to set default device:', error);
@@ -240,10 +235,10 @@ export const BranchGateDeviceManagement: React.FC = () => {
 
   const handleSyncDeviceLogs = async (device: Device) => {
     setSyncingDevices(prev => new Set(prev).add(device.id));
-    setSyncMessages(prev => ({ ...prev, [device.id]: '🔄 Syncing logs...' }));
+    setSyncMessages(prev => ({ ...prev, [String(device.id)]: '🔄 Syncing logs...' }));
 
     try {
-      const result = await invoke('sync_device_logs', {
+      const result = await branchService.syncDeviceLogs({
         ip: device.ip,
         port: device.port,
         deviceId: device.id,
@@ -251,24 +246,23 @@ export const BranchGateDeviceManagement: React.FC = () => {
         targetBranchId: Number(device.branch_id) || 1,
         targetGateId: Number(device.gate_id) || 1,
       });
-      setSyncMessages(prev => ({ ...prev, [device.id]: `✅ ${result}` }));
+      setSyncMessages(prev => ({ ...prev, [String(device.id)]: `✅ ${result}` }));
       
-      // Notify other components (like EmployeeManagement) that new data is available
       window.dispatchEvent(new CustomEvent('data-synced', { detail: { table: 'employees' } }));
       
       setTimeout(() => {
         setSyncMessages(prev => {
           const updated = { ...prev };
-          delete updated[device.id];
+          delete updated[String(device.id)];
           return updated;
         });
       }, 5000);
     } catch (error) {
-      setSyncMessages(prev => ({ ...prev, [device.id]: `❌ Sync failed: ${error}` }));
+      setSyncMessages(prev => ({ ...prev, [String(device.id)]: `❌ Sync failed: ${error}` }));
       setTimeout(() => {
         setSyncMessages(prev => {
           const updated = { ...prev };
-          delete updated[device.id];
+          delete updated[String(device.id)];
           return updated;
         });
       }, 5000);
@@ -283,35 +277,33 @@ export const BranchGateDeviceManagement: React.FC = () => {
 
   const handleSyncToDevice = async (device: Device) => {
     setSyncingDevices(prev => new Set(prev).add(device.id));
-    setSyncMessages(prev => ({ ...prev, [device.id]: '🔄 Syncing employees to device...' }));
+    setSyncMessages(prev => ({ ...prev, [String(device.id)]: '🔄 Syncing employees to device...' }));
 
     try {
-      const result = await invoke<any>('sync_employees_to_device', {
-        deviceId: device.id,
-      });
+      const result = await branchService.syncEmployeesToDevice(device.id);
       
       if (result.success) {
         setSyncMessages(prev => ({ 
           ...prev, 
-          [device.id]: `✅ Synced to device: ${result.synced} employees ready, ${result.failed} failed` 
+          [String(device.id)]: `✅ Synced to device: ${result.synced} employees ready, ${result.failed} failed` 
         }));
       } else {
-        setSyncMessages(prev => ({ ...prev, [device.id]: `❌ Sync failed: ${result.error}` }));
+        setSyncMessages(prev => ({ ...prev, [String(device.id)]: `❌ Sync failed: ${result.error}` }));
       }
       
       setTimeout(() => {
         setSyncMessages(prev => {
           const updated = { ...prev };
-          delete updated[device.id];
+          delete updated[String(device.id)];
           return updated;
         });
       }, 5000);
     } catch (error) {
-      setSyncMessages(prev => ({ ...prev, [device.id]: `❌ Sync failed: ${error}` }));
+      setSyncMessages(prev => ({ ...prev, [String(device.id)]: `❌ Sync failed: ${error}` }));
       setTimeout(() => {
         setSyncMessages(prev => {
           const updated = { ...prev };
-          delete updated[device.id];
+          delete updated[String(device.id)];
           return updated;
         });
       }, 5000);
@@ -326,7 +318,7 @@ export const BranchGateDeviceManagement: React.FC = () => {
 
   const testDeviceConnection = async (device: Device) => {
     try {
-      await invoke('test_device_connection', {
+      await branchService.testDeviceConnection({
         ip: device.ip,
         port: device.port,
         commKey: device.comm_key,
@@ -334,24 +326,14 @@ export const BranchGateDeviceManagement: React.FC = () => {
         brand: device.brand
       });
       
-      // Update device status to online in database
-      await invoke('update_device_status', {
-        ip: device.ip,
-        status: 'online'
-      });
+      await branchService.updateDeviceStatus(device.ip, 'online');
       
-      // Update device status to online in UI
       setDevices(prev => prev.map(d =>
         d.id === device.id ? { ...d, status: 'online' } : d
       ));
     } catch (error) {
-      // Update device status to offline in database
-      await invoke('update_device_status', {
-        ip: device.ip,
-        status: 'offline'
-      }).catch(() => {}); // Ignore errors on status update
+      await branchService.updateDeviceStatus(device.ip, 'offline').catch(() => {});
       
-      // Update device status to offline in UI
       setDevices(prev => prev.map(d =>
         d.id === device.id ? { ...d, status: 'offline' } : d
       ));
@@ -404,9 +386,9 @@ export const BranchGateDeviceManagement: React.FC = () => {
         <div className="mb-6 p-4 bg-card border border-border rounded-lg">
           <Label className="text-sm font-medium mb-2 block">Select Branch</Label>
           <select
-            value={selectedBranchId || ''}
+            value={selectedBranchId ?? ''}
             onChange={(e) => {
-              setSelectedBranchId(e.target.value ? Number(e.target.value) : null);
+              setSelectedBranchId(e.target.value || null);
               setSelectedGateId(null);
             }}
             className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
@@ -484,16 +466,9 @@ export const BranchGateDeviceManagement: React.FC = () => {
         onSave={async (data) => {
           try {
             if (branchDialog.editing) {
-              await invoke('update_branch', { 
-                id: branchDialog.editing.id, 
-                name: data.name, 
-                location: data.location 
-              });
+              await branchService.updateBranch(branchDialog.editing.id, data.name, data.location);
             } else {
-              await invoke('add_branch', { 
-                name: data.name, 
-                location: data.location 
-              });
+              await branchService.addBranch(data.name, data.location);
             }
             setBranchDialog({ open: false, editing: null });
             loadData();
@@ -519,16 +494,9 @@ export const BranchGateDeviceManagement: React.FC = () => {
         onSave={async (data) => {
           try {
             if (gateDialog.editing) {
-              await invoke('update_gate', { 
-                id: gateDialog.editing.id, 
-                branchId: data.branchId, 
-                name: data.name 
-              });
+              await branchService.updateGate(gateDialog.editing.id, data.branchId, data.name);
             } else {
-              await invoke('add_gate', { 
-                branchId: data.branchId, 
-                name: data.name 
-              });
+              await branchService.addGate(data.branchId, data.name);
             }
             setGateDialog({ open: false, editing: null, preselectBranch: null });
             loadData();
@@ -550,9 +518,9 @@ export const BranchGateDeviceManagement: React.FC = () => {
         onSave={async (data) => {
           try {
             if (deviceDialog.editing) {
-              await invoke('update_device', { id: deviceDialog.editing.id, device: data });
+              await branchService.updateDevice(deviceDialog.editing.id, data);
             } else {
-              await invoke('add_device', { device: data });
+              await branchService.addDevice(data);
             }
             setDeviceDialog({ open: false, editing: null, preselectBranch: null, preselectGate: null });
             loadData();
@@ -615,8 +583,8 @@ const BranchesTab: React.FC<{
   devices: Device[];
   onAdd: () => void;
   onEdit: (branch: Branch) => void;
-  onDelete: (id: number, name: string) => void;
-  onSelect: (id: number) => void;
+  onDelete: (id: string | number, name: string) => void;
+  onSelect: (id: string | number) => void;
   loading: boolean;
 }> = ({ branches, gates: _gates, devices: _devices, onAdd, onEdit, onDelete, onSelect, loading }) => (
   <div>
@@ -694,8 +662,8 @@ const GatesTab: React.FC<{
   branchName: string;
   onAdd: () => void;
   onEdit: (gate: Gate) => void;
-  onDelete: (id: number, name: string) => void;
-  onSelect: (id: number) => void;
+  onDelete: (id: string | number, name: string) => void;
+  onSelect: (id: string | number) => void;
   loading: boolean;
 }> = ({ gates, branches, branchName, onAdd, onEdit, onDelete, onSelect, loading }) => (
   <div>
@@ -770,14 +738,14 @@ const DevicesTab: React.FC<{
   gates: Gate[];
   onAdd: () => void;
   onEdit: (device: Device) => void;
-  onDelete: (id: number, name: string) => void;
-  onSetDefault: (id: number) => void;
+  onDelete: (id: string | number, name: string) => void;
+  onSetDefault: (id: string | number) => void;
   onSync: (device: Device) => void;
   onSyncToDevice: (device: Device) => void;
   onTest: (device: Device) => void;
   loading: boolean;
-  syncingDevices: Set<number>;
-  syncMessages: Record<number, string>;
+  syncingDevices: Set<string | number>;
+  syncMessages: Record<string, string>;
 }> = ({ devices, onAdd, onEdit, onDelete, onSync, onSyncToDevice, loading, syncingDevices, syncMessages }) => (
   <div>
     <div className="flex justify-between items-center mb-6">
@@ -951,12 +919,12 @@ const BranchDialog: React.FC<{
   devices: Device[];
   onClose: () => void;
   onSave: (data: { name: string; location: string }) => void;
-  onAddGate: (branchId?: number) => void;
+  onAddGate: (branchId?: string | number) => void;
   onEditGate: (gate: Gate) => void;
-  onDeleteGate: (id: number, name: string) => void;
-  onAddDevice: (branchId?: number) => void;
+  onDeleteGate: (id: string | number, name: string) => void;
+  onAddDevice: (branchId?: string | number) => void;
   onEditDevice: (device: Device) => void;
-  onDeleteDevice: (id: number, name: string) => void;
+  onDeleteDevice: (id: string | number, name: string) => void;
 }> = ({ open, editing, gates, devices, onClose, onSave, onAddGate, onEditGate, onDeleteGate, onAddDevice, onEditDevice, onDeleteDevice }) => {
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
@@ -1137,14 +1105,14 @@ const BranchDialog: React.FC<{
 const GateDialog: React.FC<{
   open: boolean;
   editing: Gate | null;
-  preselectBranch: number | null;
-  branchId: number;
+  preselectBranch: string | number | null;
+  branchId: string | number;
   branches: Branch[];
   onClose: () => void;
-  onSave: (data: { branchId: number; name: string }) => void;
+  onSave: (data: { branchId: string | number; name: string }) => void;
 }> = ({ open, editing, preselectBranch, branchId, branches, onClose, onSave }) => {
   const [name, setName] = useState('');
-  const [selectedBranch, setSelectedBranch] = useState<number>(() => {
+  const [selectedBranch, setSelectedBranch] = useState<string | number>(() => {
     if (editing) return editing.branch_id;
     if (preselectBranch) return preselectBranch;
     if (branchId && branchId !== 0) return branchId;
@@ -1180,12 +1148,12 @@ const GateDialog: React.FC<{
           <div>
             <Label>Branch</Label>
             <select
-              value={selectedBranch}
-              onChange={(e) => setSelectedBranch(Number(e.target.value))}
+              value={String(selectedBranch)}
+              onChange={(e) => setSelectedBranch(e.target.value)}
               className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
             >
               {branches.map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
+                <option key={String(b.id)} value={String(b.id)}>{b.name}</option>
               ))}
             </select>
           </div>
@@ -1215,8 +1183,8 @@ const GateDialog: React.FC<{
 const DeviceDialog: React.FC<{
   open: boolean;
   editing: Device | null;
-  preselectBranch: number | null;
-  preselectGate: number | null;
+  preselectBranch: string | number | null;
+  preselectGate: string | number | null;
   branches: Branch[];
   gates: Gate[];
   onClose: () => void;
@@ -1229,8 +1197,8 @@ const DeviceDialog: React.FC<{
     port: 4370,
     comm_key: 0,
     machine_number: 1,
-    branch_id: 0,
-    gate_id: 0,
+    branch_id: '' as string | number,
+    gate_id: '' as string | number,
     subnet_mask: '255.255.255.0',
     gateway: '192.168.1.1',
     dns: '8.8.8.8',
@@ -1242,7 +1210,6 @@ const DeviceDialog: React.FC<{
 
   useEffect(() => {
     if (editing && editing.name) {
-      // Full edit mode
       setForm({
         name: editing.name,
         brand: editing.brand,
@@ -1261,7 +1228,6 @@ const DeviceDialog: React.FC<{
         https_enabled: editing.https_enabled || false,
       });
     } else {
-      // New device or preselect branch
       const targetBranchId = preselectBranch || (editing ? editing.branch_id : (branches[0]?.id || 0));
       const targetGateId = preselectGate || 0;
       
@@ -1285,15 +1251,13 @@ const DeviceDialog: React.FC<{
     }
   }, [editing, preselectBranch, preselectGate, branches, gates]);
 
-  // Get gates for selected branch
   const selectedBranchGates = gates.filter(g => g.branch_id === form.branch_id);
 
-  // When branch changes, reset gate selection to none
-  const handleBranchChange = (branchId: number) => {
+  const handleBranchChange = (branchId: string | number) => {
     setForm({
       ...form,
       branch_id: branchId,
-      gate_id: 0 // No gate selected by default
+      gate_id: 0
     });
   };
 
@@ -1342,15 +1306,15 @@ const DeviceDialog: React.FC<{
             <div>
               <Label>Branch</Label>
               <select
-                value={form.branch_id}
-                onChange={(e) => handleBranchChange(Number(e.target.value))}
+                value={String(form.branch_id)}
+                onChange={(e) => handleBranchChange(e.target.value)}
                 className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
               >
                 {branches.length === 0 ? (
                   <option value="">No branches available</option>
                 ) : (
                   branches.map(b => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
+                    <option key={String(b.id)} value={String(b.id)}>{b.name}</option>
                   ))
                 )}
               </select>
@@ -1358,13 +1322,13 @@ const DeviceDialog: React.FC<{
             <div>
               <Label>Gate <span className="text-muted-foreground font-normal">(Optional)</span></Label>
               <select
-                value={form.gate_id || ''}
-                onChange={(e) => setForm({ ...form, gate_id: e.target.value ? Number(e.target.value) : 0 })}
+                value={form.gate_id ? String(form.gate_id) : ''}
+                onChange={(e) => setForm({ ...form, gate_id: e.target.value || 0 })}
                 className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
               >
                 <option value="">No Gate (Direct Device)</option>
                 {selectedBranchGates.map(g => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
+                  <option key={String(g.id)} value={String(g.id)}>{g.name}</option>
                 ))}
               </select>
               <p className="text-xs text-muted-foreground mt-1">
@@ -1403,7 +1367,7 @@ const DeviceDialog: React.FC<{
                 size="sm"
                 onClick={async () => {
                   try {
-                    await invoke('test_device_connection', {
+                    await branchService.testDeviceConnection({
                       ip: form.ip,
                       port: form.port,
                       commKey: form.comm_key,

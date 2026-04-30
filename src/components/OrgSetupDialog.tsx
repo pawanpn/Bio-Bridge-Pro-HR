@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import branchService from '../services/branchService';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,11 +23,11 @@ export const OrgSetupDialog: React.FC<OrgSetupDialogProps> = ({ open, onOpenChan
     if(!newName.trim()) return;
     try {
       if(activeTab === 'branches') {
-        await invoke('add_branch', { name: newName, location: null });
+        await branchService.addBranch(newName, null);
       } else if (activeTab === 'departments') {
-         await invoke('create_department', { name: newName, branchId: selectedBranchId ? parseInt(selectedBranchId) : null });
+         await branchService.createDepartment(newName, selectedBranchId ? parseInt(selectedBranchId) : null);
       } else {
-         await invoke('create_designation', { name: newName, branchId: selectedBranchId ? parseInt(selectedBranchId) : null });
+         await branchService.createDesignation(newName, selectedBranchId ? parseInt(selectedBranchId) : null);
       }
       setNewName('');
       onRefresh();
@@ -36,15 +36,15 @@ export const OrgSetupDialog: React.FC<OrgSetupDialogProps> = ({ open, onOpenChan
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: number | string) => {
     if(!confirm('Are you sure you want to delete this specific entity?')) return;
     try {
       if(activeTab === 'branches') {
-         await invoke('delete_branch', { id });
+         await branchService.deleteBranch(id);
       } else if (activeTab === 'departments') {
-         await invoke('delete_department', { id });
+         await branchService.deleteDepartment(id);
       } else {
-         await invoke('delete_designation', { id });
+         await branchService.deleteDesignation(id);
       }
       onRefresh();
     } catch(err) {
