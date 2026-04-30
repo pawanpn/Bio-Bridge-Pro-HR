@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
+import toast from 'react-hot-toast';
 import {
   ArrowLeft, Mail, Phone, MapPin, Briefcase, Building,
   Calendar, Clock, Fingerprint, Shield, Smartphone,
@@ -128,6 +129,8 @@ export const EmployeeDetail: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<'profile' | 'attendance'>('profile');
   const [reportType, setReportType] = useState('complete');
+  const [printContent, setPrintContent] = useState('');
+  const [printOpen, setPrintOpen] = useState(false);
 
   useEffect(() => {
     if (!employeeId) return;
@@ -223,10 +226,14 @@ export const EmployeeDetail: React.FC = () => {
       if (sortedDates.length > 0) body += '<h4>Daily Log</h4><table style="width:100%;">'+sortedDates.map(d=>{const l=dailyGroups[d];const f=l[0].timestamp.slice(11,16);const g=l[l.length-1].timestamp.slice(11,16);return row(d,`In:${f} | Out:${g} | Punches:${l.length}`,f>'09:15');}).join('')+'</table>';
     }
 
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Employee Report</title><style>body{font-family:'Segoe UI',Arial,sans-serif;max-width:800px;margin:0 auto;padding:40px 30px;color:#222;}@media print{body{padding:20px;}}</style></head><body><div style="text-align:center;margin-bottom:20px;"><h1 style="color:#1a237e;margin:0;">BioBridge Pro HR</h1><p style="color:#666;">${typeLabel}</p><p style="color:#999;font-size:12px;">${nowStr}</p></div><div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;border-bottom:2px solid #1a237e;padding-bottom:16px;"><div style="width:56px;height:56px;border-radius:50%;background:#1a237e;color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:bold;">${(p.first_name||'?').charAt(0)}</div><div><h2 style="margin:0;">${p.full_name||'—'}</h2><p style="margin:2px 0;color:#555;">${p.employee_code||'—'} &bull; ${p.department_name||'—'}</p></div></div>${body}<p style="text-align:center;color:#999;font-size:11px;margin-top:30px;border-top:1px solid #eee;padding-top:16px;">Confidential &bull; ${nowStr}</p></body></html>`;
+    const html = `<div id="print-area" style="font-family:'Segoe UI',Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px 30px;color:#222;"><div style="text-align:center;margin-bottom:20px;"><h1 style="color:#1a237e;margin:0;">BioBridge Pro HR</h1><p style="color:#666;">${typeLabel}</p><p style="color:#999;font-size:12px;">${nowStr}</p></div><div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;border-bottom:2px solid #1a237e;padding-bottom:16px;"><div style="width:56px;height:56px;border-radius:50%;background:#1a237e;color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:bold;">${(p.first_name||'?').charAt(0)}</div><div><h2 style="margin:0;">${p.full_name||'—'}</h2><p style="margin:2px 0;color:#555;">${p.employee_code||'—'} &bull; ${p.department_name||'—'}</p></div></div>${body}<p style="text-align:center;color:#999;font-size:11px;margin-top:30px;border-top:1px solid #eee;padding-top:16px;">Confidential &bull; ${nowStr}</p></div>`;
 
-    const w = window.open('', '_blank', 'width=900,height=700');
-    if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 500); }
+    setPrintContent(html);
+    setPrintOpen(true);
+  };
+
+  const doPrint = () => {
+    window.print();
   };
 
   const handleDownload = () => {
@@ -250,6 +257,7 @@ export const EmployeeDetail: React.FC = () => {
     a.href = URL.createObjectURL(blob);
     a.download = `Employee_${p.employee_code||p.id}_${type}_report.html`;
     a.click();
+    toast.success('Report downloaded successfully');
   };
 
   if (loading) {
@@ -534,6 +542,35 @@ export const EmployeeDetail: React.FC = () => {
             <FieldRow icon={<Clock className="w-4 h-4" />} label="Last Updated" value={profile.updated_at} />
           </Section>
         </div>
+      )}
+
+      {/* Print Preview Dialog */}
+      {printOpen && (
+        <>
+          <style>{`
+            @media print {
+              body * { visibility: hidden; }
+              #print-root, #print-root * { visibility: visible; }
+              #print-root { position: absolute; left: 0; top: 0; width: 100%; }
+              #print-root .no-print { display: none !important; }
+            }
+          `}</style>
+          <div className="fixed inset-0 z-[99999] bg-black/60 flex items-start justify-center pt-4 pb-4" onClick={() => setPrintOpen(false)}>
+            <div id="print-root" className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[95vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="no-print flex items-center justify-between p-4 border-b">
+                <div>
+                  <h2 className="text-lg font-bold">Print Preview</h2>
+                  <p className="text-xs text-muted-foreground">Choose your printer and settings, then click Print</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="default" size="sm" onClick={doPrint}><Printer className="w-4 h-4 mr-1" /> Print</Button>
+                  <Button variant="outline" size="sm" onClick={() => setPrintOpen(false)}>Close</Button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-auto p-6" dangerouslySetInnerHTML={{ __html: printContent }} />
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

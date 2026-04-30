@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import branchService from '../services/branchService';
 import { useAuth } from '../context/AuthContext';
 import {
   Calendar, Upload, UserPlus,
@@ -130,9 +131,9 @@ export const AttendanceManagement: React.FC = () => {
     setLoading(true);
     try {
       const [branchData, empResult, deviceData, gateData, localId] = await Promise.all([
-        invoke<any[]>('list_branches'),
+        branchService.listBranches(),
         invoke<any>('list_employees'),
-        invoke<any[]>('list_all_devices', { branchId: selectedBranch }),
+        branchService.listAllDevices(),
         invoke<any[]>('list_gates', { branchId: selectedBranch }),
         invoke<number | null>('get_local_sync_target'),
       ]);

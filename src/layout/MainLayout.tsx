@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
-import { invoke } from '@tauri-apps/api/core';
 import { AttendanceConsole } from '../components/AttendanceConsole';
 import { ConnectivityBadge } from '../components/ConnectivityBadge';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { useAuth } from '../context/AuthContext';
 import { syncService } from '../services/syncService';
+import branchService from '../services/branchService';
 import { AppConfig } from '../config/appConfig';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,11 +47,12 @@ export const MainLayout: React.FC = () => {
   const isImpersonating = !!localStorage.getItem('biobridge_impersonate_user');
   const [calendarMode, setCalendarMode] = useState(localStorage.getItem('calendarMode') || 'BS');
   const [activeTab, setActiveTab] = useState('Overview');
-  const [branches, setBranches] = useState<{id: number, name: string}[]>([]);
+  const [branches, setBranches] = useState<{id: string | number, name: string}[]>([]);
   const [selectedBranch, setSelectedBranch] = useState<number | string>('all');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarVisible, setIsSidebarVisible] = useState(true);
   const [breadcrumbHistory, setBreadcrumbHistory] = useState<Array<{label: string, path: string}>>([]);
+  const [orgName, setOrgName] = useState<string | null>(null);
 
   // Initialize sync service
   useEffect(() => {
@@ -117,7 +118,12 @@ export const MainLayout: React.FC = () => {
   }, [location.pathname]);
 
   useEffect(() => {
-    invoke<any[]>('list_branches').then(setBranches).catch(console.error);
+    branchService.listBranches().then(setBranches).catch(console.error);
+
+    // Load organization name
+    branchService.getOrganization().then(org => {
+      if (org) setOrgName(org.name);
+    }).catch(() => {});
 
     // Set initial branch if user is branch-locked
     if (user?.branch_id) {
@@ -210,6 +216,12 @@ export const MainLayout: React.FC = () => {
           <div className="flex items-center justify-between">
             <div className="min-w-0">
               <h1 className="text-sm font-bold truncate">{AppConfig.appName}</h1>
+              {orgName && (
+                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-amber-400/80">
+                  <Building2 size={10} className="flex-shrink-0" />
+                  <span className="truncate">{orgName}</span>
+                </div>
+              )}
               <div className="flex items-center gap-1.5 mt-1 text-[10px] text-white/60">
                 <div className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
                 <span className="truncate">{user?.username} ({user?.role})</span>

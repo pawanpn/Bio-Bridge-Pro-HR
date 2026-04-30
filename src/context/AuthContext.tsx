@@ -12,6 +12,7 @@ interface User {
   department_id?: string;
   designation_id?: string;
   organization_id?: string;
+  organization_name?: string;
   must_change_password?: boolean;
 }
 
@@ -23,6 +24,7 @@ interface AuthContextType {
   changePassword: (newPassword: string) => Promise<void>;
   resetPassword: (emailOrId: string) => Promise<{ success: boolean; error?: string }>;
   loading: boolean;
+  refreshOrganization: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -139,8 +141,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         department_id: userProfile.department_id,
         designation_id: userProfile.designation_id,
         organization_id: userProfile.organization_id,
-        must_change_password: false // ⚠️ IGNORED - always false to skip password change screen
+        must_change_password: false
       };
+
+      // Load organization name if we have an org id
+      if (userProfile.organization_id) {
+        try {
+          const { data: org } = await supabase
+            .from('organizations')
+            .select('name')
+            .eq('id', userProfile.organization_id)
+            .single();
+          if (org) userData.organization_name = org.name;
+        } catch { /* ignore org name lookup failure */ }
+      }
 
       setUser(userData);
       setSupabaseUser(supabaseAuthUser);
@@ -298,6 +312,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const refreshOrganization = async () => {
+    if (!user?.organization_id) return;
+    try {
+      const { data: org } = await supabase
+        .from('organizations')
+        .select('*')
+        .eq('id', user.organization_id)
+        .single();
+      if (org && user) {
+        const updated = { ...user, organization_name: org.name };
+        setUser(updated);
+        localStorage.setItem('biobridge_user', JSON.stringify(updated));
+      }
+    } catch { /* silent */ }
+  };
+
   return (
     <AuthContext.Provider value={{ 
       user, 
@@ -306,7 +336,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       logout, 
       changePassword,
       resetPassword,
-      loading
+      loading,
+      refreshOrganization
     }}>
       {children}
     </AuthContext.Provider>
