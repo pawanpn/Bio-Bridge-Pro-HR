@@ -9,7 +9,6 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <App />
     <Toaster
       position="top-center"
-      reverseOrder={false}
       toastOptions={{
         duration: 4000,
         style: {
@@ -50,15 +49,6 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
             border: '1px solid #93c5fd',
           },
         },
-      }}
-      containerStyle={{
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        pointerEvents: 'none',
-        zIndex: 999999,
       }}
     />
   </React.StrictMode>,
