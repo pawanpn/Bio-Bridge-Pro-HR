@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { AppConfig } from '../config/appConfig';
-import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, UserPlus, UserCircle } from 'lucide-react';
+import { Shield, Lock, Eye, EyeOff, Settings, Key, Users as UsersIcon, UserPlus, UserCircle, Database } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { EmployeeProfileSidebar } from '../components/EmployeeProfileSidebar';
+import { DeviceSettings as DeviceSettingsContent } from './DeviceSettings';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -16,7 +17,7 @@ interface CloudConfig {
   rootFolderId?: string;
 }
 
-type Tab = 'general' | 'directory' | 'master' | 'users';
+type Tab = 'general' | 'functionality' | 'directory' | 'master' | 'users' | 'devices';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Page
@@ -39,39 +40,51 @@ export const SystemSettings: React.FC = () => {
   }, []);
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 900 }}>
+    <div style={{ padding: '28px 32px', maxWidth: 1100 }}>
       {/* Page Header */}
       <div style={{ marginBottom: 28 }}>
         <h1 style={{ margin: 0 }}>System Settings</h1>
         <p style={{ color: 'var(--text-muted)', marginTop: 6, marginBottom: 0 }}>
-          General configuration and protected Master Settings.
+          Manage application features, organization details, and core system preferences.
         </p>
       </div>
 
       {/* Tab Bar */}
-      <div style={{ display: 'flex', gap: 4, borderBottom: '2px solid var(--border-color)', marginBottom: 32 }}>
+      <div style={{ display: 'flex', gap: 4, borderBottom: '2px solid var(--border-color)', marginBottom: 32, overflowX: 'auto' }}>
         <TabButton
-          label="General Settings"
+          label="General"
           icon={<Settings size={15} />}
           active={activeTab === 'general'}
           onClick={() => handleTabChange('general')}
         />
         <TabButton
-          label="Employee Directory"
+          label="Functionality Control"
+          icon={<Settings size={15} />}
+          active={activeTab === 'functionality'}
+          onClick={() => handleTabChange('functionality')}
+        />
+        <TabButton
+          label="Directory"
           icon={<UsersIcon size={15} />}
           active={activeTab === 'directory'}
           onClick={() => handleTabChange('directory')}
         />
         <TabButton
-          label="Master Settings"
+          label="Master"
           icon={<Shield size={15} />}
           active={activeTab === 'master'}
           locked={!masterUnlocked}
           onClick={() => handleTabChange('master')}
         />
+        <TabButton
+          label="Devices"
+          icon={<Database size={15} />}
+          active={activeTab === 'devices'}
+          onClick={() => handleTabChange('devices')}
+        />
         {isSuperAdmin && (
           <TabButton
-            label="User Management"
+            label="Users"
             icon={<Shield size={15} />}
             active={activeTab === 'users'}
             onClick={() => handleTabChange('users')}
@@ -80,14 +93,238 @@ export const SystemSettings: React.FC = () => {
       </div>
 
       {/* Tab Content */}
-      {activeTab === 'general' && <GeneralSettings />}
-      {activeTab === 'directory' && <EmployeeDirectory />}
-      {activeTab === 'users' && <UserManagement />}
-      {activeTab === 'master' && (
-        masterUnlocked
-          ? <MasterSettingsContent onLock={() => setMasterUnlocked(false)} />
-          : <MasterLoginGate onUnlock={() => setMasterUnlocked(true)} />
-      )}
+      <div style={{ minHeight: 600 }}>
+        {activeTab === 'general' && <GeneralSettings />}
+        {activeTab === 'functionality' && <FunctionalityControl />}
+        {activeTab === 'directory' && <EmployeeDirectory />}
+        {activeTab === 'users' && <UserManagement />}
+        {activeTab === 'devices' && <DeviceSettingsContent />}
+        {activeTab === 'master' && (
+          masterUnlocked
+            ? <MasterSettingsContent onLock={() => setMasterUnlocked(false)} />
+            : <MasterLoginGate onUnlock={() => setMasterUnlocked(true)} />
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Functionality Control (New Feature)
+// ─────────────────────────────────────────────────────────────────────────────
+const FunctionalityControl: React.FC = () => {
+  const categories = [
+    { id: 'general', label: 'General', icon: '⚙️' },
+    { id: 'company', label: 'Company', icon: '🏢' },
+    { id: 'localization', label: 'Localization', icon: '🌐' },
+    { id: 'security', label: 'Security', icon: '🔒' },
+    { id: 'notifications', label: 'Notifications', icon: '🔔' },
+    { id: 'attendance', label: 'Attendance', icon: '📅' },
+    { id: 'payroll', label: 'Payroll', icon: '💰' },
+    { id: 'database', label: 'Database', icon: '💾' },
+  ];
+
+  const [activeCat, setActiveCat] = useState('general');
+  const [configs, setConfigs] = useState<{setting_key: string, setting_value: string}[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState('');
+
+  const loadConfigs = async (cat: string) => {
+    setLoading(true);
+    try {
+      const data = await invoke<any[]>('get_system_configs', { category: cat });
+      setConfigs(data);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadConfigs(activeCat);
+    
+    // Auto-initialize sync if we are in database tab and have keys
+    if (activeCat === 'database') {
+       const initSync = async () => {
+          try {
+             const data = await invoke<any[]>('get_system_configs', { category: 'database' });
+             const url = data.find(c => c.key === 'supabase_url')?.value;
+             const key = data.find(c => c.key === 'supabase_key')?.value;
+             if (url && key) {
+                await invoke('initialize_supabase_sync', { 
+                   config: { 
+                      supabase_url: url, 
+                      supabase_key: key, 
+                      organization_id: "1", // Default org
+                      encryption_key: null 
+                   } 
+                });
+             }
+          } catch (e) {}
+       };
+       initSync();
+    }
+  }, [activeCat]);
+
+  const handleSave = async (key: string, value: string) => {
+    setSaving(true);
+    try {
+      await invoke('save_system_config', { category: activeCat, key, value });
+      setStatus(`✅ ${key.replace('_', ' ')} saved!`);
+      setTimeout(() => setStatus(''), 2000);
+      loadConfigs(activeCat);
+    } catch (e) { setStatus('❌ Failed to save'); }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: 32, animation: 'fadeIn 0.3s ease-out' }}>
+      {/* Sidebar */}
+      <div style={{ width: 240, flexShrink: 0 }}>
+        {categories.map(cat => (
+          <button
+            key={cat.id}
+            onClick={() => setActiveCat(cat.id)}
+            style={{
+              width: '100%', textAlign: 'left', padding: '12px 16px', borderRadius: 8,
+              border: 'none', background: activeCat === cat.id ? 'var(--primary-color)' : 'transparent',
+              color: activeCat === cat.id ? 'white' : 'var(--text-color)',
+              cursor: 'pointer', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 12,
+              fontWeight: activeCat === cat.id ? 600 : 500, transition: 'all 0.2s',
+            }}
+          >
+            <span style={{ fontSize: 18 }}>{cat.icon}</span>
+            {cat.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Main Panel */}
+      <div style={{ flex: 1 }}>
+        <div style={cardStyle}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+            <h3 style={{ margin: 0 }}>{categories.find(c => c.id === activeCat)?.label} Functionality</h3>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+               {status && <span style={{ fontSize: 12, color: status.includes('✅') ? 'var(--success)' : 'var(--error)' }}>{status}</span>}
+               <Button 
+                 variant="outline" 
+                 size="sm" 
+                 onClick={async () => {
+                    setLoading(true);
+                    try {
+                      const res: any = await invoke('sync_to_supabase');
+                      setStatus(`✅ Synced: ${res.synced_count} records`);
+                    } catch (e) { setStatus('❌ Sync Error'); }
+                    setLoading(false);
+                 }}
+                 style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+               >
+                 <Database size={14} /> Sync Now
+               </Button>
+            </div>
+          </div>
+
+          {activeCat === 'database' && (
+            <div style={{ 
+              marginBottom: 32, padding: 20, borderRadius: 12, 
+              background: 'rgba(79, 70, 229, 0.05)', border: '1px solid rgba(79, 70, 229, 0.1)' 
+            }}>
+               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                     <h4 style={{ margin: '0 0 12px 0', fontSize: 14, color: 'var(--primary-color)' }}>☁️ Cloud Database (Supabase)</h4>
+                     <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 20px 0' }}>
+                        Your data is backed up in real-time. Ensure your Supabase URL and Service Key are configured below.
+                     </p>
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={async () => {
+                        const url = configs.find(c => c.setting_key === 'supabase_url')?.setting_value;
+                        const key = configs.find(c => c.setting_key === 'supabase_key')?.setting_value;
+                        if (!url || !key) { setStatus('❌ Config missing'); return; }
+                        setStatus('⌛ Testing...');
+                        try {
+                           await invoke('test_supabase_connection', { config: { supabase_url: url, supabase_key: key, organization_id: "1" } });
+                           setStatus('✅ Connection Successful!');
+                        } catch (e) { setStatus('❌ Connection Failed'); }
+                    }}
+                  >
+                    Test Connection
+                  </Button>
+               </div>
+               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                  <div style={{ padding: '12px 16px', background: 'var(--bg-color)', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                     <span style={labelStyle}>Bridge Status</span>
+                     <span style={{ fontSize: 14, fontWeight: 700, color: status.includes('✅') ? 'var(--success)' : 'var(--error)' }}>
+                        {status.includes('✅') ? '● Live Connected' : '● Waiting for Pulse'}
+                     </span>
+                  </div>
+                  <div style={{ padding: '12px 16px', background: 'var(--bg-color)', borderRadius: 8, border: '1px solid var(--border-color)' }}>
+                     <span style={labelStyle}>Last Activity</span>
+                     <span style={{ fontSize: 14, fontWeight: 700 }}>{new Date().toLocaleTimeString()}</span>
+                  </div>
+               </div>
+            </div>
+          )}
+
+          {loading ? (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Loading settings...</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+              {configs.map(cfg => (
+                <div key={cfg.setting_key} style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: 20 }}>
+                  <label style={{ ...labelStyle, display: 'block', marginBottom: 8, textTransform: 'capitalize' }}>
+                    {cfg.setting_key.replace(/_/g, ' ')}
+                  </label>
+                  
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <input
+                      type="text"
+                      value={cfg.setting_value || ''}
+                      onChange={(e) => {
+                        const newVal = e.target.value;
+                        setConfigs(prev => prev.map(c => c.setting_key === cfg.setting_key ? { ...c, setting_value: newVal } : c));
+                      }}
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                    <Button 
+                      variant="accent" 
+                      onClick={() => handleSave(cfg.setting_key, cfg.setting_value)}
+                      disabled={saving}
+                      className="h-10"
+                    >
+                      Update
+                    </Button>
+                  </div>
+                  {cfg.setting_key === 'office_start_time' && (
+                    <p style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 6 }}>
+                      Global office start time (e.g. 09:15). Used to calculate late entries if no specific shift is assigned to an employee.
+                    </p>
+                  )}
+                </div>
+              ))}
+
+              {/* Add New Setting Field for dynamic extensibility */}
+              <div style={{ marginTop: 20, padding: 20, border: '1px dashed var(--border-color)', borderRadius: 12 }}>
+                <h4 style={{ margin: '0 0 16px 0', fontSize: 14 }}>Add Functional Parameter</h4>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 12 }}>
+                  <input id="new-key" placeholder="Setting Key (e.g. auto_sync)" style={inputStyle} />
+                  <input id="new-val" placeholder="Initial Value" style={inputStyle} />
+                  <Button onClick={async () => {
+                    const k = (document.getElementById('new-key') as HTMLInputElement).value;
+                    const v = (document.getElementById('new-val') as HTMLInputElement).value;
+                    if(k) {
+                       await handleSave(k, v);
+                       (document.getElementById('new-key') as HTMLInputElement).value = '';
+                       (document.getElementById('new-val') as HTMLInputElement).value = '';
+                    }
+                  }}>Add</Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

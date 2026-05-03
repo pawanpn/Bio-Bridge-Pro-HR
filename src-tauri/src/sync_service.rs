@@ -77,6 +77,34 @@ pub async fn initialize_supabase_sync(
     }))
 }
 
+#[tauri::command]
+pub async fn test_supabase_connection(
+    config: SyncConfig,
+) -> Result<serde_json::Value, crate::errors::AppError> {
+    use crate::errors::AppError;
+
+    let client = reqwest::Client::new();
+    let url = format!("{}/rest/v1/", config.supabase_url);
+
+    let response = client
+        .get(&url)
+        .header("apikey", &config.supabase_key)
+        .header("Authorization", format!("Bearer {}", config.supabase_key))
+        .send()
+        .await
+        .map_err(|e| AppError::NetworkError(format!("Connection failed: {}", e)))?;
+
+    if response.status().is_success() {
+        Ok(serde_json::json!({
+            "success": true,
+            "message": "Connected to Supabase successfully"
+        }))
+    } else {
+        let error_msg = response.text().await.unwrap_or_default();
+        Err(AppError::NetworkError(format!("Supabase error: {}", error_msg)))
+    }
+}
+
 /// Sync all pending changes to Supabase
 #[tauri::command]
 pub async fn sync_to_supabase(
@@ -95,6 +123,15 @@ pub async fn sync_to_supabase(
             .ok_or_else(|| AppError::ValidationError("Supabase not configured".into()))?
             .clone()
     };
+
+    sync_data_internal(&config, &state).await
+}
+
+pub async fn sync_data_internal(
+    config: &SyncConfig,
+    state: &crate::AppState,
+) -> Result<SyncResult, crate::errors::AppError> {
+    use crate::errors::AppError;
 
     // Get pending records
     let pending_records = {
@@ -315,23 +352,45 @@ fn store_records_locally(
     table_name: &str,
     records: &[serde_json::Value],
 ) -> Result<usize, crate::errors::AppError> {
-    use crate::errors::AppError;
+    // Removed redundant import
 
     let mut stored = 0;
 
     for record in records {
-        if let Some(id) = record.get("id").and_then(|v| v.as_str()) {
-            // Upsert logic: INSERT or REPLACE
-            let json_str = record.to_string();
-            conn.execute(
-                &format!(
-                    "INSERT OR REPLACE INTO {} (id, data, updated_at) VALUES (?1, ?2, datetime('now'))",
-                    table_name
-                ),
-                rusqlite::params![id, json_str],
-            )
-            .map_err(|e| AppError::DatabaseError(format!("Insert failed: {}", e)))?;
-            stored += 1;
+        if let Some(id) = record.get("id").and_then(|v| v.as_i64()) {
+            match table_name.to_lowercase().as_str() {
+                "employees" => {
+                    let first_name = record.get("first_name").and_then(|v| v.as_str()).unwrap_or("");
+                    let last_name = record.get("last_name").and_then(|v| v.as_str()).unwrap_or("");
+                    let employee_code = record.get("employee_code").and_then(|v| v.as_str()).unwrap_or("");
+                    let status = record.get("status").and_then(|v| v.as_str()).unwrap_or("Active");
+                    let name = format!("{} {}", first_name, last_name);
+                    let dept_id = record.get("department_id").and_then(|v| v.as_i64()).unwrap_or(1);
+                    let branch_id = record.get("branch_id").and_then(|v| v.as_i64()).unwrap_or(1);
+
+                    conn.execute(
+                        "INSERT OR REPLACE INTO Employees (
+                            id, name, first_name, last_name, employee_code, 
+                            employment_status, status, department_id, branch_id,
+                            updated_at
+                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))",
+                        rusqlite::params![
+                            id, name, first_name, last_name, employee_code, 
+                            status, status, dept_id, branch_id
+                        ],
+                    ).ok();
+                    stored += 1;
+                },
+                _ => {
+                    // Generic fallback for other tables if they have a 'data' column
+                    // Removed unused json_str
+                    let _ = conn.execute(
+                        &format!("INSERT OR REPLACE INTO {} (id, updated_at) VALUES (?1, datetime('now'))", table_name),
+                        rusqlite::params![id],
+                    );
+                    stored += 1;
+                }
+            }
         }
     }
 

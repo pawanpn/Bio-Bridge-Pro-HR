@@ -10,7 +10,7 @@ use std::time::Duration;
 use crate::models::{AttendanceLog, DeviceBrand};
 use crate::errors::AppError;
 
-const CONNECT_TIMEOUT_SECS: u64 = 10;
+const CONNECT_TIMEOUT_SECS: u64 = 65;
 const MAX_RETRIES: u32 = 3;
 const RETRY_DELAY_SECS: u64 = 1;
 
@@ -18,10 +18,12 @@ const RETRY_DELAY_SECS: u64 = 1;
 /// To add a new brand: implement this trait and register it in `get_driver()`.
 #[async_trait]
 pub trait DeviceDriver: Send + Sync {
-    async fn sync_logs(&self, ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, last_timestamp: Option<String>) -> Result<Vec<AttendanceLog>, AppError>;
+    async fn sync_logs(&self, ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, last_timestamp: Option<String>) -> Result<(Vec<crate::models::UserInfo>, Vec<AttendanceLog>), AppError>;
     async fn get_all_user_info(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32) -> Result<Vec<crate::models::UserInfo>, AppError>;
     async fn test_connectivity(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32) -> Result<(), AppError>;
     async fn listen_realtime(&self, ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError>;
+    async fn push_user_info(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32, user_id: i32, name: &str, role: i32, card_no: &str) -> Result<(), AppError>;
+    async fn pull_user_biometric(&self, ip: &str, port: u16, comm_key: i32, machine_number: i32, user_id: i32) -> Result<serde_json::Value, AppError>;
     fn brand_name(&self) -> &'static str;
 }
 
@@ -39,9 +41,9 @@ pub async fn test_device(ip: &str, port: u16, comm_key: i32, machine_number: i32
     let driver = get_driver(&brand)?;
     // Use a longer timeout for tests since the driver might retry 3 times internally (3s each)
     tokio::time::timeout(
-        Duration::from_secs(15), 
+        Duration::from_secs(30), 
         driver.test_connectivity(ip, port, comm_key, machine_number)
-    ).await.map_err(|_| AppError::TimeoutError(15, 1))?
+    ).await.map_err(|_| AppError::TimeoutError(30, 1))?
 }
 
 /// Retry wrapper: up to MAX_RETRIES attempts, each with CONNECT_TIMEOUT_SECS hard cap.
@@ -54,7 +56,7 @@ async fn with_retry(
     device_id: i32,
     machine_number: i32,
     last_timestamp: Option<String>,
-) -> Result<Vec<AttendanceLog>, AppError> {
+) -> Result<(Vec<crate::models::UserInfo>, Vec<AttendanceLog>), AppError> {
     let mut last_err = AppError::Unknown("No attempts made".to_string());
 
     for attempt in 1..=MAX_RETRIES {
@@ -69,11 +71,11 @@ async fn with_retry(
         .await;
 
         match result {
-            Ok(Ok(logs)) => {
+            Ok(Ok(data)) => {
                 if attempt > 1 {
                     eprintln!("[{}] Succeeded on attempt {}", driver.brand_name(), attempt);
                 }
-                return Ok(logs);
+                return Ok(data);
             }
             Ok(Err(e)) => {
                 eprintln!("[{} @ {}] Attempt {}/{} failed: {}", driver.brand_name(), ip, attempt, MAX_RETRIES, e);
@@ -94,7 +96,7 @@ async fn with_retry(
 }
 
 /// Public sync facade: resolves driver from brand, then applies retry logic.
-pub async fn sync_device(ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, brand: DeviceBrand, last_timestamp: Option<String>) -> Result<Vec<AttendanceLog>, AppError> {
+pub async fn sync_device(ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, brand: DeviceBrand, last_timestamp: Option<String>) -> Result<(Vec<crate::models::UserInfo>, Vec<AttendanceLog>), AppError> {
     let driver = get_driver(&brand)?;
     with_retry(driver, ip.to_string(), port, comm_key, device_id, machine_number, last_timestamp).await
 }
@@ -109,4 +111,16 @@ pub async fn get_all_user_info(ip: &str, port: u16, comm_key: i32, machine_numbe
 pub async fn listen_device(ip: &str, port: u16, comm_key: i32, device_id: i32, machine_number: i32, brand: DeviceBrand, app_handle: tauri::AppHandle, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<(), AppError> {
     let driver = get_driver(&brand)?;
     driver.listen_realtime(ip, port, comm_key, device_id, machine_number, app_handle, cancel).await
+}
+
+/// Public push user facade: sets user details on the device
+pub async fn push_user_info(ip: &str, port: u16, comm_key: i32, machine_number: i32, brand: DeviceBrand, user_id: i32, name: &str, role: i32, card_no: &str) -> Result<(), AppError> {
+    let driver = get_driver(&brand)?;
+    driver.push_user_info(ip, port, comm_key, machine_number, user_id, name, role, card_no).await
+}
+
+/// Public pull biometric facade: retrieves fingerprint/face templates from device
+pub async fn pull_user_biometric(ip: &str, port: u16, comm_key: i32, machine_number: i32, brand: DeviceBrand, user_id: i32) -> Result<serde_json::Value, AppError> {
+    let driver = get_driver(&brand)?;
+    driver.pull_user_biometric(ip, port, comm_key, machine_number, user_id).await
 }

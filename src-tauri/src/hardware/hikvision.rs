@@ -15,7 +15,7 @@ pub struct HikvisionDriver;
 impl DeviceDriver for HikvisionDriver {
     fn brand_name(&self) -> &'static str { "Hikvision" }
 
-    async fn sync_logs(&self, ip: &str, port: u16, _comm_key: i32, device_id: i32, _machine_number: i32, _last_timestamp: Option<String>) -> Result<Vec<AttendanceLog>, AppError> {
+    async fn sync_logs(&self, ip: &str, port: u16, _comm_key: i32, device_id: i32, _machine_number: i32, _last_timestamp: Option<String>) -> Result<(Vec<crate::models::UserInfo>, Vec<AttendanceLog>), AppError> {
         let url = format!("http://{}:{}/ISAPI/AccessControl/AcsEvent?format=json", ip, port);
         let client = Client::builder().timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS)).build().map_err(|e| AppError::ConnectionError(e.to_string()))?;
 
@@ -45,7 +45,7 @@ impl DeviceDriver for HikvisionDriver {
                 }
             }
         }
-        Ok(attendance_logs)
+        Ok((Vec::new(), attendance_logs))
     }
 
     async fn get_all_user_info(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32) -> Result<Vec<crate::models::UserInfo>, AppError> {
@@ -111,5 +111,12 @@ impl DeviceDriver for HikvisionDriver {
             }
         }
         Ok(())
+    }
+    async fn push_user_info(&self, _ip: &str, _port: u16, _comm_key: i32, _machine_number: i32, _user_id: i32, _name: &str, _role: i32, _card_no: &str) -> Result<(), AppError> {
+        Err(AppError::Unknown("Push user info not implemented for Hikvision driver yet".into()))
+    }
+
+    async fn pull_user_biometric(&self, _ip: &str, _port: u16, _comm_key: i32, _machine_number: i32, _user_id: i32) -> Result<serde_json::Value, AppError> {
+        Err(AppError::Unknown("Pull biometric not implemented for Hikvision driver yet".into()))
     }
 }

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,7 +21,6 @@ import {
   AlertCircle,
   CheckCircle2
 } from 'lucide-react';
-import { supabase } from '@/config/supabase';
 
 interface SystemSetting {
   id?: string;
@@ -114,100 +114,69 @@ export const DynamicSystemSettings: React.FC = () => {
   const loadSettings = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('system_settings')
-        .select('*')
-        .order('category', { ascending: true })
-        .order('setting_key', { ascending: true });
-
-      if (error) throw error;
+      const data = await invoke<SystemSetting[]>('get_all_system_configs');
       setSettings(data || []);
     } catch (error: any) {
       console.error('Error loading settings:', error);
-      setErrorMessage('Failed to load settings: ' + error.message);
+      setErrorMessage('Failed to load settings: ' + error);
     } finally {
       setLoading(false);
     }
   };
 
-  const updateSetting = async (id: string | undefined, setting: SystemSetting) => {
+  const updateSettingLocal = (id: string | undefined, value: string) => {
+    setSettings(prev => prev.map(s => s.id === id ? { ...s, setting_value: value } : s));
+  };
+
+  const saveSettingToBackend = async (setting: SystemSetting) => {
     try {
       setSaving(true);
       setSuccessMessage('');
       setErrorMessage('');
 
-      if (id) {
-        // Update existing
-        const { error } = await supabase
-          .from('system_settings')
-          .update({
-            setting_value: setting.setting_value,
-            setting_type: setting.setting_type,
-            description: setting.description,
-            is_public: setting.is_public,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', id);
+      await invoke('save_system_config', {
+          category: setting.category,
+          key: setting.setting_key,
+          value: setting.setting_value
+      });
 
-        if (error) throw error;
-        setSuccessMessage('Setting updated successfully');
-      } else {
-        // Create new
-        const { error } = await supabase
-          .from('system_settings')
-          .insert({
-            setting_key: setting.setting_key,
-            setting_value: setting.setting_value,
-            setting_type: setting.setting_type,
-            category: setting.category,
-            description: setting.description,
-            is_public: setting.is_public
-          });
-
-        if (error) throw error;
-        setSuccessMessage('Setting created successfully');
-        setShowAddSetting(false);
-        setNewSetting({
+      setSuccessMessage('Setting saved: ' + setting.setting_key);
+      setShowAddSetting(false);
+      setNewSetting({
           setting_key: '',
           setting_value: '',
           setting_type: 'string',
           category: 'general',
           description: '',
           is_public: true
-        });
-      }
+      });
 
-      // Reload settings
       await loadSettings();
-      
-      // Clear success message after 3 seconds
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (error: any) {
       console.error('Error saving setting:', error);
-      setErrorMessage('Failed to save setting: ' + error.message);
+      setErrorMessage('Failed to save setting: ' + error);
       setTimeout(() => setErrorMessage(''), 5000);
     } finally {
       setSaving(false);
     }
   };
 
-  const deleteSetting = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this setting?')) return;
+  const deleteSetting = async (setting: SystemSetting) => {
+    if (!confirm(`Are you sure you want to delete "${setting.setting_key}"?`)) return;
 
     try {
-      const { error } = await supabase
-        .from('system_settings')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
+      await invoke('delete_system_config', { 
+          category: setting.category, 
+          key: setting.setting_key 
+      });
 
       setSuccessMessage('Setting deleted successfully');
       await loadSettings();
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (error: any) {
       console.error('Error deleting setting:', error);
-      setErrorMessage('Failed to delete setting: ' + error.message);
+      setErrorMessage('Failed to delete setting: ' + error);
       setTimeout(() => setErrorMessage(''), 5000);
     }
   };
@@ -217,12 +186,9 @@ export const DynamicSystemSettings: React.FC = () => {
       case 'boolean':
         return (
           <select
-            className="w-full px-3 py-2 border rounded-md"
+            className="w-full px-3 py-2 border rounded-md outline-none focus:ring-1 focus:ring-primary"
             value={setting.setting_value}
-            onChange={(e) => {
-              const updated = { ...setting, setting_value: e.target.value };
-              updateSetting(setting.id, updated);
-            }}
+            onChange={(e) => updateSettingLocal(setting.id, e.target.value)}
           >
             <option value="true">Enabled</option>
             <option value="false">Disabled</option>
@@ -234,23 +200,17 @@ export const DynamicSystemSettings: React.FC = () => {
           <Input
             type="number"
             value={setting.setting_value}
-            onChange={(e) => {
-              const updated = { ...setting, setting_value: e.target.value };
-              updateSetting(setting.id, updated);
-            }}
+            onChange={(e) => updateSettingLocal(setting.id, e.target.value)}
           />
         );
       
       case 'json':
         return (
           <textarea
-            className="w-full px-3 py-2 border rounded-md font-mono text-sm"
+            className="w-full px-3 py-2 border rounded-md font-mono text-sm outline-none focus:ring-1 focus:ring-primary"
             rows={4}
             value={setting.setting_value}
-            onChange={(e) => {
-              const updated = { ...setting, setting_value: e.target.value };
-              updateSetting(setting.id, updated);
-            }}
+            onChange={(e) => updateSettingLocal(setting.id, e.target.value)}
           />
         );
       
@@ -259,10 +219,7 @@ export const DynamicSystemSettings: React.FC = () => {
           <Input
             type="text"
             value={setting.setting_value}
-            onChange={(e) => {
-              const updated = { ...setting, setting_value: e.target.value };
-              updateSetting(setting.id, updated);
-            }}
+            onChange={(e) => updateSettingLocal(setting.id, e.target.value)}
           />
         );
     }
@@ -382,14 +339,25 @@ export const DynamicSystemSettings: React.FC = () => {
                                 </p>
                               )}
                             </div>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => deleteSetting(setting.id!)}
-                            >
-                              <Trash2 size={16} className="text-red-500" />
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={saving}
+                                onClick={() => saveSettingToBackend(setting)}
+                              >
+                                Save Changes
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 hover:bg-red-50"
+                                onClick={() => deleteSetting(setting)}
+                                title="Delete setting"
+                              >
+                                <Trash2 size={16} className="text-red-500" />
+                              </Button>
+                            </div>
                           </div>
                           {renderSettingInput(setting)}
                         </div>
@@ -518,7 +486,7 @@ export const DynamicSystemSettings: React.FC = () => {
                 </Button>
                 <Button 
                   className="flex-1" 
-                  onClick={() => updateSetting(undefined, newSetting)}
+                  onClick={() => saveSettingToBackend(newSetting)}
                   disabled={!newSetting.setting_key || !newSetting.setting_value}
                 >
                   {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}

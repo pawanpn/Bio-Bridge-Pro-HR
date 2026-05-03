@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../context/AuthContext';
+import { supabase } from '@/config/supabase';
+import { Switch } from '@/components/ui/switch';
 import {
   Users, UserPlus, Search, Filter, Download, Upload,
   Edit2, Trash2, Eye, FileText, Calendar, MapPin, Phone, Mail,
-  HardDrive, Loader2, AlertCircle, CheckCircle, Info
+  HardDrive, Loader2, AlertCircle, CheckCircle, Info,
+  Settings, User, Shield, Clock, FileStack, Smartphone, Fingerprint, MessageSquare, Plus, X, Key
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { OrgSetupDialog } from '../components/OrgSetupDialog';
 import {
   Dialog,
   DialogContent,
@@ -56,6 +60,40 @@ interface EmployeeForm {
   emergency_contact_name: string;
   emergency_contact_phone: string;
   emergency_contact_relation: string;
+  area_id: string;
+  location_id: string;
+  photo: string;
+  enable_self_service: boolean;
+  enable_mobile_access: boolean;
+  local_name: string;
+  national_id: string;
+  contact_tel: string;
+  office_tel: string;
+  motorcycle_license: string;
+  automobile_license: string;
+  religion: string;
+  city: string;
+  postcode: string;
+  passport_no: string;
+  nationality: string;
+  verification_mode: string;
+  device_privilege: string;
+  device_password: string;
+  card_no: string;
+  bio_photo: string;
+  enable_attendance: boolean;
+  enable_holiday: boolean;
+  outdoor_management: boolean;
+  workflow_role: string;
+  mobile_punch: boolean;
+  app_role: string;
+  whatsapp_alert: boolean;
+  whatsapp_exception: boolean;
+  whatsapp_punch: boolean;
+  supervisor_mobile: string;
+  biometric_id?: number | string;
+  shift_start_time?: string;
+  shift_end_time?: string;
 }
 
 const emptyForm: EmployeeForm = {
@@ -84,10 +122,44 @@ const emptyForm: EmployeeForm = {
   emergency_contact_name: '',
   emergency_contact_phone: '',
   emergency_contact_relation: '',
+  area_id: '',
+  location_id: '',
+  photo: '',
+  enable_self_service: false,
+  enable_mobile_access: false,
+  local_name: '',
+  national_id: '',
+  contact_tel: '',
+  office_tel: '',
+  motorcycle_license: '',
+  automobile_license: '',
+  religion: '',
+  city: '',
+  postcode: '',
+  passport_no: '',
+  nationality: '',
+  verification_mode: '',
+  device_privilege: '',
+  device_password: '',
+  card_no: '',
+  bio_photo: '',
+  enable_attendance: true,
+  enable_holiday: true,
+  outdoor_management: false,
+  workflow_role: '',
+  mobile_punch: false,
+  app_role: 'employee',
+  whatsapp_alert: false,
+  whatsapp_exception: false,
+  whatsapp_punch: false,
+  supervisor_mobile: '',
+  biometric_id: '',
+  shift_start_time: '',
+  shift_end_time: '',
 };
 
 export const EmployeeManagement: React.FC = () => {
-  const { user } = useAuth();
+  const { user, resetPassword } = useAuth();
   
   // State
   const [employees, setEmployees] = useState<any[]>([]);
@@ -97,12 +169,14 @@ export const EmployeeManagement: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [viewMode, setViewMode] = useState<'directory' | 'setup' | 'deleted'>('directory');
   
   // Dialogs
   const [formDialog, setFormDialog] = useState({ open: false, editing: null as any });
   const [viewDialog, setViewDialog] = useState({ open: false, employee: null as any });
   const [deleteDialog, setDeleteDialog] = useState({ open: false, employee: null as any });
   const [importDialog, setImportDialog] = useState({ open: false });
+  const [orgSetupOpen, setOrgSetupOpen] = useState(false);
   
   // Import state
   const [devices, setDevices] = useState<any[]>([]);
@@ -115,6 +189,7 @@ export const EmployeeManagement: React.FC = () => {
   const [formData, setFormData] = useState<EmployeeForm>(emptyForm);
   const [formStep, setFormStep] = useState(1);
   const [formStatus, setFormStatus] = useState('');
+  const [debugInfo, setDebugInfo] = useState<any>(null);
 
   // Load data
   useEffect(() => {
@@ -127,16 +202,18 @@ export const EmployeeManagement: React.FC = () => {
     return () => {
       window.removeEventListener('data-synced', handleDataSynced);
     };
-  }, []);
+  }, [viewMode]);
 
   const loadData = async () => {
     setLoading(true);
     try {
       console.log('[EmployeeManagement] Loading data...');
-      const [empResult, branchData, deviceData] = await Promise.all([
-        invoke<any>('list_employees'),
+      const [empResult, branchData, deviceData, deptData, desigData] = await Promise.all([
+        invoke<any>('list_employees', { statusFilter: viewMode === 'deleted' ? 'deleted' : 'active' }),
         invoke<any[]>('list_branches'),
         invoke<any[]>('list_all_devices'),
+        invoke<any[]>('list_departments'),
+        invoke<any[]>('list_designations'),
       ]);
       
       console.log('[EmployeeManagement] Raw branch data:', branchData);
@@ -156,6 +233,11 @@ export const EmployeeManagement: React.FC = () => {
       setEmployees(empData);
       setBranches(branches);
       setDevices(devices);
+      setDepartments(Array.isArray(deptData) ? deptData : []);
+      setDesignations(Array.isArray(desigData) ? desigData : []);
+      if ((empResult as any)?.debug) {
+        setDebugInfo((empResult as any).debug);
+      }
     } catch (error) {
       console.error('Failed to load data:', error);
       setEmployees([]);
@@ -175,12 +257,73 @@ export const EmployeeManagement: React.FC = () => {
     return matchesSearch && matchesStatus;
   });
 
+  const filteredDepartments = formData.branch_id 
+    ? departments.filter(d => !d.branch_id || d.branch_id.toString() === formData.branch_id?.toString())
+    : departments;
+
+  const filteredDesignations = formData.branch_id 
+    ? designations.filter(d => !d.branch_id || d.branch_id.toString() === formData.branch_id?.toString())
+    : designations;
+
   // Form handlers
+  const handleNextStep = () => {
+    if (formStep < 8) setFormStep(s => s + 1);
+  };
+
+  const handlePrevStep = () => {
+    if (formStep > 1) setFormStep(s => s - 1);
+  };
+
+  const handleNextEmployee = () => {
+    if (!formDialog.editing) return;
+    const currentIndex = filteredEmployees.findIndex(e => e.id === formDialog.editing.id);
+    if (currentIndex < filteredEmployees.length - 1) {
+      handleEditEmployee(filteredEmployees[currentIndex + 1]);
+    }
+  };
+
+  const handlePrevEmployee = () => {
+    if (!formDialog.editing) return;
+    const currentIndex = filteredEmployees.findIndex(e => e.id === formDialog.editing.id);
+    if (currentIndex > 0) {
+      handleEditEmployee(filteredEmployees[currentIndex - 1]);
+    }
+  };
+
   const handleAddEmployee = () => {
-    setFormData(emptyForm);
-    setFormStep(1);
-    setFormStatus('');
-    setFormDialog({ open: true, editing: null });
+    const checkLimit = async () => {
+      try {
+        const userId = (window as any).__biobridge_user?.id;
+        if (!userId) return null;
+
+        const { data: userData } = await supabase.from('users').select('organization_id').eq('id', userId).single();
+        if (!userData?.organization_id) return null;
+
+        const orgId = userData.organization_id;
+        const [{ data: org }, { count }] = await Promise.all([
+          supabase.from('organizations').select('max_users').eq('id', orgId).single(),
+          supabase.from('users').select('*', { count: 'exact', head: true }).eq('organization_id', orgId)
+        ]);
+
+        if (org?.max_users && count && count >= org.max_users) {
+          return `User limit reached (${count}/${org.max_users}). Contact your provider to upgrade.`;
+        }
+        return null;
+      } catch { return null; }
+    };
+
+    checkLimit().then(limitMsg => {
+      if (limitMsg) {
+        setFormStatus(`❌ ${limitMsg}`);
+        return;
+      }
+      const maxId = employees.reduce((max, emp) => Math.max(max, parseInt(emp.id) || 0), 0);
+      const nextCode = `BB-${String(maxId + 1).padStart(4, '0')}`;
+      setFormData({ ...emptyForm, employee_code: nextCode });
+      setFormStep(1);
+      setFormStatus('');
+      setFormDialog({ open: true, editing: null });
+    });
   };
 
   const handleEditEmployee = (emp: any) => {
@@ -225,19 +368,51 @@ export const EmployeeManagement: React.FC = () => {
         reporting_manager_id: formData.reporting_manager_id || undefined,
         bank_name: formData.bank_name || undefined,
         account_number: formData.account_number || undefined,
-        emergency_contact_name: formData.emergency_contact_name || undefined,
-        emergency_contact_phone: formData.emergency_contact_phone || undefined,
         emergency_contact_relation: formData.emergency_contact_relation || undefined,
+        area_id: formData.area_id || undefined,
+        location_id: formData.location_id || undefined,
+        photo: formData.photo || undefined,
+        enable_self_service: formData.enable_self_service,
+        enable_mobile_access: formData.enable_mobile_access,
+        local_name: formData.local_name || undefined,
+        national_id: formData.national_id || undefined,
+        contact_tel: formData.contact_tel || undefined,
+        office_tel: formData.office_tel || undefined,
+        motorcycle_license: formData.motorcycle_license || undefined,
+        automobile_license: formData.automobile_license || undefined,
+        religion: formData.religion || undefined,
+        city: formData.city || undefined,
+        postcode: formData.postcode || undefined,
+        passport_no: formData.passport_no || undefined,
+        nationality: formData.nationality || undefined,
+        verification_mode: formData.verification_mode || undefined,
+        device_privilege: formData.device_privilege || undefined,
+        device_password: formData.device_password || undefined,
+        card_no: formData.card_no || undefined,
+        bio_photo: formData.bio_photo || undefined,
+        enable_attendance: formData.enable_attendance,
+        enable_holiday: formData.enable_holiday,
+        outdoor_management: formData.outdoor_management,
+        workflow_role: formData.workflow_role || undefined,
+        mobile_punch: formData.mobile_punch,
+        app_role: formData.app_role || undefined,
+        whatsapp_alert: formData.whatsapp_alert,
+        whatsapp_exception: formData.whatsapp_exception,
+        whatsapp_punch: formData.whatsapp_punch,
+        supervisor_mobile: formData.supervisor_mobile || undefined,
+        biometric_id: formData.biometric_id ? parseInt(String(formData.biometric_id)) : undefined,
+        shift_start_time: formData.shift_start_time || undefined,
+        shift_end_time: formData.shift_end_time || undefined,
       };
 
       // Save using the crud commands (local SQLite first)
       if (formDialog.editing) {
-        await invoke('crud::update_employee', {
+        await invoke('update_employee', {
           employeeId: formDialog.editing.id,
           request,
         });
       } else {
-        await invoke('crud::create_employee', { request });
+        await invoke('create_employee', { request });
       }
 
       setFormStatus('✅ Employee saved successfully!');
@@ -251,14 +426,82 @@ export const EmployeeManagement: React.FC = () => {
     }
   };
 
+  const handleSyncToDevice = async () => {
+    if (!formDialog.editing || !formData.biometric_id) {
+      setFormStatus('❌ Biometric ID is required to sync to device');
+      return;
+    }
+
+    if (devices.length === 0) {
+      setFormStatus('❌ No devices available to sync');
+      return;
+    }
+
+    setLoading(true);
+    setFormStatus('🔄 Syncing user to device...');
+    try {
+      await invoke('push_employee_to_device', {
+        deviceId: parseInt(selectedDeviceId) || devices[0].id,
+        employeeId: formDialog.editing.id,
+      });
+      setFormStatus('✅ Employee name synced to device successfully!');
+    } catch (error: any) {
+      console.error('Sync error:', error);
+      setFormStatus('❌ Sync failed: ' + (error?.message || error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePullBiometric = async () => {
+    if (!formDialog.editing || !formData.biometric_id) {
+      setFormStatus('❌ Biometric ID is required to pull data');
+      return;
+    }
+
+    if (devices.length === 0) {
+      setFormStatus('❌ No devices available');
+      return;
+    }
+
+    setLoading(true);
+    setFormStatus('🔄 Pulling biometric from device...');
+    try {
+      const data = await invoke('pull_employee_biometric', {
+        deviceId: parseInt(selectedDeviceId) || devices[0].id,
+        employeeId: formDialog.editing.id,
+      });
+      console.log('Pulled biometric data:', data);
+      setFormStatus('✅ Biometric pulled successfully! (Verified ' + (Array.isArray(data) ? data.length : 0) + ' templates)');
+    } catch (error: any) {
+      console.error('Pull error:', error);
+      setFormStatus('❌ Pull failed: ' + (error?.message || error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleDeleteEmployee = async () => {
     if (!deleteDialog.employee) return;
     try {
-      await invoke('crud::delete_employee', { employeeId: deleteDialog.employee.id });
+      await invoke('delete_employee', { employeeId: deleteDialog.employee.id });
       setDeleteDialog({ open: false, employee: null });
       loadData();
     } catch (error) {
       console.error('Failed to delete:', error);
+    }
+  };
+
+  const handleRestoreEmployee = async (id: number) => {
+    try {
+      setLoading(true);
+      await invoke('restore_employee', { employeeId: id });
+      loadData();
+    } catch (error: any) {
+      console.error('Restore error:', error);
+      alert('Failed to restore: ' + (error?.message || error));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -337,20 +580,26 @@ export const EmployeeManagement: React.FC = () => {
             Manage employee master data, personal details, and employment information
           </p>
         </div>
-        <div className="flex gap-3">
-          <Button variant="outline" onClick={handleImportFromDevice}>
-            <HardDrive className="w-4 h-4 mr-2" />
-            Import from Device
-          </Button>
-          <Button variant="outline" onClick={exportToCSV}>
-            <Download className="w-4 h-4 mr-2" />
-            Export CSV
-          </Button>
-          <Button onClick={handleAddEmployee}>
-            <UserPlus className="w-4 h-4 mr-2" />
-            Add Employee
-          </Button>
-        </div>
+        {viewMode === 'setup' && (
+          <div className="flex gap-3">
+            <Button variant="outline" onClick={() => setOrgSetupOpen(true)}>
+              <Settings className="w-4 h-4 mr-2" />
+              Org Structure
+            </Button>
+            <Button variant="outline" onClick={handleImportFromDevice}>
+              <HardDrive className="w-4 h-4 mr-2" />
+              Import from Device
+            </Button>
+            <Button variant="outline" onClick={exportToCSV}>
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </Button>
+            <Button onClick={handleAddEmployee}>
+              <UserPlus className="w-4 h-4 mr-2" />
+              Add Employee
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Stats Cards */}
@@ -402,7 +651,31 @@ export const EmployeeManagement: React.FC = () => {
       {/* Filters */}
       <Card className="mb-6">
         <CardContent className="p-4">
-          <div className="flex gap-4">
+          <div className="flex gap-4 items-center">
+            <div className="flex gap-2 bg-muted/50 p-1 rounded-lg border border-border/50 mr-2">
+              <Button 
+                variant={viewMode === 'directory' ? 'default' : 'ghost'} 
+                onClick={() => setViewMode('directory')}
+                className="rounded-md"
+              >
+                Directory
+              </Button>
+              <Button 
+                variant={viewMode === 'setup' ? 'secondary' : 'ghost'} 
+                onClick={() => setViewMode('setup')}
+                className="rounded-md gap-2"
+              >
+                Setup
+              </Button>
+              <Button 
+                variant={viewMode === 'deleted' ? 'destructive' : 'ghost'} 
+                onClick={() => setViewMode('deleted')}
+                className="rounded-md gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                Archive
+              </Button>
+            </div>
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
@@ -432,11 +705,13 @@ export const EmployeeManagement: React.FC = () => {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Employee Code</TableHead>
+                <TableHead>Employee ID</TableHead>
+                <TableHead>Attendance Device ID</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Department</TableHead>
                 <TableHead>Branch</TableHead>
                 <TableHead>Status</TableHead>
+                {viewMode === 'deleted' && <TableHead>Deleted Date</TableHead>}
                 <TableHead>Joining Date</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
@@ -456,6 +731,7 @@ export const EmployeeManagement: React.FC = () => {
                 filteredEmployees.map(emp => (
                   <TableRow key={emp.id} className="cursor-pointer hover:bg-muted/50">
                     <TableCell className="font-mono text-sm">{emp.employee_code || `#${emp.id}`}</TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-xs">{emp.biometric_id || '—'}</TableCell>
                     <TableCell className="font-medium">
                       {emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || '—'}
                     </TableCell>
@@ -466,6 +742,11 @@ export const EmployeeManagement: React.FC = () => {
                         {emp.employment_status || 'Active'}
                       </Badge>
                     </TableCell>
+                    {viewMode === 'deleted' && (
+                      <TableCell className="text-red-600 font-medium text-xs">
+                        {emp.deleted_at || '—'}
+                      </TableCell>
+                    )}
                     <TableCell className="text-muted-foreground text-sm">
                       {emp.date_of_joining || '—'}
                     </TableCell>
@@ -474,12 +755,36 @@ export const EmployeeManagement: React.FC = () => {
                         <Button variant="ghost" size="icon" onClick={() => setViewDialog({ open: true, employee: emp })}>
                           <Eye className="w-4 h-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleEditEmployee(emp)}>
-                          <Edit2 className="w-4 h-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => setDeleteDialog({ open: true, employee: emp })}>
-                          <Trash2 className="w-4 h-4 text-destructive" />
-                        </Button>
+                        {viewMode === 'setup' && (
+                          <>
+                            <Button variant="ghost" size="icon" title="Reset Password" onClick={async () => {
+                              if(confirm('Send password reset email to this employee?')) {
+                                const res = await resetPassword(emp.employee_code || emp.email);
+                                if(res.success) alert('Password reset link sent to the employee.');
+                                else alert('Failed to send reset link: ' + res.error);
+                              }
+                            }}>
+                              <Key className="w-4 h-4 text-orange-500" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => handleEditEmployee(emp)}>
+                              <Edit2 className="w-4 h-4" />
+                            </Button>
+                            <Button variant="ghost" size="icon" onClick={() => setDeleteDialog({ open: true, employee: emp })}>
+                              <Trash2 className="w-4 h-4 text-destructive" />
+                            </Button>
+                          </>
+                        )}
+                        {viewMode === 'deleted' && (
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            onClick={() => handleRestoreEmployee(emp.id)}
+                            className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                            title="Restore"
+                          >
+                            <CheckCircle className="w-4 h-4" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -490,211 +795,683 @@ export const EmployeeManagement: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* Debug Info Footer */}
+      {debugInfo && (
+        <div className="mt-4 p-2 bg-muted/30 rounded text-[10px] font-mono flex gap-4 text-muted-foreground uppercase">
+          <span>Row Count in DB: {debugInfo.total_in_db}</span>
+          <span>Active Count: {debugInfo.total_active}</span>
+          <span>Branch Filter: {JSON.stringify(debugInfo.branch_filter || 'None')}</span>
+        </div>
+      )}
+
       {/* Add/Edit Employee Dialog */}
       <Dialog open={formDialog.open} onOpenChange={(open) => !open && setFormDialog({ open: false, editing: null })}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {formDialog.editing ? 'Edit Employee' : 'Add New Employee'}
-            </DialogTitle>
+        <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0 overflow-hidden">
+          <DialogHeader className="p-6 border-b shrink-0">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                {formDialog.editing ? (
+                  <><Edit2 className="w-5 h-5 text-primary" /> Edit Employee</>
+                ) : (
+                  <><UserPlus className="w-5 h-5 text-primary" /> Add New Employee</>
+                )}
+              </DialogTitle>
+              <div className="flex gap-2 pr-12">
+                <Button variant="ghost" onClick={() => setFormDialog({ open: false, editing: null })}>
+                  Discard
+                </Button>
+                <Button onClick={handleSaveEmployee} className="bg-primary hover:bg-primary/95 text-white min-w-[80px] shadow-sm">
+                  Save
+                </Button>
+              </div>
+            </div>
           </DialogHeader>
 
-          <div className="space-y-6">
-            {/* Step Indicators */}
-            <div className="flex gap-2 mb-6">
-              {[1, 2, 3].map(step => (
+          <div className="flex flex-1 overflow-hidden">
+            {/* Sidebar Navigation */}
+            <div className="w-64 border-r bg-muted/30 overflow-y-auto p-4 space-y-1">
+              {[
+                { id: 1, label: 'Profile', icon: User },
+                { id: 2, label: 'Account Settings', icon: Settings },
+                { id: 3, label: 'Personal Information', icon: Info },
+                { id: 4, label: 'Device Settings', icon: Shield },
+                { id: 5, label: 'Attendance Setting', icon: Clock },
+                { id: 6, label: 'Document Setting', icon: FileStack },
+                { id: 7, label: 'Mobile App Settings', icon: Smartphone },
+                { id: 8, label: 'WhatsApp Settings', icon: MessageSquare },
+              ].map((section) => (
                 <button
-                  key={step}
-                  onClick={() => setFormStep(step)}
-                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                    formStep === step
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground'
+                  key={section.id}
+                  onClick={() => setFormStep(section.id)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                    formStep === section.id
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                   }`}
                 >
-                  {step === 1 ? 'Personal Info' : step === 2 ? 'Employment' : 'Contact & Bank'}
+                  <section.icon className="w-4 h-4" />
+                  {section.label}
                 </button>
               ))}
             </div>
 
-            {/* Step 1: Personal Information */}
-            {formStep === 1 && (
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <Label>Employee Code *</Label>
-                  <Input
-                    value={formData.employee_code}
-                    onChange={(e) => setFormData({ ...formData, employee_code: e.target.value })}
-                    placeholder="EMP001"
-                  />
+            {/* Main Form Content */}
+            <div className="flex-1 overflow-y-auto p-8">
+              {formStatus && (
+                <div className={`mb-6 p-4 rounded-lg flex items-center gap-3 ${
+                  formStatus.includes('❌') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'
+                }`}>
+                  {formStatus.includes('❌') ? <AlertCircle className="w-5 h-5" /> : <CheckCircle className="w-5 h-5" />}
+                  <p className="text-sm font-medium">{formStatus}</p>
                 </div>
-                <div>
-                  <Label>First Name *</Label>
-                  <Input
-                    value={formData.first_name}
-                    onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                    placeholder="John"
-                  />
-                </div>
-                <div>
-                  <Label>Middle Name</Label>
-                  <Input
-                    value={formData.middle_name}
-                    onChange={(e) => setFormData({ ...formData, middle_name: e.target.value })}
-                    placeholder="Kumar"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label>Last Name *</Label>
-                  <Input
-                    value={formData.last_name}
-                    onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                    placeholder="Doe"
-                  />
-                </div>
-                <div>
-                  <Label>Date of Birth</Label>
-                  <Input
-                    type="date"
-                    value={formData.date_of_birth}
-                    onChange={(e) => setFormData({ ...formData, date_of_birth: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <Label>Gender</Label>
-                  <select
-                    value={formData.gender}
-                    onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                  >
-                    <option value="">Select</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-              </div>
-            )}
+              )}
 
-            {/* Step 2: Employment Details */}
-            {formStep === 2 && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Branch</Label>
-                  <select
-                    value={formData.branch_id}
-                    onChange={(e) => setFormData({ ...formData, branch_id: e.target.value })}
-                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                  >
-                    <option value="">Select Branch</option>
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
+              {/* Section 1: Profile */}
+              {formStep === 1 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="flex justify-between items-start border-b pb-4">
+                    <div>
+                      <h3 className="text-lg font-semibold">Profile</h3>
+                      <p className="text-sm text-muted-foreground">Basic identity and employment assignment</p>
+                    </div>
+                    <div className="w-24 h-24 rounded-full border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors">
+                      <Upload className="w-6 h-6 text-muted-foreground mb-1" />
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold">Photo</span>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="emp_id" className="text-sm font-semibold">Employee ID *</Label>
+                      <Input
+                        id="emp_id"
+                        value={formData.employee_code}
+                        onChange={(e) => setFormData({ ...formData, employee_code: e.target.value })}
+                        placeholder="BB-0001"
+                        disabled={!!formDialog.editing}
+                        className="bg-background disabled:opacity-75 disabled:bg-muted"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="email" className="text-sm font-semibold">Email</Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={formData.personal_email}
+                        onChange={(e) => setFormData({ ...formData, personal_email: e.target.value })}
+                        placeholder="employee@company.com"
+                        className="bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="first_name" className="text-sm font-semibold">First Name *</Label>
+                      <Input
+                        id="first_name"
+                        value={formData.first_name}
+                        onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+                        placeholder="John"
+                        className="bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="last_name" className="text-sm font-semibold">Last Name *</Label>
+                      <Input
+                        id="last_name"
+                        value={formData.last_name}
+                        onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+                        placeholder="Doe"
+                        className="bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="doj" className="text-sm font-semibold">Date of Joining</Label>
+                      <Input
+                        id="doj"
+                        type="date"
+                        value={formData.date_of_joining}
+                        onChange={(e) => setFormData({ ...formData, date_of_joining: e.target.value })}
+                        className="bg-background"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="branch" className="text-sm font-semibold">Branch *</Label>
+                      <select
+                        id="branch"
+                        value={formData.branch_id}
+                        onChange={(e) => setFormData({ ...formData, branch_id: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                      >
+                        <option value="">Select Branch</option>
+                        {branches.map(b => (
+                          <option key={b.id} value={b.id}>{b.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-6 w-full">
+                    <div className="space-y-2">
+                      <Label htmlFor="department" className="text-sm font-semibold">Department *</Label>
+                      <select
+                        id="department"
+                        value={formData.department_id}
+                        onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                      >
+                        <option value="">Select Department</option>
+                        {filteredDepartments.map(d => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="position" className="text-sm font-semibold">Position *</Label>
+                      <select
+                        id="position"
+                        value={formData.designation_id}
+                        onChange={(e) => setFormData({ ...formData, designation_id: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                      >
+                        <option value="">Select Position</option>
+                        {filteredDesignations.map(d => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="emp_type" className="text-sm font-semibold">Employment Type</Label>
+                      <select
+                        id="emp_type"
+                        value={formData.employment_type}
+                        onChange={(e) => setFormData({ ...formData, employment_type: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                      >
+                        <option value="Full-time">Full-time</option>
+                        <option value="Part-time">Part-time</option>
+                        <option value="Contract">Contract</option>
+                        <option value="Intern">Intern</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <Label>Employment Type</Label>
-                  <select
-                    value={formData.employment_type}
-                    onChange={(e) => setFormData({ ...formData, employment_type: e.target.value })}
-                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
-                  >
-                    <option value="Full-time">Full-time</option>
-                    <option value="Part-time">Part-time</option>
-                    <option value="Contract">Contract</option>
-                    <option value="Intern">Intern</option>
-                  </select>
-                </div>
-                <div>
-                  <Label>Date of Joining</Label>
-                  <Input
-                    type="date"
-                    value={formData.date_of_joining}
-                    onChange={(e) => setFormData({ ...formData, date_of_joining: e.target.value })}
-                  />
-                </div>
-              </div>
-            )}
+              )}
 
-            {/* Step 3: Contact & Bank Details */}
-            {formStep === 3 && (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label>Personal Email</Label>
-                  <Input
-                    type="email"
-                    value={formData.personal_email}
-                    onChange={(e) => setFormData({ ...formData, personal_email: e.target.value })}
-                    placeholder="john@example.com"
-                  />
-                </div>
-                <div>
-                  <Label>Personal Phone</Label>
-                  <Input
-                    value={formData.personal_phone}
-                    onChange={(e) => setFormData({ ...formData, personal_phone: e.target.value })}
-                    placeholder="+977-98XXXXXXXX"
-                  />
-                </div>
-                <div className="col-span-2">
-                  <Label>Current Address</Label>
-                  <Textarea
-                    value={formData.current_address}
-                    onChange={(e) => setFormData({ ...formData, current_address: e.target.value })}
-                    placeholder="Current address..."
-                  />
-                </div>
-                <div>
-                  <Label>Bank Name</Label>
-                  <Input
-                    value={formData.bank_name}
-                    onChange={(e) => setFormData({ ...formData, bank_name: e.target.value })}
-                    placeholder="Bank name"
-                  />
-                </div>
-                <div>
-                  <Label>Account Number</Label>
-                  <Input
-                    value={formData.account_number}
-                    onChange={(e) => setFormData({ ...formData, account_number: e.target.value })}
-                    placeholder="Account number"
-                  />
-                </div>
-              </div>
-            )}
+              {/* Section 2: Account Settings */}
+              {formStep === 2 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="border-b pb-4">
+                    <h3 className="text-lg font-semibold">Account Settings</h3>
+                    <p className="text-sm text-muted-foreground">Manage system access and privileges</p>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between p-4 bg-muted/20 rounded-lg border">
+                      <div className="space-y-0.5">
+                        <Label className="text-base font-semibold">Enable Self-Service Login *</Label>
+                        <p className="text-xs text-muted-foreground">When enabled, employees can log in via the web portal.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.enable_self_service}
+                        onCheckedChange={(val) => setFormData({ ...formData, enable_self_service: val })}
+                      />
+                    </div>
 
-            {formStatus && (
-              <div className={`p-3 rounded-md ${
-                formStatus.includes('❌') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
-              }`}>
-                {formStatus}
-              </div>
-            )}
+                    <div className="flex items-center justify-between p-4 bg-muted/20 rounded-lg border">
+                      <div className="space-y-0.5">
+                        <Label className="text-base font-semibold">Enable Mobile App Access *</Label>
+                        <p className="text-xs text-muted-foreground">Allow access to the mobile application for this employee.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.enable_mobile_access}
+                        onCheckedChange={(val) => setFormData({ ...formData, enable_mobile_access: val })}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Section 3: Personal Information */}
+              {formStep === 3 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="border-b pb-4">
+                    <h3 className="text-lg font-semibold text-primary flex items-center gap-2">
+                       Personal Information <Shield className="w-4 h-4 text-primary" />
+                    </h3>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-6">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Birth Date</Label>
+                      <Input type="date" value={formData.date_of_birth} onChange={(e) => setFormData({ ...formData, date_of_birth: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Local Name</Label>
+                      <Input value={formData.local_name} onChange={(e) => setFormData({ ...formData, local_name: e.target.value })} placeholder="Original script name" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">National ID Number</Label>
+                      <Input value={formData.national_id} onChange={(e) => setFormData({ ...formData, national_id: e.target.value })} placeholder="Citizenship / ID Card" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Mobile</Label>
+                      <Input value={formData.personal_phone} onChange={(e) => setFormData({ ...formData, personal_phone: e.target.value })} placeholder="+X XXX XXX XXXX" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Contact Tel</Label>
+                      <Input value={formData.contact_tel} onChange={(e) => setFormData({ ...formData, contact_tel: e.target.value })} placeholder="Emergency contact" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Office Tel</Label>
+                      <Input value={formData.office_tel} onChange={(e) => setFormData({ ...formData, office_tel: e.target.value })} placeholder="Direct extension" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Motorcycle License</Label>
+                      <Input value={formData.motorcycle_license} onChange={(e) => setFormData({ ...formData, motorcycle_license: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Automobile License</Label>
+                      <Input value={formData.automobile_license} onChange={(e) => setFormData({ ...formData, automobile_license: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Religion</Label>
+                      <Input value={formData.religion} onChange={(e) => setFormData({ ...formData, religion: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">City</Label>
+                      <Input value={formData.city} onChange={(e) => setFormData({ ...formData, city: e.target.value })} />
+                    </div>
+                    <div className="space-y-2 col-span-1">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Postcode</Label>
+                      <Input value={formData.postcode} onChange={(e) => setFormData({ ...formData, postcode: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Gender</Label>
+                      <select
+                        value={formData.gender}
+                        onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                      >
+                        <option value="">Select</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                    <div className="col-span-2 space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Permanent Address</Label>
+                      <Input value={formData.permanent_address} onChange={(e) => setFormData({ ...formData, permanent_address: e.target.value })} placeholder="Full home address" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Passport NO.</Label>
+                      <Input value={formData.passport_no} onChange={(e) => setFormData({ ...formData, passport_no: e.target.value })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Nationality</Label>
+                      <Input value={formData.nationality} onChange={(e) => setFormData({ ...formData, nationality: e.target.value })} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Section 4: Device Settings */}
+              {formStep === 4 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="flex justify-between items-start border-b pb-4">
+                    <div>
+                      <h3 className="text-lg font-semibold">Device Settings</h3>
+                      <p className="text-sm text-muted-foreground">Hardware authentication configuration</p>
+                    </div>
+                    <div className="w-24 h-24 rounded-full border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors">
+                      <Upload className="w-6 h-6 text-muted-foreground mb-1" />
+                      <span className="text-[10px] text-muted-foreground uppercase font-bold text-center">Bio-photo</span>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Verification Mode</Label>
+                      <select
+                        value={formData.verification_mode}
+                        onChange={(e) => setFormData({ ...formData, verification_mode: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                      >
+                        <option value="">Default Selection</option>
+                        <option value="FP/PW/RF">FP/PW/RF</option>
+                        <option value="Face/FP/PW">Face/FP/PW</option>
+                        <option value="Card">Card Only</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Device Privilege</Label>
+                      <select
+                        value={formData.device_privilege}
+                        onChange={(e) => setFormData({ ...formData, device_privilege: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                      >
+                        <option value="Normal User">Normal User</option>
+                        <option value="Registrar">Registrar</option>
+                        <option value="Admin">Device Admin</option>
+                        <option value="Super Admin">Super Device Admin</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Device Password</Label>
+                      <Input type="password" value={formData.device_password} onChange={(e) => setFormData({ ...formData, device_password: e.target.value })} placeholder="Hardware PIN" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase text-muted-foreground">Card NO.</Label>
+                      <Input value={formData.card_no} onChange={(e) => setFormData({ ...formData, card_no: e.target.value })} placeholder="RFID Card ID" />
+                    </div>
+                    <div className="space-y-2">
+                       <Label className="text-xs font-bold uppercase text-muted-foreground">Attendance Device ID</Label>
+                       <Input 
+                         type="number" 
+                         value={formData.biometric_id} 
+                         onChange={(e) => setFormData({ ...formData, biometric_id: e.target.value })} 
+                         placeholder="Bio Device ID (e.g. 101)" 
+                         className="border-primary/30"
+                       />
+                       <p className="text-[10px] text-muted-foreground">This ID must match the ID on your hardware device for log linking.</p>
+                    </div>
+                    <div className="col-span-2 space-y-4 py-4">
+                      <div className="grid grid-cols-2 gap-4 items-end">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-bold text-muted-foreground uppercase">Target Device for Sync</Label>
+                          <select 
+                            value={selectedDeviceId}
+                            onChange={(e) => setSelectedDeviceId(e.target.value)}
+                            className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                          >
+                             <option value="">Select Device...</option>
+                             {devices.map(d => (
+                               <option key={d.id} value={d.id}>{d.name} ({d.ip})</option>
+                             ))}
+                          </select>
+                        </div>
+                        <Button 
+                          variant="default" 
+                          onClick={handleSyncToDevice}
+                          disabled={!formData.biometric_id || devices.length === 0}
+                          className="h-10 bg-blue-600 hover:bg-blue-700 text-white font-bold gap-2"
+                        >
+                          <Smartphone className="w-4 h-4" />
+                          Push Name to Device
+                        </Button>
+                      </div>
+
+                      <Button 
+                        variant="outline" 
+                        onClick={handlePullBiometric}
+                        disabled={!formData.biometric_id || devices.length === 0}
+                        className="w-full border-dashed h-12 gap-2 text-muted-foreground hover:text-primary"
+                      >
+                        <Fingerprint className="w-5 h-5" />
+                         Pull Biometric (Fingerprint/Face) from Device
+                      </Button>
+                      <p className="text-[10px] text-center text-muted-foreground italic">
+                        Note: User must already be added to the device with ID #{formData.biometric_id}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Section 5: Attendance Setting */}
+              {formStep === 5 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="border-b pb-4">
+                    <h3 className="text-lg font-semibold text-primary">Attendance Setting</h3>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between p-4 bg-muted/10 rounded-lg border">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-bold">Enable Attendance *</Label>
+                        <p className="text-xs text-muted-foreground italic">When enabled, the system will include the employee in attendance calculations.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.enable_attendance}
+                        onCheckedChange={(val) => setFormData({ ...formData, enable_attendance: val })}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-muted/10 rounded-lg border">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-bold">Enable Holiday *</Label>
+                        <p className="text-xs text-muted-foreground italic">When enabled, the system will automatically assign configured holidays.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.enable_holiday}
+                        onCheckedChange={(val) => setFormData({ ...formData, enable_holiday: val })}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-muted/10 rounded-lg border">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-bold">Outdoor Management</Label>
+                        <p className="text-[10px] text-muted-foreground italic">Allow attendance logs from mobile GPS outside office</p>
+                      </div>
+                      <Switch 
+                        checked={formData.outdoor_management}
+                        onCheckedChange={(val) => setFormData({ ...formData, outdoor_management: val })}
+                      />
+                    </div>
+
+                    {/* Shift Time Configuration */}
+                    <Card className="border-dashed bg-slate-50/50">
+                      <CardHeader className="pb-2 px-4 pt-4">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-primary" /> Shift Configuration
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="px-4 pb-4 space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label className="text-[10px] font-bold uppercase text-slate-500">Custom Shift Start</Label>
+                            <Input 
+                              type="time" 
+                              value={formData.shift_start_time} 
+                              onChange={(e) => setFormData({ ...formData, shift_start_time: e.target.value })} 
+                              className="bg-white h-9"
+                            />
+                            <p className="text-[9px] text-slate-400 italic">Leave empty to use global office time (09:15)</p>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-[10px] font-bold uppercase text-slate-500">Custom Shift End</Label>
+                            <Input 
+                              type="time" 
+                              value={formData.shift_end_time} 
+                              onChange={(e) => setFormData({ ...formData, shift_end_time: e.target.value })} 
+                              className="bg-white h-9"
+                            />
+                          </div>
+                        </div>
+                        <div className="bg-blue-50/50 border border-blue-100 rounded p-2 flex gap-2">
+                          <Info className="w-4 h-4 text-blue-500 shrink-0" />
+                          <p className="text-[10px] text-blue-700 leading-tight">
+                            If an employee is <strong>Regular</strong>, keep these empty. For <strong>Part-time</strong> or custom shifts, enter the specific start time to calculate late entries correctly.
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <div className="space-y-2">
+                       <Label className="text-xs font-bold uppercase text-muted-foreground">Workflow Role</Label>
+                       <select
+                        value={formData.workflow_role}
+                        onChange={(e) => setFormData({ ...formData, workflow_role: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                      >
+                        <option value="">Select Role</option>
+                        <option value="Self">Self Only</option>
+                        <option value="Manager">Line Manager</option>
+                        <option value="HR">HR Approver</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Section 6: Document Setting */}
+              {formStep === 6 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="flex justify-between items-center border-b pb-4">
+                    <h3 className="text-lg font-semibold">Document Setting</h3>
+                    <Button size="sm" className="bg-primary h-8 px-3">
+                      <Plus className="w-4 h-4 mr-1" /> Add Document
+                    </Button>
+                  </div>
+                  
+                  <Table className="border rounded-md">
+                    <TableHeader className="bg-muted/50">
+                      <TableRow>
+                        <TableHead className="w-[40%] text-xs font-bold">Document</TableHead>
+                        <TableHead className="text-xs font-bold">Valid Up To</TableHead>
+                        <TableHead className="text-xs font-bold text-center">Email Alert</TableHead>
+                        <TableHead className="text-xs font-bold">Alert Before</TableHead>
+                        <TableHead className="text-xs font-bold text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow>
+                        <TableCell colSpan={5} className="h-48 text-center text-muted-foreground italic">
+                           No documents uploaded for this employee
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+
+              {/* Section 7: Mobile App Settings */}
+              {formStep === 7 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="border-b pb-4">
+                    <h3 className="text-lg font-semibold">Mobile App Settings</h3>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between p-4 bg-muted/10 rounded-lg border">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-bold">Mobile App Punch *</Label>
+                        <p className="text-xs text-muted-foreground italic">When enabled, employees can use the mobile app to punch attendance.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.mobile_punch}
+                        onCheckedChange={(val) => setFormData({ ...formData, mobile_punch: val })}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                       <Label className="text-xs font-bold uppercase text-muted-foreground">App Role</Label>
+                       <select
+                        value={formData.app_role}
+                        onChange={(e) => setFormData({ ...formData, app_role: e.target.value })}
+                        className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                      >
+                        <option value="employee">Standard Employee</option>
+                        <option value="supervisor">Supervisor</option>
+                        <option value="hr">HR Manager</option>
+                        <option value="admin">System Admin</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Section 8: WhatsApp Settings */}
+              {formStep === 8 && (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div className="border-b pb-4">
+                    <h3 className="text-lg font-semibold">WhatsApp Settings</h3>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between p-5 bg-[#25D366]/5 rounded-xl border border-[#25D366]/20">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-bold flex items-center gap-2">
+                          <MessageSquare className="w-4 h-4 text-[#25D366]" /> 
+                          Enable WhatsApp Alert *
+                        </Label>
+                        <p className="text-xs text-muted-foreground italic">Send automatic organization messages through WhatsApp notifications.</p>
+                      </div>
+                      <Switch 
+                        checked={formData.whatsapp_alert}
+                        onCheckedChange={(val) => setFormData({ ...formData, whatsapp_alert: val })}
+                      />
+                    </div>
+
+                    <div className="space-y-4 px-2">
+                      <div className="flex items-center gap-6">
+                        <div className="flex items-center gap-2 flex-1">
+                          <Switch 
+                            checked={formData.whatsapp_exception}
+                            onCheckedChange={(val) => setFormData({ ...formData, whatsapp_exception: val })}
+                          />
+                          <Label className="text-xs font-medium">Exception Alerts</Label>
+                        </div>
+                        <div className="flex items-center gap-2 flex-1">
+                          <Switch 
+                            checked={formData.whatsapp_punch}
+                            onCheckedChange={(val) => setFormData({ ...formData, whatsapp_punch: val })}
+                          />
+                          <Label className="text-xs font-medium">Punch Confirmation</Label>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 pt-2">
+                        <Label className="text-xs font-bold uppercase text-muted-foreground">Supervisor Mobile</Label>
+                        <Input 
+                          value={formData.supervisor_mobile} 
+                          onChange={(e) => setFormData({ ...formData, supervisor_mobile: e.target.value })} 
+                          placeholder="+977XXXXXXXXXX"
+                          className="font-mono"
+                        />
+                         <p className="text-[10px] text-muted-foreground italic">Required for escalation and reporting alerts</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
-          <DialogFooter className="flex justify-between">
-            <div>
-              {formStep > 1 && (
-                <Button variant="outline" onClick={() => setFormStep(formStep - 1)}>
-                  Previous
+          {/* Modal Footer: Form Step Navigation */}
+          <div className="p-4 border-t bg-muted/10 flex items-center justify-between shrink-0">
+             <div className="flex items-center gap-3 pl-4">
+                <div className="h-2 w-32 bg-slate-100 rounded-full overflow-hidden">
+                   <div 
+                      className="h-full bg-blue-600 transition-all duration-300" 
+                      style={{ width: `${(formStep / 8) * 100}%` }}
+                   />
+                </div>
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                   Progress: {Math.round((formStep / 8) * 100)}%
+                </span>
+             </div>
+             
+             <div className="flex items-center gap-3 pr-4">
+                <div className="text-[11px] font-bold text-muted-foreground mr-4 h-9 flex items-center px-3 bg-white border border-slate-100 rounded-lg shadow-sm">
+                   Section {formStep} of 8
+                </div>
+                <Button 
+                  variant="outline" 
+                  onClick={handlePrevStep}
+                  disabled={formStep === 1}
+                  className="h-9 px-5 rounded-lg border-slate-200 text-xs font-bold"
+                >
+                  ← Back
                 </Button>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setFormDialog({ open: false, editing: null })}>
-                Cancel
-              </Button>
-              {formStep < 3 ? (
-                <Button onClick={() => setFormStep(formStep + 1)}>
-                  Next
+                <Button 
+                  variant="default" 
+                  onClick={handleNextStep}
+                  disabled={formStep === 8}
+                  className="h-9 px-5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-md active:scale-95"
+                >
+                  Continue →
                 </Button>
-              ) : (
-                <Button onClick={handleSaveEmployee}>
-                  {formDialog.editing ? 'Update' : 'Create'} Employee
-                </Button>
-              )}
-            </div>
-          </DialogFooter>
+             </div>
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -712,7 +1489,8 @@ export const EmployeeManagement: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-xl font-bold">{viewDialog.employee.name}</h3>
-                  <p className="text-muted-foreground">{viewDialog.employee.employee_code || `#${viewDialog.employee.id}`}</p>
+                  <p className="text-muted-foreground font-medium text-primary">Employee ID: {viewDialog.employee.employee_code || `#${viewDialog.employee.id}`}</p>
+                  <p className="text-xs text-muted-foreground font-mono mt-1">Attendance Device ID: {viewDialog.employee.biometric_id || 'Not Assigned'}</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -944,6 +1722,15 @@ export const EmployeeManagement: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      
+      <OrgSetupDialog 
+         open={orgSetupOpen} 
+         onOpenChange={setOrgSetupOpen}
+         branches={branches}
+         departments={departments}
+         designations={designations}
+         onRefresh={loadData}
+      />
     </div>
   );
 };

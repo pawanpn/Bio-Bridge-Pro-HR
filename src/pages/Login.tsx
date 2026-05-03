@@ -5,22 +5,26 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Lock, Mail as MailIcon, ShieldCheck, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Lock, Mail as MailIcon, ShieldCheck, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { AppConfig } from '../config/appConfig';
 
 export const Login: React.FC = () => {
-  const { login, changePassword, loading: authLoading } = useAuth();
+  const { login, changePassword, resetPassword, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
   const [isChangingPass, setIsChangingPass] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
   const [rememberMe, setRememberMe] = useState(localStorage.getItem('rememberMe') === 'true');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   React.useEffect(() => {
     if (localStorage.getItem('rememberMe') === 'true') {
@@ -118,18 +122,47 @@ export const Login: React.FC = () => {
         </CardHeader>
 
         <CardContent>
-          {!isChangingPass ? (
+          {isResetting ? (
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if(!email) return setError("Please enter your Email or Employee ID");
+              setLoading(true); setError(''); setSuccess('');
+              const res = await resetPassword(email);
+              setLoading(false);
+              if(res.success) {
+                 setSuccess("Password reset link sent! Check your email.");
+              } else {
+                 setError(res.error || "Failed context reset");
+              }
+            }} className="space-y-5">
+               <div className="space-y-2">
+                 <Label htmlFor="reset-email">Email or Employee ID</Label>
+                 <div className="relative">
+                   <MailIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                   <Input id="reset-email" type="text" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email or BB-0001" className="pl-10" autoFocus />
+                 </div>
+               </div>
+               {error && <div className="p-3 bg-red-100 text-red-600 rounded-md text-sm">{error}</div>}
+               {success && <div className="p-3 bg-green-100 text-green-600 rounded-md text-sm">{success}</div>}
+               <Button type="submit" className="w-full h-12 text-base" disabled={loading}>
+                 {loading ? 'Sending...' : 'Send Reset Link'}
+               </Button>
+               <Button type="button" variant="ghost" onClick={() => { setIsResetting(false); setError(''); setSuccess(''); }} className="w-full">
+                 Back to Login
+               </Button>
+            </form>
+          ) : !isChangingPass ? (
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">Email or Employee ID</Label>
                 <div className="relative">
                   <MailIcon size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     id="email"
-                    type="email"
+                    type="text"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="admin@biobridge.com"
+                    placeholder="admin@biobridge.com or BB-0001"
                     className="pl-10"
                     autoFocus={!email}
                   />
@@ -142,12 +175,20 @@ export const Login: React.FC = () => {
                   <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     id="password"
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Enter password"
-                    className="pl-10"
+                    className="pl-10 pr-10"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </div>
 
@@ -161,7 +202,7 @@ export const Login: React.FC = () => {
                   />
                   <span>Save Credentials</span>
                 </label>
-                {(localStorage.getItem('saved_username')) && (
+                {(localStorage.getItem('saved_username') || localStorage.getItem('saved_email')) && (
                   <button
                     type="button"
                     onClick={clearSaved}
@@ -170,6 +211,16 @@ export const Login: React.FC = () => {
                     Clear Saved
                   </button>
                 )}
+              </div>
+
+              <div className="text-right">
+                <button
+                  type="button"
+                  onClick={() => { setIsResetting(true); setError(''); setSuccess(''); }}
+                  className="text-sm font-medium text-primary hover:underline transition-colors"
+                >
+                   Forgot Password?
+                </button>
               </div>
 
               {error && (
@@ -209,13 +260,21 @@ export const Login: React.FC = () => {
                   <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     id="newPassword"
-                    type="password"
+                    type={showNewPassword ? "text" : "password"}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="Enter new password"
-                    className="pl-10"
+                    className="pl-10 pr-10"
                     autoFocus
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </div>
 
@@ -225,12 +284,20 @@ export const Login: React.FC = () => {
                   <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     id="confirmPassword"
-                    type="password"
+                    type={showConfirmPassword ? "text" : "password"}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="Repeat new password"
-                    className="pl-10"
+                    className="pl-10 pr-10"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    tabIndex={-1}
+                  >
+                    {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </div>
 

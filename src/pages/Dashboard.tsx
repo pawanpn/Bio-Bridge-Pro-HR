@@ -347,6 +347,8 @@ export const Dashboard: React.FC = () => {
         port: dev.port,
         deviceId: dev.id,
         brand: dev.brand,
+        targetBranchId: 1,
+        targetGateId: 1,
       });
       setSyncProgress(null);
       invoke<Stats>('get_dashboard_stats').then(s => { 
@@ -587,7 +589,7 @@ export const Dashboard: React.FC = () => {
               icon={<Users size={28} />}
               gradient="from-blue-50 to-blue-100 dark:from-blue-950/30 dark:to-blue-900/20"
               iconColor="text-blue-600 dark:text-blue-400"
-              onClick={() => setActiveListModal({ title: 'Total Employees', data: [...stats.presentStaff, ...stats.absentStaff, ...stats.leaveStaff], type: 'total' })}
+              onClick={() => navigate('/employees')}
             />
             <StatCard
               title="Present Today"
@@ -595,7 +597,7 @@ export const Dashboard: React.FC = () => {
               icon={<UserCheck size={28} />}
               gradient="from-green-50 to-green-100 dark:from-green-950/30 dark:to-green-900/20"
               iconColor="text-green-600 dark:text-green-400"
-              onClick={() => setActiveListModal({ title: 'Present Today', data: stats.presentStaff, type: 'present' })}
+              onClick={() => navigate('/attendance')}
             />
             <StatCard
               title="Late Today"
@@ -786,29 +788,76 @@ export const Dashboard: React.FC = () => {
                 </CardContent>
               </Card>
 
-              {/* Absent */}
-              <Card>
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-bold flex justify-between items-center">
-                    <span>Absent</span>
-                    <Badge variant="destructive" className="hover:bg-destructive/90">
-                      {stats.absent}
-                    </Badge>
-                  </CardTitle>
+              {/* Live Activity Feed */}
+              <Card className="border-none shadow-sm bg-blue-50/30 dark:bg-blue-900/10 mb-6">
+                <CardHeader className="pb-3 border-b border-blue-100 dark:border-blue-900/30">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2">
+                       <Activity className="h-4 w-4 text-blue-600" />
+                       Live Attendance
+                    </CardTitle>
+                    <Badge variant="secondary" className="text-[10px] h-5 bg-blue-100 text-blue-700">{stats.presentStaff.length}</Badge>
+                  </div>
                 </CardHeader>
-                <CardContent className="pt-0">
-                  {stats.absentStaff.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Everyone is present or on leave!</p>
+                <CardContent className="p-0">
+                  {stats.presentStaff.length === 0 ? (
+                    <p className="text-xs text-muted-foreground p-6 text-center italic">No punches recorded yet today</p>
                   ) : (
-                    <div className="space-y-2">
+                    <div className="max-h-[300px] overflow-auto divide-y divide-blue-100 dark:divide-blue-900/30">
+                      {stats.presentStaff.map(s => (
+                        <div
+                          key={s.id}
+                          onClick={() => navigate(`/attendance?search=${encodeURIComponent(s.name)}`)}
+                          className="flex justify-between items-center p-3 hover:bg-white dark:hover:bg-slate-800/50 cursor-pointer transition-colors group"
+                        >
+                          <div className="flex items-center gap-2.5">
+                             <div className="h-7 w-7 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-[10px] font-bold text-blue-700 group-hover:bg-blue-600 group-hover:text-white transition-all">
+                                {s.name.charAt(0)}
+                             </div>
+                             <div>
+                                <span className="text-sm font-bold text-slate-700 dark:text-slate-200 group-hover:text-blue-600 transition-colors">{s.name}</span>
+                                <p className="text-[9px] text-slate-400">Punched In</p>
+                             </div>
+                          </div>
+                          <div className="text-right">
+                             <Badge variant="secondary" className="text-[10px] font-mono block bg-white border-blue-50 shadow-sm">{s.time || '--:--'}</Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Absent Staff Card */}
+              <Card className="border-none shadow-sm dark:bg-slate-900/40">
+                <CardHeader className="pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex justify-between items-center">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2">
+                       <UserMinus className="h-4 w-4 text-rose-500" />
+                       Absent Today
+                    </CardTitle>
+                    <Badge variant="destructive" className="text-[10px] h-5">{stats.absent}</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {stats.absentStaff.length === 0 ? (
+                    <p className="text-xs text-muted-foreground p-6 text-center italic">Everyone is present!</p>
+                  ) : (
+                    <div className="max-h-[250px] overflow-auto divide-y divide-slate-50 dark:divide-slate-800">
                       {stats.absentStaff.map(s => (
                         <div
                           key={s.id}
-                          onClick={() => handleEmployeeClick(s.id)}
-                          className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-900/30 rounded-lg cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-800/50 border-l-4 border-red-500"
+                          onClick={() => navigate(`/employees?search=${encodeURIComponent(s.name)}`)}
+                          className="flex justify-between items-center p-3 hover:bg-rose-50 dark:hover:bg-rose-950/10 cursor-pointer transition-all group"
                         >
-                          <span className="text-sm font-semibold">{s.name}</span>
-                          <Badge variant="destructive" className="text-xs">Missing</Badge>
+                          <div className="flex items-center gap-2.5 opacity-80 group-hover:opacity-100">
+                             <div className="h-7 w-7 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-400">
+                                {s.name.charAt(0)}
+                             </div>
+                             <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">{s.name}</span>
+                          </div>
+                          <Badge variant="outline" className="text-[9px] h-5 px-1.5 border-rose-200 text-rose-600">Missing</Badge>
                         </div>
                       ))}
                     </div>

@@ -41,10 +41,16 @@ fn get_script_path() -> std::path::PathBuf {
 /// Extract JSON from stdout, skipping any debug text before the JSON object
 fn extract_json_from_stdout(raw: &str) -> serde_json::Value {
     if let Some(start) = raw.find('{') {
-        serde_json::from_str(&raw[start..]).unwrap_or_else(|_| serde_json::json!({}))
-    } else {
-        serde_json::json!({})
+        if let Some(end) = raw.rfind('}') {
+            if end >= start {
+                return serde_json::from_str(&raw[start..=end]).unwrap_or_else(|e| {
+                    println!("JSON Parse error: {}", e);
+                    serde_json::json!({})
+                });
+            }
+        }
     }
+    serde_json::json!({})
 }
 
 /// Verify Node.js is available
@@ -65,7 +71,7 @@ fn verify_node_available() -> Result<(), AppError> {
 impl DeviceDriver for ZKTecoDriver {
     fn brand_name(&self) -> &'static str { "ZKTeco" }
 
-    async fn sync_logs(&self, ip: &str, port: u16, _comm_key: i32, device_id: i32, _machine_number: i32, last_timestamp: Option<String>) -> Result<Vec<AttendanceLog>, AppError> {
+    async fn sync_logs(&self, ip: &str, port: u16, _comm_key: i32, device_id: i32, _machine_number: i32, last_timestamp: Option<String>) -> Result<(Vec<crate::models::UserInfo>, Vec<AttendanceLog>), AppError> {
         // Step 1: Quick TCP pre-check
         use std::net::TcpStream;
         use std::time::Duration;
@@ -97,7 +103,7 @@ impl DeviceDriver for ZKTecoDriver {
            .arg("sync")
            .arg(ip)
            .arg(port.to_string())
-           .arg("10000"); // 10s timeout
+           .arg("60000"); // 60s timeout
 
         if let Some(ts) = last_timestamp {
             cmd.arg(ts);
@@ -119,8 +125,24 @@ impl DeviceDriver for ZKTecoDriver {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let parsed = extract_json_from_stdout(&stdout);
         let mut attendance_logs = Vec::new();
+        let mut users = Vec::new();
 
-        if let Some(attendances) = parsed.get("attendances").and_then(|a| a.as_array()) {
+        if let Some(users_array) = parsed.get("users").and_then(|u| u.get("data")).and_then(|d| d.as_array()) {
+            for u in users_array {
+                let emp_str = u.get("userId").and_then(|v| v.as_str()).unwrap_or("0");
+                let employee_id = emp_str.parse::<i32>().unwrap_or(0);
+                let name = u.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+                if employee_id > 0 {
+                    users.push(crate::models::UserInfo {
+                        employee_id,
+                        name: if name.is_empty() { format!("User {}", employee_id) } else { name }
+                    });
+                }
+            }
+        }
+
+        if let Some(attendances) = parsed.get("attendances").and_then(|a| a.get("data")).and_then(|d| d.as_array()) {
             for att in attendances {
                 let emp_str = att.get("deviceUserId").and_then(|v| v.as_str()).unwrap_or("0");
                 let employee_id = emp_str.parse::<i32>().unwrap_or(0);
@@ -137,7 +159,7 @@ impl DeviceDriver for ZKTecoDriver {
             }
         }
 
-        Ok(attendance_logs)
+        Ok((users, attendance_logs))
     }
 
     async fn get_all_user_info(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32) -> Result<Vec<crate::models::UserInfo>, AppError> {
@@ -187,7 +209,7 @@ impl DeviceDriver for ZKTecoDriver {
         let parsed = extract_json_from_stdout(&stdout);
         let mut users = Vec::new();
 
-        if let Some(users_array) = parsed.get("users").and_then(|u| u.as_array()) {
+        if let Some(users_array) = parsed.get("users").and_then(|u| u.get("data")).and_then(|d| d.as_array()) {
             for u in users_array {
                 let emp_str = u.get("userId").and_then(|v| v.as_str()).unwrap_or("0");
                 let employee_id = emp_str.parse::<i32>().unwrap_or(0);
@@ -280,7 +302,7 @@ impl DeviceDriver for ZKTecoDriver {
                                 let _ = app_handle.emit("realtime-punch", serde_json::json!({
                                     "device_id": device_id,
                                     "employee_id": emp_id,
-                                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                                    "timestamp": chrono::Local::now().to_rfc3339(),
                                     "punch_method": "Realtime"
                                 }));
                             }
@@ -296,6 +318,90 @@ impl DeviceDriver for ZKTecoDriver {
         
         let _ = child.kill().await;
         Ok(())
+    }
+
+    async fn push_user_info(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32, user_id: i32, name: &str, role: i32, card_no: &str) -> Result<(), AppError> {
+        // Step 1: Verify Node.js
+        verify_node_available()?;
+
+        // Step 2: Get script path
+        let script_path = get_script_path();
+        if !script_path.exists() {
+            return Err(AppError::ConnectionError(format!(
+                "zk_fetch.cjs not found"
+            )));
+        }
+
+        // Step 3: Execute setUser command
+        let output = tokio::process::Command::new("node")
+            .arg(&script_path)
+            .arg("setUser")
+            .arg(ip)
+            .arg(port.to_string())
+            .arg("10000") // 10s timeout
+            .arg(user_id.to_string())
+            .arg(name)
+            .arg(role.to_string())
+            .arg(card_no)
+            .output()
+            .await
+            .map_err(|e| AppError::ConnectionError(format!("Failed to execute: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AppError::ConnectionError(format!(
+                "Failed to set user on device:\n{}", stderr
+            )));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parsed = extract_json_from_stdout(&stdout);
+        
+        if parsed.get("status").and_then(|s| s.as_str()) == Some("success") {
+            Ok(())
+        } else {
+            let msg = parsed.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown script error");
+            Err(AppError::ConnectionError(format!("Script reported error: {}", msg)))
+        }
+    }
+
+    async fn pull_user_biometric(&self, ip: &str, port: u16, _comm_key: i32, _machine_number: i32, user_id: i32) -> Result<serde_json::Value, AppError> {
+        // Step 1: Verify Node.js
+        verify_node_available()?;
+
+        // Step 2: Get script path
+        let script_path = get_script_path();
+        if !script_path.exists() {
+            return Err(AppError::ConnectionError(format!("zk_fetch.cjs not found")));
+        }
+
+        // Step 3: Execute getFingerprints command
+        let output = tokio::process::Command::new("node")
+            .arg(&script_path)
+            .arg("getFingerprints")
+            .arg(ip)
+            .arg(port.to_string())
+            .arg("20000") // 20s timeout for large data
+            .arg(user_id.to_string())
+            .output()
+            .await
+            .map_err(|e| AppError::ConnectionError(format!("Failed to execute: {}", e)))?;
+
+        // Step 4: Parse response
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AppError::ConnectionError(format!("Failed to pull biometric:\n{}", stderr)));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parsed = extract_json_from_stdout(&stdout);
+        
+        if parsed.get("status").and_then(|s| s.as_str()) == Some("success") {
+            Ok(parsed["data"].clone())
+        } else {
+            let msg = parsed.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown script error");
+            Err(AppError::ConnectionError(format!("Script reported error: {}", msg)))
+        }
     }
 }
 
