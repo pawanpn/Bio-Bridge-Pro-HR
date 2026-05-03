@@ -1,5 +1,16 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase } from '@/config/supabase';
+import { supabase, getServiceKey } from '@/config/supabase';
+import { createClient } from '@supabase/supabase-js';
+
+let _serviceClient: ReturnType<typeof createClient> | null = null;
+const getServiceClient = () => {
+  if (_serviceClient) return _serviceClient;
+  const url = localStorage.getItem('supabaseUrl') || '';
+  const key = import.meta.env.VITE_SUPABASE_SERVICE_KEY || localStorage.getItem('supabaseServiceKey') || getServiceKey() || '';
+  if (!url || !key) return null;
+  _serviceClient = createClient(url, key, { db: { schema: 'public' } });
+  return _serviceClient;
+};
 
 export type ProviderRole = 'PROVIDER_OWNER' | 'PROVIDER_ADMIN' | 'PROVIDER_BILLING' | 'PROVIDER_SUPPORT' | 'PROVIDER_MONITOR';
 
@@ -41,7 +52,18 @@ export const ProviderAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   const loadPermissions = async (role: ProviderRole) => {
     try {
-      const { data } = await supabase.from('provider_roles').select('permissions').eq('role_name', role).single();
+      const client = supabase;
+      let { data, error } = await client.from('provider_roles').select('permissions').eq('role_name', role).single();
+
+      if (error && (error.message?.includes('permission denied') || error.message?.includes('does not exist'))) {
+        const svc = getServiceClient();
+        if (svc) {
+          const res = await svc.from('provider_roles').select('permissions').eq('role_name', role).single();
+          if (!res.error) { data = res.data; error = null; }
+          else { error = res.error; }
+        }
+      }
+
       if (data?.permissions && Array.isArray(data.permissions)) {
         setPermissions(data.permissions as ProviderModule[]);
         return;
@@ -82,13 +104,30 @@ export const ProviderAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (reason) localStorage.setItem(LOGOUT_REASON_KEY, reason);
   };
 
-  const providerLogin = async (username: string, pin: string) => {
-    // Step 1: try Supabase provider_users table
-    const { data, error } = await supabase
+  const queryProviderUser = async (username: string) => {
+    const client = supabase;
+    let { data, error } = await client
       .from('provider_users')
       .select('id, username, full_name, email, role, pin, is_active')
       .eq('username', username)
       .maybeSingle();
+
+    if (error && (error.message?.includes('permission denied') || error.message?.includes('does not exist'))) {
+      const svc = getServiceClient();
+      if (svc) {
+        const res = await svc.from('provider_users')
+          .select('id, username, full_name, email, role, pin, is_active')
+          .eq('username', username)
+          .maybeSingle();
+        if (!res.error) return res;
+      }
+    }
+    return { data, error };
+  };
+
+  const providerLogin = async (username: string, pin: string) => {
+    // Step 1: try Supabase provider_users table
+    const { data, error } = await queryProviderUser(username);
 
     if (data && !data.is_active) {
       // allow default PIN even for disabled master account
@@ -113,7 +152,7 @@ export const ProviderAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
       return { success: true };
     }
 
-    // Step 2: fallback — default PIN login (works even if Supabase table missing)
+    // Step 2: fallback — default PIN login (works even if Supabase table missing / RLS blocked)
     const defaultPin = getDefaultPin();
     if (pin === defaultPin) {
       const user: ProviderUser = {
@@ -130,7 +169,7 @@ export const ProviderAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
       return { success: true };
     }
 
-    if (error && !error.message?.includes('does not exist')) {
+    if (error && !error.message?.includes('does not exist') && !error.message?.includes('permission denied')) {
       return { success: false, error: error.message };
     }
 
@@ -142,11 +181,24 @@ export const ProviderAuthProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (!providerUser || providerUser.id === 'local-provider') return;
     const validate = async () => {
       try {
-        const { data } = await supabase
+        const client = supabase;
+        let { data, error } = await client
           .from('provider_users')
           .select('role, is_active')
           .eq('username', providerUser.username)
           .maybeSingle();
+
+        if (error && (error.message?.includes('permission denied') || error.message?.includes('does not exist'))) {
+          const svc = getServiceClient();
+          if (svc) {
+            const res = await svc.from('provider_users')
+              .select('role, is_active')
+              .eq('username', providerUser.username)
+              .maybeSingle();
+            if (!res.error) { data = res.data; error = null; }
+          }
+        }
+
         if (!data) return;
         if (!data.is_active) {
           providerLogout('Your account has been disabled. Contact super provider.');

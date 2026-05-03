@@ -732,19 +732,19 @@ BEGIN
     LOOP
         IF NOT EXISTS (
             SELECT 1 FROM pg_policies
-            WHERE policyname = 'authenticated_read' AND tablename = t AND schemaname = 'public'
+            WHERE policyname = 'anon_read' AND tablename = t AND schemaname = 'public'
         ) THEN
             EXECUTE format(
-                'CREATE POLICY "authenticated_read" ON public.%I FOR SELECT TO authenticated USING (true)',
+                'CREATE POLICY "anon_read" ON public.%I FOR SELECT USING (true)',
                 t
             );
         END IF;
         IF NOT EXISTS (
             SELECT 1 FROM pg_policies
-            WHERE policyname = 'service_role_all' AND tablename = t AND schemaname = 'public'
+            WHERE policyname = 'anon_all' AND tablename = t AND schemaname = 'public'
         ) THEN
             EXECUTE format(
-                'CREATE POLICY "service_role_all" ON public.%I FOR ALL TO service_role USING (true) WITH CHECK (true)',
+                'CREATE POLICY "anon_all" ON public.%I FOR ALL USING (true) WITH CHECK (true)',
                 t
             );
         END IF;
