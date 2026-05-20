@@ -74,7 +74,7 @@ function generateEmail(orgName: string, orgId: number, orgEmail?: string): strin
 async function createSuperAdminUser(orgId: number, orgName: string, orgEmail?: string, password?: string): Promise<{ userId?: string; authId?: string; email: string; username: string; error?: string }> {
   const username = generateUsername(orgName, orgId);
   const email = generateEmail(orgName, orgId, orgEmail);
-  const defaultPassword = password || 'PLACEHOLDER';
+  const defaultPassword = password || import.meta.env.VITE_DEFAULT_ORG_PASSWORD || '';
 
   const adminClient = getAdminClient();
   let authUserId: string | undefined;

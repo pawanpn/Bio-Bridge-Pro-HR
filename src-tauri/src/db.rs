@@ -695,12 +695,12 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         []
     )?;
 
-    // Seed default Super Admin (admin / changeme)
-    // password hash for default admin
-    let admin_pass_hash = "PLACEHOLDER_HASH";
+    // Seed default Super Admin - password hash loaded from env
+    let admin_pass_hash = std::env::var("DEFAULT_ADMIN_PASS_HASH")
+        .unwrap_or_else(|_| "CHANGE_ME_BCRYPT_HASH".to_string());
     let _ = conn.execute(
         "INSERT OR IGNORE INTO Users (username, password_hash, role, must_change_password) VALUES ('admin', ?1, 'SUPER_ADMIN', 1)",
-        [admin_pass_hash]
+        [&admin_pass_hash]
     );
 
     // Seed corporate dummy data
