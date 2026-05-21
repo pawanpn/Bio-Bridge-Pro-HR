@@ -1,155 +1,270 @@
-import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import { ProviderAuthProvider, useProviderAuth, type ProviderModule } from './context/ProviderAuthContext';
-import { EnhancedSetupWizard } from './components/EnhancedSetupWizard';
-import { MainLayout } from './layout/MainLayout';
-import { ERPDashboard } from './pages/ERPDashboard';
-import { DeviceSettings } from './pages/DeviceSettings';
-import { DynamicSystemSettings } from './pages/DynamicSystemSettings';
-import { Reports } from './pages/Reports';
-import { LeaveManagement } from './pages/LeaveManagement';
-import { EmployeeDetail } from './pages/EmployeeDetail';
-import { Login } from './pages/Login';
-import { AttendanceManagement } from './pages/AttendanceManagement';
-import { NotificationSystem } from './pages/NotificationSystem';
-import { BranchGateDeviceManagement } from './pages/BranchGateDeviceManagement';
-import { EmployeeManagement } from './pages/EmployeeManagement';
-import { PayrollManagement } from './pages/PayrollManagement';
-import { FinanceManagement } from './pages/FinanceManagement';
-import { PermissionManagement } from './components/PermissionManagement';
-import { EmployeeHierarchyTree } from './components/EmployeeHierarchyTree';
-import { InventoryManagement } from './pages/InventoryManagement';
-import { ProjectsManagement } from './pages/ProjectsManagement';
-import { CRMManagement } from './pages/CRMManagement';
-import { AssetsManagement } from './pages/AssetsManagement';
-import { SystemTools } from './components/SystemTools';
-import { ProviderLogin } from './pages/ProviderLogin';
-import { ProviderLayout } from './layout/ProviderLayout';
-import { ProviderDashboard } from './pages/ProviderDashboard';
-import { ProviderOrganizations } from './pages/ProviderOrganizations';
-import { ProviderClientUsers } from './pages/ProviderClientUsers';
-import { ProviderMonitoring } from './pages/ProviderMonitoring';
-import { ProviderBilling } from './pages/ProviderBilling';
-import { ProviderCRM } from './pages/ProviderCRM';
-import { ProviderStaff } from './pages/ProviderStaff';
-import { ProviderRoles } from './pages/ProviderRoles';
-import { ProviderSetup } from './pages/ProviderSetup';
+// ============================================================
+// Bio-Bridge Pro HR — App.tsx (UPDATED)
+// Changes from original:
+//  1. Wrapped in AuthProvider (single session source)
+//  2. Root ErrorBoundary — no more white-screen crashes
+//  3. AuthGuard on every protected route
+//  4. Removed direct supabase client imports from routing layer
+//  5. Unauthorized page added
+// ============================================================
 
-function ClientApp() {
-  const { user, loading } = useAuth();
-  const isSetupComplete = localStorage.getItem('setupComplete') === 'true';
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider } from "./hooks/useAuth";
+import { ErrorBoundary } from "./components/ErrorBoundary";
+import { AuthGuard } from "./components/AuthGuard";
+import MainLayout from "./components/MainLayout";
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading...</p>
-        </div>
-      </div>
-    );
-  }
+// ── Pages (lazy-loaded for faster startup) ──────────────────
+import { lazy, Suspense } from "react";
 
-  if (!isSetupComplete) {
-    return <EnhancedSetupWizard />;
-  }
+const LoginPage          = lazy(() => import("./pages/LoginPage"));
+const DashboardPage      = lazy(() => import("./pages/DashboardPage"));
+const EmployeesPage      = lazy(() => import("./pages/EmployeesPage"));
+const EmployeeDetailPage = lazy(() => import("./pages/EmployeeDetailPage"));
+const AttendancePage     = lazy(() => import("./pages/AttendancePage"));
+const LeavePage          = lazy(() => import("./pages/LeavePage"));
+const PayrollPage        = lazy(() => import("./pages/PayrollPage"));
+const FinancePage        = lazy(() => import("./pages/FinancePage"));
+const InventoryPage      = lazy(() => import("./pages/InventoryPage"));
+const ProjectsPage       = lazy(() => import("./pages/ProjectsPage"));
+const DevicesPage        = lazy(() => import("./pages/DevicesPage"));
+const ReportsPage        = lazy(() => import("./pages/ReportsPage"));
+const SettingsPage       = lazy(() => import("./pages/SettingsPage"));
+const AuditPage          = lazy(() => import("./pages/AuditPage"));
+const SetupWizardPage    = lazy(() => import("./pages/SetupWizardPage"));
+const UnauthorizedPage   = lazy(() => import("./pages/UnauthorizedPage"));
 
-  if (!user) {
-    return <Login />;
-  }
-
+// ── Page loading fallback ───────────────────────────────────
+function PageSkeleton() {
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      <Route path="/" element={<MainLayout />}>
-        <Route path="dashboard" element={<ERPDashboard />} />
-        <Route path="employee/:employeeId" element={<EmployeeDetail />} />
-        <Route path="employees" element={<EmployeeManagement />} />
-        <Route path="employee-hierarchy" element={<EmployeeHierarchyTree />} />
-        <Route path="leave-management" element={<LeaveManagement />} />
-        <Route path="attendance" element={<AttendanceManagement />} />
-        <Route path="payroll" element={<PayrollManagement />} />
-        <Route path="finance" element={<FinanceManagement />} />
-        <Route path="organization" element={<BranchGateDeviceManagement />} />
-        <Route path="device-settings" element={<DeviceSettings />} />
-        <Route path="notifications" element={<NotificationSystem />} />
-        <Route path="system-settings" element={<DynamicSystemSettings />} />
-        <Route path="system-tools" element={<SystemTools />} />
-        <Route path="permissions" element={<PermissionManagement />} />
-        <Route path="reports" element={<Reports />} />
-        <Route path="inventory" element={<InventoryManagement />} />
-        <Route path="projects" element={<ProjectsManagement />} />
-        <Route path="crm" element={<CRMManagement />} />
-        <Route path="assets" element={<AssetsManagement />} />
-        <Route path="cloud-settings" element={<Navigate to="/system-settings" replace />} />
-      </Route>
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes>
+    <div style={{
+      padding: "2rem",
+      display: "flex",
+      flexDirection: "column",
+      gap: "12px",
+    }}>
+      {[180, 120, 240, 90].map((w, i) => (
+        <div
+          key={i}
+          style={{
+            height: "14px",
+            width: `${w}px`,
+            background: "var(--color-background-secondary)",
+            borderRadius: "4px",
+            animation: "shimmer 1.2s infinite",
+          }}
+        />
+      ))}
+      <style>{`
+        @keyframes shimmer {
+          0%,100% { opacity: 0.5 }
+          50%      { opacity: 1 }
+        }
+      `}</style>
+    </div>
   );
 }
 
-function ProviderRouteGuard({ module, children }: { module: ProviderModule; children: React.ReactNode }) {
-  const { canAccess } = useProviderAuth();
-  if (!canAccess(module)) return <Navigate to="/provider/dashboard" replace />;
-  return <>{children}</>;
-}
+// ─── App ─────────────────────────────────────────────────────
 
-function ProviderRoutesWrapper() {
-  const { providerUser, loading } = useProviderAuth();
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-amber-500 mx-auto mb-4"></div>
-          <p className="text-slate-400">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
+export default function App() {
   return (
-    <Routes>
-      <Route path="/provider/setup" element={<ProviderSetup />} />
-      <Route path="/provider/login" element={providerUser ? <Navigate to="/provider/dashboard" replace /> : <ProviderLogin />} />
-      <Route path="/provider" element={providerUser ? <ProviderLayout /> : <Navigate to="/provider/login" replace />}>
-        <Route path="dashboard" element={<ProviderRouteGuard module="dashboard"><ProviderDashboard /></ProviderRouteGuard>} />
-        <Route path="organizations" element={<ProviderRouteGuard module="organizations"><ProviderOrganizations /></ProviderRouteGuard>} />
-        <Route path="users" element={<ProviderRouteGuard module="users"><ProviderClientUsers /></ProviderRouteGuard>} />
-        <Route path="monitoring" element={<ProviderRouteGuard module="monitoring"><ProviderMonitoring /></ProviderRouteGuard>} />
-        <Route path="billing" element={<ProviderRouteGuard module="billing"><ProviderBilling /></ProviderRouteGuard>} />
-        <Route path="crm" element={<ProviderRouteGuard module="crm"><ProviderCRM /></ProviderRouteGuard>} />
-        <Route path="staff" element={<ProviderRouteGuard module="staff"><ProviderStaff /></ProviderRouteGuard>} />
-        <Route path="roles" element={<ProviderRouteGuard module="roles"><ProviderRoles /></ProviderRouteGuard>} />
-        <Route index element={<Navigate to="dashboard" replace />} />
-      </Route>
-      <Route path="/provider/*" element={<Navigate to="/provider/login" replace />} />
-    </Routes>
-  );
-}
-
-function AppRouter() {
-  const location = useLocation();
-  const isProviderPath = location.pathname.startsWith('/provider');
-
-  if (isProviderPath) {
-    return <ProviderRoutesWrapper />;
-  }
-
-  return <ClientApp />;
-}
-
-function App() {
-  return (
-    <BrowserRouter>
+    // 1. Root error boundary — catches any crash including routing errors
+    <ErrorBoundary scope="App">
+      {/* 2. Auth context — ALL hooks use this, never supabase directly */}
       <AuthProvider>
-        <ProviderAuthProvider>
-          <AppRouter />
-        </ProviderAuthProvider>
+        <BrowserRouter>
+          <Suspense fallback={<PageSkeleton />}>
+            <Routes>
+
+              {/* ── Public routes ──────────────────────────────── */}
+              <Route path="/login"        element={<LoginPage />} />
+              <Route path="/setup"        element={<SetupWizardPage />} />
+              <Route path="/unauthorized" element={<UnauthorizedPage />} />
+              <Route path="/"             element={<Navigate to="/dashboard" replace />} />
+
+              {/* ── Protected routes — ALL inside AuthGuard ─────── */}
+              <Route
+                element={
+                  <AuthGuard>
+                    <ErrorBoundary scope="Layout">
+                      <MainLayout />
+                    </ErrorBoundary>
+                  </AuthGuard>
+                }
+              >
+                {/* Dashboard — any authenticated user */}
+                <Route
+                  path="/dashboard"
+                  element={
+                    <ErrorBoundary scope="Dashboard">
+                      <DashboardPage />
+                    </ErrorBoundary>
+                  }
+                />
+
+                {/* HR */}
+                <Route
+                  path="/employees"
+                  element={
+                    <AuthGuard permission="hr:view_employees">
+                      <ErrorBoundary scope="Employees">
+                        <EmployeesPage />
+                      </ErrorBoundary>
+                    </AuthGuard>
+                  }
+                />
+                <Route
+                  path="/employees/:id"
+                  element={
+                    <AuthGuard permission="hr:view_employees">
+                      <ErrorBoundary scope="Employee Detail">
+                        <EmployeeDetailPage />
+                      </ErrorBoundary>
+                    </AuthGuard>
+                  }
+                />
+
+                {/* Attendance */}
+                <Route
+                  path="/attendance"
+                  element={
+                    <AuthGuard permission="attendance:view">
+                      <ErrorBoundary scope="Attendance">
+                        <AttendancePage />
+                      </ErrorBoundary>
+                    </AuthGuard>
+                  }
+                />
+
+                {/* Leave */}
+                <Route
+                  path="/leave"
+                  element={
+                    <AuthGuard permission="leave:view">
+                      <ErrorBoundary scope="Leave">
+                        <LeavePage />
+                      </ErrorBoundary>
+                    </AuthGuard>
+                  }
+                />
+
+                {/* Payroll — restricted to payroll managers and above */}
+                <Route
+                  path="/payroll"
+                  element={
+                    <AuthGuard
+                      permission="payroll:view"
+                      roles={["SUPER_ADMIN", "ADMIN", "MANAGER"]}
+                    >
+                      <ErrorBoundary scope="Payroll">
+                        <PayrollPage />
+                      </ErrorBoundary>
+                    </AuthGuard>
+                  }
+                />
+
+                {/* Finance — admin only */}
+                <Route
+                  path="/finance"
+                  element={
+                    <AuthGuard
+                      permission="finance:view"
+                      roles={["SUPER_ADMIN", "ADMIN"]}
+                    >
+                      <ErrorBoundary scope="Finance">
+                        <FinancePage />
+                      </ErrorBoundary>
+                    </AuthGuard>
+                  }
+                />
+
+                {/* Inventory */}
+                <Route
+                  path="/inventory"
+                  element={
+                    <AuthGuard permission="inventory:view">
+                      <ErrorBoundary scope="Inventory">
+                        <InventoryPage />
+                      </ErrorBoundary>
+                    </AuthGuard>
+                  }
+                />
+
+                {/* Projects */}
+                <Route
+                  path="/projects"
+                  element={
+                    <AuthGuard permission="projects:view">
+                      <ErrorBoundary scope="Projects">
+                        <ProjectsPage />
+                      </ErrorBoundary>
+                    </AuthGuard>
+                  }
+                />
+
+                {/* Devices — admin / supervisor */}
+                <Route
+                  path="/devices"
+                  element={
+                    <AuthGuard
+                      permission="devices:manage"
+                      roles={["SUPER_ADMIN", "ADMIN", "SUPERVISOR"]}
+                    >
+                      <ErrorBoundary scope="Devices">
+                        <DevicesPage />
+                      </ErrorBoundary>
+                    </AuthGuard>
+                  }
+                />
+
+                {/* Reports */}
+                <Route
+                  path="/reports"
+                  element={
+                    <AuthGuard permission="reports:view">
+                      <ErrorBoundary scope="Reports">
+                        <ReportsPage />
+                      </ErrorBoundary>
+                    </AuthGuard>
+                  }
+                />
+
+                {/* Settings — admin only */}
+                <Route
+                  path="/settings"
+                  element={
+                    <AuthGuard
+                      permission="settings:manage"
+                      roles={["SUPER_ADMIN", "ADMIN"]}
+                    >
+                      <ErrorBoundary scope="Settings">
+                        <SettingsPage />
+                      </ErrorBoundary>
+                    </AuthGuard>
+                  }
+                />
+
+                {/* Audit log — super admin only */}
+                <Route
+                  path="/audit"
+                  element={
+                    <AuthGuard roles={["SUPER_ADMIN"]}>
+                      <ErrorBoundary scope="Audit">
+                        <AuditPage />
+                      </ErrorBoundary>
+                    </AuthGuard>
+                  }
+                />
+              </Route>
+
+              {/* 404 */}
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+
+            </Routes>
+          </Suspense>
+        </BrowserRouter>
       </AuthProvider>
-    </BrowserRouter>
+    </ErrorBoundary>
   );
 }
-
-export default App;

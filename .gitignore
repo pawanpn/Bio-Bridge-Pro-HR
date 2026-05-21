@@ -1,26 +1,86 @@
-# Logs
-logs
+# ============================================================
+# Bio-Bridge Pro HR — .gitignore
+# SECURITY: .env files MUST never be committed.
+# Rotate your Supabase keys if they were already pushed.
+# ============================================================
+
+# ── Secrets (NEVER commit these) ────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+supabase/.env
+src-tauri/.env
+
+# ── Node ────────────────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# ── Rust / Tauri ─────────────────────────────────────────────
+target/
+src-tauri/target/
+Cargo.lock         # keep if binary; remove if library
+*.rlib
+*.rmeta
+
+# ── Tauri build outputs ──────────────────────────────────────
+src-tauri/gen/
+src-tauri/WixTools/
+*.msi
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+*.exe
+
+# ── SQLite database files (local data, not source) ──────────
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# ── Logs ─────────────────────────────────────────────────────
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
-
-.env
-
-# Editor directories and files
+# ── IDE ──────────────────────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json
-.idea
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db
+
+# ── Test outputs ─────────────────────────────────────────────
+coverage/
+*.snap
+
+# ── Temp / scratch files (delete these from repo too) ────────
+temp_*.ts
+temp_*.js
+create-admin-user.*
+run-migration.*
+test-connection.*
+setup-auth.*
+setup-database.*
+sync.py
+
+# ── Mobile ───────────────────────────────────────────────────
+mobile/android/
+mobile/ios/
+mobile/.gradle/
+
+# ── Type checking cache ──────────────────────────────────────
+*.tsbuildinfo
