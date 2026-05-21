@@ -1,8 +1,9 @@
+import React from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
-import { AuthProvider } from "./context/AuthContext";
-import { useAuth } from "./context/AuthContext";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AuthGuard } from "./components/AuthGuard";
+import { MainLayout } from "./layout/MainLayout";
 import { lazy, Suspense, useEffect } from "react";
 
 const Login                = lazy(() => import("./pages/Login").then(m => ({ default: m.Login })));
@@ -20,6 +21,7 @@ const SystemSettings       = lazy(() => import("./pages/SystemSettings").then(m 
 const DeviceSettings       = lazy(() => import("./pages/DeviceSettings").then(m => ({ default: m.DeviceSettings })));
 const CRMManagement        = lazy(() => import("./pages/CRMManagement").then(m => ({ default: m.CRMManagement })));
 const AssetsManagement     = lazy(() => import("./pages/AssetsManagement").then(m => ({ default: m.AssetsManagement })));
+const NotificationSystem   = lazy(() => import("./pages/NotificationSystem").then(m => ({ default: m.NotificationSystem })));
 
 function PageSkeleton() {
   return (
@@ -31,7 +33,6 @@ function PageSkeleton() {
   );
 }
 
-// Handles redirect after login and blocks logged-in users from /login
 function AuthRedirect() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
@@ -56,23 +57,34 @@ export default function App() {
           <AuthRedirect />
           <Suspense fallback={<PageSkeleton />}>
             <Routes>
+              {/* Public */}
               <Route path="/login" element={<Login />} />
-              <Route path="/"      element={<Navigate to="/dashboard" replace />} />
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-              <Route path="/dashboard"     element={<AuthGuard><ErrorBoundary scope="Dashboard"><ERPDashboard /></ErrorBoundary></AuthGuard>} />
-              <Route path="/employees"     element={<AuthGuard><ErrorBoundary scope="Employees"><EmployeeManagement /></ErrorBoundary></AuthGuard>} />
-              <Route path="/employees/:id" element={<AuthGuard><ErrorBoundary scope="Employee"><EmployeeDetail /></ErrorBoundary></AuthGuard>} />
-              <Route path="/attendance"    element={<AuthGuard><ErrorBoundary scope="Attendance"><AttendanceManagement /></ErrorBoundary></AuthGuard>} />
-              <Route path="/leave"         element={<AuthGuard><ErrorBoundary scope="Leave"><LeaveManagement /></ErrorBoundary></AuthGuard>} />
-              <Route path="/payroll"       element={<AuthGuard><ErrorBoundary scope="Payroll"><PayrollManagement /></ErrorBoundary></AuthGuard>} />
-              <Route path="/finance"       element={<AuthGuard><ErrorBoundary scope="Finance"><FinanceManagement /></ErrorBoundary></AuthGuard>} />
-              <Route path="/inventory"     element={<AuthGuard><ErrorBoundary scope="Inventory"><InventoryManagement /></ErrorBoundary></AuthGuard>} />
-              <Route path="/projects"      element={<AuthGuard><ErrorBoundary scope="Projects"><ProjectsManagement /></ErrorBoundary></AuthGuard>} />
-              <Route path="/reports"       element={<AuthGuard><ErrorBoundary scope="Reports"><Reports /></ErrorBoundary></AuthGuard>} />
-              <Route path="/settings"      element={<AuthGuard><ErrorBoundary scope="Settings"><SystemSettings /></ErrorBoundary></AuthGuard>} />
-              <Route path="/devices"       element={<AuthGuard><ErrorBoundary scope="Devices"><DeviceSettings /></ErrorBoundary></AuthGuard>} />
-              <Route path="/crm"           element={<AuthGuard><ErrorBoundary scope="CRM"><CRMManagement /></ErrorBoundary></AuthGuard>} />
-              <Route path="/assets"        element={<AuthGuard><ErrorBoundary scope="Assets"><AssetsManagement /></ErrorBoundary></AuthGuard>} />
+              {/* Protected — all inside MainLayout which has the sidebar */}
+              <Route element={
+                <AuthGuard>
+                  <ErrorBoundary scope="Layout">
+                    <MainLayout />
+                  </ErrorBoundary>
+                </AuthGuard>
+              }>
+                <Route path="/dashboard"     element={<ErrorBoundary scope="Dashboard"><ERPDashboard /></ErrorBoundary>} />
+                <Route path="/employees"     element={<ErrorBoundary scope="Employees"><EmployeeManagement /></ErrorBoundary>} />
+                <Route path="/employees/:id" element={<ErrorBoundary scope="Employee"><EmployeeDetail /></ErrorBoundary>} />
+                <Route path="/attendance"    element={<ErrorBoundary scope="Attendance"><AttendanceManagement /></ErrorBoundary>} />
+                <Route path="/leave"         element={<ErrorBoundary scope="Leave"><LeaveManagement /></ErrorBoundary>} />
+                <Route path="/payroll"       element={<ErrorBoundary scope="Payroll"><PayrollManagement /></ErrorBoundary>} />
+                <Route path="/finance"       element={<ErrorBoundary scope="Finance"><FinanceManagement /></ErrorBoundary>} />
+                <Route path="/inventory"     element={<ErrorBoundary scope="Inventory"><InventoryManagement /></ErrorBoundary>} />
+                <Route path="/projects"      element={<ErrorBoundary scope="Projects"><ProjectsManagement /></ErrorBoundary>} />
+                <Route path="/reports"       element={<ErrorBoundary scope="Reports"><Reports /></ErrorBoundary>} />
+                <Route path="/settings"      element={<ErrorBoundary scope="Settings"><SystemSettings /></ErrorBoundary>} />
+                <Route path="/devices"       element={<ErrorBoundary scope="Devices"><DeviceSettings /></ErrorBoundary>} />
+                <Route path="/crm"           element={<ErrorBoundary scope="CRM"><CRMManagement /></ErrorBoundary>} />
+                <Route path="/assets"        element={<ErrorBoundary scope="Assets"><AssetsManagement /></ErrorBoundary>} />
+                <Route path="/notifications" element={<ErrorBoundary scope="Notifications"><NotificationSystem /></ErrorBoundary>} />
+              </Route>
 
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
