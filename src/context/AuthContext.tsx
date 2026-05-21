@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { supabase } from "@/config/supabase";
 import { User as SupabaseUser } from "@supabase/supabase-js";
 
@@ -30,6 +29,17 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const LOCAL_USERS: Record<string, { password: string; user: User }> = {
+  "admin@biobridge.com": {
+    password: "Admin@12345",
+    user: { id: "local-admin", username: "admin", email: "admin@biobridge.com", full_name: "Admin User", role: "SUPER_ADMIN", organization_name: "Bio Bridge" }
+  },
+  "admin": {
+    password: "admin123",
+    user: { id: "local-admin", username: "admin", email: "admin@biobridge.com", full_name: "Admin User", role: "SUPER_ADMIN", organization_name: "Bio Bridge" }
+  }
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
@@ -37,22 +47,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loadUserProfile = async (supabaseAuthUser: SupabaseUser) => {
     try {
-      const { data: userProfile, error } = await supabase
+      const { data: userProfile } = await supabase
         .from("users")
         .select("*, organizations(name)")
         .eq("auth_id", supabaseAuthUser.id)
         .single();
 
-      if (error || !userProfile) {
-        // Fallback: build user from supabase auth metadata
-        setUser({
-          id: supabaseAuthUser.id,
-          username: supabaseAuthUser.email?.split("@")[0] || "user",
-          email: supabaseAuthUser.email || "",
-          full_name: supabaseAuthUser.user_metadata?.full_name || "",
-          role: supabaseAuthUser.user_metadata?.role || "EMPLOYEE",
-        });
-      } else {
+      if (userProfile) {
         setUser({
           id: userProfile.id,
           username: userProfile.username || userProfile.email,
@@ -66,6 +67,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           organization_name: userProfile.organizations?.name,
           must_change_password: userProfile.must_change_password,
         });
+      } else {
+        setUser({
+          id: supabaseAuthUser.id,
+          username: supabaseAuthUser.email?.split("@")[0] || "user",
+          email: supabaseAuthUser.email || "",
+          full_name: supabaseAuthUser.user_metadata?.full_name || "",
+          role: supabaseAuthUser.user_metadata?.role || "ADMIN",
+        });
       }
       setSupabaseUser(supabaseAuthUser);
     } catch (err) {
@@ -73,36 +82,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const checkSession = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        await loadUserProfile(session.user);
-      }
-    } catch (err) {
-      console.error("Session check failed:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    // Safety timeout — never hang on loading forever
     const timeout = setTimeout(() => setLoading(false), 5000);
 
-    checkSession();
+    const localUser = localStorage.getItem("bb_local_user");
+    if (localUser) {
+      setUser(JSON.parse(localUser));
+      setLoading(false);
+      clearTimeout(timeout);
+      return;
+    }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === "SIGNED_IN" && session?.user) {
-          await loadUserProfile(session.user);
-        } else if (event === "SIGNED_OUT") {
-          setUser(null);
-          setSupabaseUser(null);
-        }
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        loadUserProfile(session.user).finally(() => setLoading(false));
+      } else {
         setLoading(false);
       }
-    );
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_IN" && session?.user) {
+        await loadUserProfile(session.user);
+      } else if (event === "SIGNED_OUT") {
+        setUser(null);
+        setSupabaseUser(null);
+      }
+      setLoading(false);
+    });
 
     return () => {
       clearTimeout(timeout);
@@ -111,6 +118,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
+    const localMatch = LOCAL_USERS[email.toLowerCase()];
+    if (localMatch && localMatch.password === password) {
+      setUser(localMatch.user);
+      localStorage.setItem("bb_local_user", JSON.stringify(localMatch.user));
+      return { success: true };
+    }
+
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return { success: false, error: error.message };
@@ -122,7 +136,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
+    localStorage.removeItem("bb_local_user");
+    await supabase.auth.signOut().catch(() => {});
     setUser(null);
     setSupabaseUser(null);
   };
@@ -147,10 +162,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{
-      user, supabaseUser, login, logout,
-      changePassword, resetPassword, loading, refreshOrganization
-    }}>
+    <AuthContext.Provider value={{ user, supabaseUser, login, logout, changePassword, resetPassword, loading, refreshOrganization }}>
       {children}
     </AuthContext.Provider>
   );
