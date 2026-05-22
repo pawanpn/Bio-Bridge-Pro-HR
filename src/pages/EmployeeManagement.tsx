@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import branchService from '../services/branchService';
 import { useNavigate } from 'react-router-dom';
@@ -164,7 +164,7 @@ const emptyForm: EmployeeForm = {
 
 const Row: React.FC<{ l: string; v?: any; bool?: boolean; long?: boolean }> = ({ l, v, bool, long }) => {
   const has = v !== undefined && v !== null && v !== '';
-  const display = bool ? (v ? 'Yes' : 'No') : (has ? String(v) : '—');
+  const display = bool ? (v ? 'Yes' : 'No') : (has ? String(v) : 'â€”');
   return (
     <div className={`flex gap-2 ${long ? '' : 'justify-between'}`}>
       <span className="text-muted-foreground flex-shrink-0">{l}:</span>
@@ -217,12 +217,12 @@ export const EmployeeManagement: React.FC = () => {
       loadingToastRef.current = null;
     }
     if (!msg) return;
-    const clean = msg.replace(/^[✅❌🔄⚠️]/u, '').trim();
-    if (msg.startsWith('❌')) {
+    const clean = msg.replace(/^[âœ…âŒðŸ”„âš ï¸]/u, '').trim();
+    if (msg.startsWith('âŒ')) {
       toast.error(clean, { duration: 6000 });
-    } else if (msg.startsWith('✅')) {
+    } else if (msg.startsWith('âœ…')) {
       toast.success(clean);
-    } else if (msg.startsWith('🔄')) {
+    } else if (msg.startsWith('ðŸ”„')) {
       loadingToastRef.current = toast.loading(clean);
     } else {
       toast(clean);
@@ -242,25 +242,35 @@ export const EmployeeManagement: React.FC = () => {
     };
   }, [viewMode]);
 
-  const loadData = async () => {
+const loadData = async () => {
     setLoading(true);
     try {
       console.log('[EmployeeManagement] Loading data...');
-      const [empResult, branchData, deviceData, deptData, desigData] = await Promise.all([
-        invoke<any>('list_employees', { statusFilter: viewMode === 'deleted' ? 'deleted' : 'active' }),
-        branchService.listBranches(),
-        branchService.listAllDevices(),
-        invoke<any[]>('list_departments'),
-        invoke<any[]>('list_designations'),
-      ]);
+      const orgId = user?.organization_id;
+      const statusVal = viewMode === 'deleted' ? 'Inactive' : 'Active';
+      const { data: empData2, error: empError } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('status', statusVal)
+        .order('employee_code', { ascending: true });
+      console.log('EMPLOYEE DEBUG - data:', empData2, 'error:', empError);
+      if (empError) console.error('Employee fetch error:', empError);
+      const empResult = { data: empData2 || [] };
+      const { data: branchData2 } = await supabase.from('branches').select('*').eq('org_id', orgId || 0);
+      const branchData = branchData2 || [];
+      const deviceData: any[] = [];
+      const { data: deptData2 } = await supabase.from('departments').select('*');
+      const deptData = deptData2 || [];
+      const { data: desigData2 } = await supabase.from('designations').select('*');
+      const desigData = desigData2 || [];
       
       console.log('[EmployeeManagement] Raw branch data:', branchData);
       console.log('[EmployeeManagement] Raw device data:', deviceData);
       console.log('[EmployeeManagement] Branch data type:', typeof branchData, Array.isArray(branchData));
       console.log('[EmployeeManagement] Device data type:', typeof deviceData, Array.isArray(deviceData));
       
-      // Handle both flat array and wrapped {success, data, count} format
-      const empData = Array.isArray(empResult) ? empResult : (empResult as any)?.data || [];
+      // Direct Supabase data
+      const empData = empData2 || [];
       const branches = Array.isArray(branchData) ? branchData : [];
       const devices = Array.isArray(deviceData) ? deviceData : [];
       
@@ -352,7 +362,7 @@ export const EmployeeManagement: React.FC = () => {
 
     checkLimit().then(limitMsg => {
       if (limitMsg) {
-        notify(`❌ ${limitMsg}`);
+        notify(`âŒ ${limitMsg}`);
         return;
       }
       const maxId = employees.reduce((max, emp) => Math.max(max, parseInt(emp.id) || 0), 0);
@@ -376,7 +386,7 @@ export const EmployeeManagement: React.FC = () => {
 
   const handleSaveEmployee = async () => {
     if (!formData.first_name || !formData.last_name || !formData.employee_code) {
-      notify('❌ First name, last name, and employee code are required');
+      notify('âŒ First name, last name, and employee code are required');
       return;
     }
 
@@ -456,7 +466,7 @@ export const EmployeeManagement: React.FC = () => {
         savedEmployeeId = result?.employee_id || null;
       }
 
-      notify('✅ Employee saved successfully!');
+      notify('âœ… Employee saved successfully!');
       loadData();
 
       // Auto-sync to device if employee has biometric_id and devices exist
@@ -469,53 +479,53 @@ export const EmployeeManagement: React.FC = () => {
 
       if (savedBiometricId != null && targetDeviceId && savedEmployeeId) {
         try {
-          notify('🔄 Syncing to device...');
+          notify('ðŸ”„ Syncing to device...');
           await invoke('push_employee_to_device', {
             deviceId: targetDeviceId,
             employeeId: savedEmployeeId,
           });
-          notify('✅ Employee saved and synced to device!');
+          notify('âœ… Employee saved and synced to device!');
         } catch (syncErr: any) {
           console.warn('Device sync failed:', syncErr);
-          notify('✅ Employee saved! (Device sync failed: ' + (syncErr?.message || 'check connection') + ')');
+          notify('âœ… Employee saved! (Device sync failed: ' + (syncErr?.message || 'check connection') + ')');
         }
       } else if (savedBiometricId == null) {
-        notify('✅ Employee saved! (No biometric ID set, skipped device sync)');
+        notify('âœ… Employee saved! (No biometric ID set, skipped device sync)');
       } else if (!devices.length) {
-        notify('✅ Employee saved! (No devices available, skipped sync)');
+        notify('âœ… Employee saved! (No devices available, skipped sync)');
       }
 
       setTimeout(() => {
         setFormDialog({ open: false, editing: null });
       }, 1500);
     } catch (error: any) {
-      notify('❌ Failed to save: ' + (error?.message || error));
+      notify('âŒ Failed to save: ' + (error?.message || error));
     }
   };
 
   const handleSyncToDevice = async () => {
     const bioId = formData.biometric_id != null && formData.biometric_id !== '' ? parseInt(String(formData.biometric_id)) : null;
     if (!formDialog.editing || bioId == null) {
-      notify('❌ Biometric ID is required to sync to device');
+      notify('âŒ Biometric ID is required to sync to device');
       return;
     }
 
     if (devices.length === 0) {
-      notify('❌ No devices available to sync');
+      notify('âŒ No devices available to sync');
       return;
     }
 
     setLoading(true);
-    notify('🔄 Syncing user to device...');
+    notify('ðŸ”„ Syncing user to device...');
     try {
       await invoke('push_employee_to_device', {
         deviceId: parseInt(selectedDeviceId) || devices.find((d: any) => d.is_default)?.id || devices[0].id,
         employeeId: formDialog.editing.id,
       });
-      notify('✅ Employee name synced to device successfully!');
+      notify('âœ… Employee name synced to device successfully!');
     } catch (error: any) {
       console.error('Sync error:', error);
-      notify('❌ Sync failed: ' + (error?.message || error));
+      notify('âŒ Sync failed: ' + (error?.message || error));
     } finally {
       setLoading(false);
     }
@@ -524,27 +534,27 @@ export const EmployeeManagement: React.FC = () => {
   const handlePullBiometric = async () => {
     const bioId = formData.biometric_id != null && formData.biometric_id !== '' ? parseInt(String(formData.biometric_id)) : null;
     if (!formDialog.editing || bioId == null) {
-      notify('❌ Biometric ID is required to pull data');
+      notify('âŒ Biometric ID is required to pull data');
       return;
     }
 
     if (devices.length === 0) {
-      notify('❌ No devices available');
+      notify('âŒ No devices available');
       return;
     }
 
     setLoading(true);
-    notify('🔄 Pulling biometric from device...');
+    notify('ðŸ”„ Pulling biometric from device...');
     try {
       const data = await invoke('pull_employee_biometric', {
         deviceId: parseInt(selectedDeviceId) || devices.find((d: any) => d.is_default)?.id || devices[0].id,
         employeeId: formDialog.editing.id,
       });
       console.log('Pulled biometric data:', data);
-      notify('✅ Biometric pulled successfully! (Verified ' + (Array.isArray(data) ? data.length : 0) + ' templates)');
+      notify('âœ… Biometric pulled successfully! (Verified ' + (Array.isArray(data) ? data.length : 0) + ' templates)');
     } catch (error: any) {
       console.error('Pull error:', error);
-      notify('❌ Pull failed: ' + (error?.message || error));
+      notify('âŒ Pull failed: ' + (error?.message || error));
     } finally {
       setLoading(false);
     }
@@ -800,12 +810,12 @@ export const EmployeeManagement: React.FC = () => {
                 filteredEmployees.map(emp => (
                   <TableRow key={emp.id} className="cursor-pointer hover:bg-muted/50">
                     <TableCell className="font-mono text-sm">{emp.employee_code || `#${emp.id}`}</TableCell>
-                    <TableCell className="text-muted-foreground font-mono text-xs">{emp.biometric_id || '—'}</TableCell>
+                    <TableCell className="text-muted-foreground font-mono text-xs">{emp.biometric_id || 'â€”'}</TableCell>
                     <TableCell className="font-medium">
-                      {emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || '—'}
+                      {emp.full_name || `${emp.first_name || ''} ${emp.last_name || ''}`.trim() || 'â€”'}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{emp.department || '—'}</TableCell>
-                    <TableCell className="text-muted-foreground">{emp.branch_name || '—'}</TableCell>
+                    <TableCell className="text-muted-foreground">{emp.department || 'â€”'}</TableCell>
+                    <TableCell className="text-muted-foreground">{emp.branch_name || 'â€”'}</TableCell>
                     <TableCell>
                       <Badge variant={emp.employment_status === 'Active' || !emp.employment_status ? 'default' : 'secondary'}>
                         {emp.employment_status || 'Active'}
@@ -813,11 +823,11 @@ export const EmployeeManagement: React.FC = () => {
                     </TableCell>
                     {viewMode === 'deleted' && (
                       <TableCell className="text-red-600 font-medium text-xs">
-                        {emp.deleted_at || '—'}
+                        {emp.deleted_at || 'â€”'}
                       </TableCell>
                     )}
                     <TableCell className="text-muted-foreground text-sm">
-                      {emp.date_of_joining || '—'}
+                      {emp.date_of_joining || 'â€”'}
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <div className="flex gap-1">
@@ -1530,7 +1540,7 @@ export const EmployeeManagement: React.FC = () => {
                   disabled={formStep === 1}
                   className="h-9 px-5 rounded-lg border-slate-200 text-xs font-bold"
                 >
-                  ← Back
+                  â† Back
                 </Button>
                 <Button 
                   variant="default" 
@@ -1538,7 +1548,7 @@ export const EmployeeManagement: React.FC = () => {
                   disabled={formStep === 8}
                   className="h-9 px-5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-all shadow-md active:scale-95"
                 >
-                  Continue →
+                  Continue â†’
                 </Button>
              </div>
           </div>
@@ -1568,7 +1578,7 @@ export const EmployeeManagement: React.FC = () => {
                   {(viewProfile.first_name || viewProfile.name || '?').charAt(0)}
                 </div>
                 <div className="flex-1">
-                  <h3 className="text-xl font-bold">{viewProfile.full_name || viewProfile.name || '—'}</h3>
+                  <h3 className="text-xl font-bold">{viewProfile.full_name || viewProfile.name || 'â€”'}</h3>
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-sm text-muted-foreground">
                     <span>Code: <strong className="text-foreground">{viewProfile.employee_code || `#${viewProfile.id}`}</strong></span>
                     {viewProfile.department_name && <span>Dept: <strong className="text-foreground">{viewProfile.department_name}</strong></span>}
@@ -1777,7 +1787,7 @@ export const EmployeeManagement: React.FC = () => {
               {devices.length === 0 && (
                 <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
                   <p className="text-sm text-yellow-800">
-                    ⚠️ No devices found. Please add a device in Organization Structure → Devices tab first.
+                    âš ï¸ No devices found. Please add a device in Organization Structure â†’ Devices tab first.
                   </p>
                   <p className="text-xs text-yellow-600 mt-1">
                     Devices loaded: {devices.length}
@@ -1786,7 +1796,7 @@ export const EmployeeManagement: React.FC = () => {
               )}
               {devices.length > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  ✅ {devices.length} device(s) available
+                  âœ… {devices.length} device(s) available
                 </p>
               )}
             </div>
@@ -1810,7 +1820,7 @@ export const EmployeeManagement: React.FC = () => {
               {branches.length === 0 && (
                 <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
                   <p className="text-sm text-yellow-800">
-                    ⚠️ No branches found. Please add a branch in Organization Structure → Branches tab first.
+                    âš ï¸ No branches found. Please add a branch in Organization Structure â†’ Branches tab first.
                   </p>
                   <p className="text-xs text-yellow-600 mt-1">
                     Branches loaded: {branches.length}
@@ -1819,7 +1829,7 @@ export const EmployeeManagement: React.FC = () => {
               )}
               {branches.length > 0 && (
                 <p className="text-xs text-muted-foreground">
-                  ✅ {branches.length} branch(es) available
+                  âœ… {branches.length} branch(es) available
                 </p>
               )}
             </div>
@@ -1842,10 +1852,10 @@ export const EmployeeManagement: React.FC = () => {
                       <div className="space-y-2">
                         <p className="font-semibold">Import Successful!</p>
                         <div className="text-sm space-y-1">
-                          <p>✅ Imported: {importResult.imported} employees</p>
-                          <p>⏭️ Skipped (already exists): {importResult.skipped} employees</p>
+                          <p>âœ… Imported: {importResult.imported} employees</p>
+                          <p>â­ï¸ Skipped (already exists): {importResult.skipped} employees</p>
                           {importResult.errors > 0 && (
-                            <p>❌ Errors: {importResult.errors} employees</p>
+                            <p>âŒ Errors: {importResult.errors} employees</p>
                           )}
                           {importResult.error_details && importResult.error_details.length > 0 && (
                             <div className="mt-2 p-2 bg-red-100 border border-red-300 rounded text-xs">
@@ -1924,3 +1934,8 @@ export const EmployeeManagement: React.FC = () => {
     </div>
   );
 };
+
+
+
+
+
