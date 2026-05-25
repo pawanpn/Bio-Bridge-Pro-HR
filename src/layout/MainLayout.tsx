@@ -76,7 +76,7 @@ export const MainLayout: React.FC = () => {
     '/dashboard': 'Dashboard',
     '/employees': 'Employees',
     '/employee-hierarchy': 'Employee Hierarchy',
-    '/leave-management': 'Leave Management',
+    '/leave': 'Leave Management',
     '/attendance': 'Attendance',
     '/payroll': 'Payroll',
     '/finance': 'Finance & Accounts',
@@ -86,9 +86,9 @@ export const MainLayout: React.FC = () => {
     '/crm': 'CRM',
     '/assets': 'Assets',
     '/organization': 'Organization',
-    '/device-settings': 'Device Settings',
+    '/devices': 'Device Settings',
     '/notifications': 'Notifications',
-    '/system-settings': 'System Settings',
+    '/settings': 'System Settings',
     '/system-tools': 'System Tools',
     '/permissions': 'Roles & Permissions',
     '/cloud-settings': 'Cloud Settings',
@@ -268,7 +268,7 @@ export const MainLayout: React.FC = () => {
                 icon={<CalendarCheck size={16} />}
                 label="Leave Management"
                 active={activeTab === 'Leave'}
-                onClick={() => go('Leave', '/leave-management')}
+                onClick={() => go('Leave', '/leave')}
               />
             )}
             {!isOperator && (
@@ -389,7 +389,7 @@ export const MainLayout: React.FC = () => {
                 icon={<Settings size={16} />}
                 label="System Settings"
                 active={activeTab === 'Settings'}
-                onClick={() => go('Settings', '/system-settings')}
+                onClick={() => go('Settings', '/settings')}
               />
             </>
           )}

@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { invoke } from '@tauri-apps/api/core';
+import { supabase } from '@/config/supabase';
 import {
   DollarSign, Calculator, Download, FileText, Users, TrendingUp,
   Plus, Eye, Clock, AlertCircle
@@ -62,11 +62,11 @@ export const PayrollManagement: React.FC = () => {
   const loadPayrollData = async () => {
     setLoading(true);
     try {
-      const records = await invoke<PayrollRecord[]>('get_payroll_records', {
-        month: selectedMonth,
-        year: selectedYear,
-      });
-      setPayrollRecords(records);
+      const { data: records } = await supabase
+        .from('payroll_records')
+        .select('*')
+        .order('created_at', { ascending: false });
+      setPayrollRecords(records || []);
     } catch (error) {
       console.error('Failed to load payroll data:', error);
     } finally {
@@ -474,3 +474,4 @@ const TabButton: React.FC<{
     {label}
   </button>
 );
+

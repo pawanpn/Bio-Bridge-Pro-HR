@@ -17,11 +17,14 @@ const FinanceManagement    = lazy(() => import("./pages/FinanceManagement").then
 const InventoryManagement  = lazy(() => import("./pages/InventoryManagement").then(m => ({ default: m.InventoryManagement })));
 const ProjectsManagement   = lazy(() => import("./pages/ProjectsManagement").then(m => ({ default: m.ProjectsManagement })));
 const Reports              = lazy(() => import("./pages/Reports").then(m => ({ default: m.Reports })));
-const SystemSettings       = lazy(() => import("./pages/SystemSettings").then(m => ({ default: m.SystemSettings })));
-const DeviceSettings       = lazy(() => import("./pages/DeviceSettings").then(m => ({ default: m.DeviceSettings })));
-const CRMManagement        = lazy(() => import("./pages/CRMManagement").then(m => ({ default: m.CRMManagement })));
-const AssetsManagement     = lazy(() => import("./pages/AssetsManagement").then(m => ({ default: m.AssetsManagement })));
-const NotificationSystem   = lazy(() => import("./pages/NotificationSystem").then(m => ({ default: m.NotificationSystem })));
+const SystemSettings              = lazy(() => import("./pages/SystemSettings").then(m => ({ default: m.SystemSettings })));
+const DeviceSettings              = lazy(() => import("./pages/DeviceSettings").then(m => ({ default: m.DeviceSettings })));
+const CRMManagement               = lazy(() => import("./pages/CRMManagement").then(m => ({ default: m.CRMManagement })));
+const AssetsManagement            = lazy(() => import("./pages/AssetsManagement").then(m => ({ default: m.AssetsManagement })));
+const NotificationSystem          = lazy(() => import("./pages/NotificationSystem").then(m => ({ default: m.NotificationSystem })));
+const BranchGateDeviceManagement  = lazy(() => import("./pages/BranchGateDeviceManagement").then(m => ({ default: m.BranchGateDeviceManagement })));
+const PermissionManagement        = lazy(() => import("./components/PermissionManagement").then(m => ({ default: m.PermissionManagement })));
+const SystemToolsComponent        = lazy(() => import("./components/SystemTools").then(m => ({ default: m.SystemTools })));
 
 function PageSkeleton() {
   return (
@@ -61,7 +64,7 @@ export default function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-              {/* Protected — all inside MainLayout which has the sidebar */}
+              {/* Protected ï¿½ all inside MainLayout which has the sidebar */}
               <Route element={
                 <AuthGuard>
                   <ErrorBoundary scope="Layout">
@@ -81,6 +84,9 @@ export default function App() {
                 <Route path="/reports"       element={<ErrorBoundary scope="Reports"><Reports /></ErrorBoundary>} />
                 <Route path="/settings"      element={<ErrorBoundary scope="Settings"><SystemSettings /></ErrorBoundary>} />
                 <Route path="/devices"       element={<ErrorBoundary scope="Devices"><DeviceSettings /></ErrorBoundary>} />
+                <Route path="/organization"  element={<ErrorBoundary scope="Organization"><BranchGateDeviceManagement /></ErrorBoundary>} />
+                <Route path="/permissions"   element={<ErrorBoundary scope="Permissions"><PermissionManagement /></ErrorBoundary>} />
+                <Route path="/system-tools"  element={<ErrorBoundary scope="SystemTools"><SystemToolsComponent /></ErrorBoundary>} />
                 <Route path="/crm"           element={<ErrorBoundary scope="CRM"><CRMManagement /></ErrorBoundary>} />
                 <Route path="/assets"        element={<ErrorBoundary scope="Assets"><AssetsManagement /></ErrorBoundary>} />
                 <Route path="/notifications" element={<ErrorBoundary scope="Notifications"><NotificationSystem /></ErrorBoundary>} />

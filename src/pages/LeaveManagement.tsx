@@ -73,12 +73,18 @@ export const LeaveManagement: React.FC = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      let leaveQuery = supabase.from('leave_requests').select('*');
       if (filterStatus !== 'all') leaveQuery = leaveQuery.eq('status', filterStatus);
       const { data: leavesData } = await leaveQuery;
       const { data: typesData } = await supabase.from('leave_types').select('name');
       const { data: empsData } = await supabase.from('employees').select('id, first_name, last_name').eq('status', 'Active');
       const leaves = leavesData || [];
-      const statsData = { pending: leaves.filter((l: any) => l.status === 'Pending').length, approved: leaves.filter((l: any) => l.status === 'Approved').length, rejected: leaves.filter((l: any) => l.status === 'Rejected').length, total: leaves.length };
+      const today = new Date().toISOString().split('T')[0];
+      const statsData: LeaveStats = {
+        pending: leaves.filter((l: any) => l.status === 'Pending').length,
+        approvedToday: leaves.filter((l: any) => l.status === 'Approved' && (l.updated_at || l.created_at || '').startsWith(today)).length,
+        currentlyOnLeave: leaves.filter((l: any) => l.start_date <= today && l.end_date >= today && l.status === 'Approved').length,
+      };
       setLeaves(leaves);
       setStats(statsData);
       setLeaveTypes((typesData || []).map((t: any) => t.name));

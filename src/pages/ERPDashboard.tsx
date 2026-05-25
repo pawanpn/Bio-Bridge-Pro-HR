@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { invoke } from '@tauri-apps/api/core';
+import { supabase } from '@/config/supabase';
 import { 
   Users, UserCheck, UserMinus, Cloud, Clock, CalendarCheck, 
   DollarSign, TrendingUp, TrendingDown, ShoppingCart, Package, FileText, 
@@ -149,82 +149,91 @@ export const ERPDashboard: React.FC = () => {
   const [lastSync, setLastSync] = useState<string>('');
 
   useEffect(() => {
-    // Load real data from local SQLite via Tauri commands
+    const safeQuery = async <T,>(query: PromiseLike<{ data: T | null; error: any }>): Promise<T[]> => {
+      try {
+        const { data, error } = await query;
+        if (error) { console.warn('Supabase query error:', error); return []; }
+        return (data as T[]) || [];
+      } catch (e) {
+        console.warn('Supabase query failed:', e);
+        return [];
+      }
+    };
+
     const loadStats = async (silent = false) => {
-      // On first load show full loading state, on refresh update silently
       if (!silent) setIsLoading(true);
       else setIsRefreshing(true);
       try {
-        // Fetch real data from local database
-        const [empResult, leaveResult, itemResult, projectResult, leadResult, dashStats] = await Promise.all([
-          invoke<any>('list_employees').catch(() => ({ data: [] })),
-          invoke<any>('list_leave_requests').catch(() => ({ data: [] })),
-          invoke<any[]>('list_items').catch(() => []),
-          invoke<any[]>('list_projects').catch(() => []),
-          invoke<any[]>('list_leads').catch(() => []),
-          invoke<any>('get_dashboard_stats').catch(() => null),
+        const today = new Date().toISOString().split('T')[0];
+        const now = new Date();
+
+        const results = await Promise.allSettled([
+          safeQuery<any>(supabase.from('employees').select('*')),
+          safeQuery<any>(supabase.from('leave_requests').select('*')),
+          safeQuery<any>(supabase.from('attendance_daily').select('employee_id').eq('date', today)),
+          safeQuery<any>(supabase.from('attendance_daily').select('employee_id').eq('date', today).eq('status', 'Late')),
+          safeQuery<any>(supabase.from('items').select('*')),
+          safeQuery<any>(supabase.from('projects').select('*')),
+          safeQuery<any>(supabase.from('leads').select('*')),
         ]);
 
-        // Parse employees
-        const employees = Array.isArray(empResult) ? empResult : (empResult as any)?.data || [];
-        const leaves = Array.isArray(leaveResult) ? leaveResult : (leaveResult as any)?.data || [];
-        const items = Array.isArray(itemResult) ? itemResult : [];
-        const projects = Array.isArray(projectResult) ? projectResult : [];
-        const leads = Array.isArray(leadResult) ? leadResult : [];
+        const getData = (idx: number) =>
+          results[idx].status === 'fulfilled' ? results[idx].value : [];
 
-        const totalEmployees = employees.length;
-        const activeEmployees = employees.filter((e: any) => e.employment_status === 'Active' || e.status === 'Active').length;
-        const onLeaveEmployees = employees.filter((e: any) => e.employment_status === 'On Leave').length;
+        const empList: any[] = getData(0);
+        const leaveList: any[] = getData(1);
+        const attList: any[] = getData(2);
+        const lateList: any[] = getData(3);
+        const itemList: any[] = getData(4);
+        const projectList: any[] = getData(5);
+        const leadList: any[] = getData(6);
 
-        // Use REAL attendance data from dashboard_stats if available
-        const presentToday = dashStats?.presentToday ?? 0;
-        const absentToday = dashStats ? Math.max(0, totalEmployees - presentToday) : 0;
+        const totalEmployees = empList.length;
+        const activeEmployees = empList.filter((e: any) => e.status === 'Active').length;
+        const onLeaveEmployees = empList.filter((e: any) => e.employment_status === 'On Leave').length;
+        const presentToday = attList.length;
+        const lateToday = lateList.length;
+        const absentToday = Math.max(0, totalEmployees - presentToday);
 
         const stats: ERPStats = {
-          // HR Module - REAL DATA
           totalEmployees,
           presentToday,
           absentToday,
-          lateToday: dashStats?.lateToday ?? 0,
+          lateToday,
           onLeave: onLeaveEmployees,
-          pendingLeaveRequests: leaves.filter((l: any) => l.status === 'Pending').length,
-          newHiresThisMonth: employees.filter((e: any) => {
+          pendingLeaveRequests: leaveList.filter((l: any) => l.status === 'Pending').length,
+          newHiresThisMonth: empList.filter((e: any) => {
+            if (!e.date_of_joining) return false;
             const joinDate = new Date(e.date_of_joining);
-            const now = new Date();
             return joinDate.getMonth() === now.getMonth() && joinDate.getFullYear() === now.getFullYear();
           }).length,
-          resignationsThisMonth: employees.filter((e: any) => e.employment_status === 'Inactive').length,
+          resignationsThisMonth: empList.filter((e: any) => e.status === 'Inactive').length,
           attendanceRate: totalEmployees > 0 ? Math.round((presentToday / totalEmployees) * 100) : 0,
 
-          // Payroll Module
           monthlyPayroll: activeEmployees * 42000,
           pendingPayslips: Math.floor(activeEmployees * 0.1),
           totalDeductions: Math.floor(activeEmployees * 42000 * 0.1),
           totalAllowances: Math.floor(activeEmployees * 42000 * 0.2),
 
-          // Finance Module
           totalRevenue: 12500000,
           totalExpenses: 8750000,
           pendingInvoices: 23,
           pendingPayments: 8,
           profitMargin: 30,
 
-          // Inventory Module - REAL DATA
-          totalItems: items.length,
-          lowStockItems: items.filter((i: any) => i.quantity <= (i.reorder_level || 10)).length,
+          totalItems: itemList.length,
+          lowStockItems: itemList.filter((i: any) => i.quantity <= (i.reorder_level || 10)).length,
           totalWarehouses: 3,
           pendingPOs: 12,
 
-          // Project Module - REAL DATA
-          activeProjects: projects.filter((p: any) => p.status === 'In Progress' || p.status === 'Planning').length,
-          completedProjects: projects.filter((p: any) => p.status === 'Completed').length,
+          activeProjects: projectList.filter((p: any) => p.status === 'In Progress' || p.status === 'Planning').length,
+          completedProjects: projectList.filter((p: any) => p.status === 'Completed').length,
           overdueTasks: 8,
           totalTasks: 156,
 
-          // CRM Module - REAL DATA
-          totalLeads: leads.length,
-          activeOpportunities: leads.filter((l: any) => l.status === 'Qualified' || l.status === 'Proposal' || l.status === 'Negotiation').length,
-          expectedRevenue: leads.reduce((sum: number, l: any) => sum + (l.value || 0), 0),
+          totalLeads: leadList.length,
+          activeOpportunities: leadList.filter((l: any) => l.status === 'Qualified' || l.status === 'Proposal' || l.status === 'Negotiation').length,
+          expectedRevenue: leadList.reduce((sum: number, l: any) => sum + (l.value || 0), 0),
           totalCustomers: 156
         };
 
@@ -239,9 +248,8 @@ export const ERPDashboard: React.FC = () => {
       }
     };
 
-    loadStats(false); // First load: show spinner
+    loadStats(false);
 
-    // Refresh silently every 5 minutes (no blink)
     const interval = setInterval(() => loadStats(true), 300000);
     return () => clearInterval(interval);
   }, []);

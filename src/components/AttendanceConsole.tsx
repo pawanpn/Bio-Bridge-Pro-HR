@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { listen } from '@tauri-apps/api/event';
+import { isTauriPlatform } from '../utils/platform';
 
 export const AttendanceConsole: React.FC = () => {
   const [logs, setLogs] = useState<string[]>([]);
@@ -7,11 +7,22 @@ export const AttendanceConsole: React.FC = () => {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const unlisten = listen<string>('console-log', (event) => {
-      setLogs((prev) => [...prev, event.payload]);
-    });
+    if (!isTauriPlatform()) return;
+
+    let cancelled = false;
+    const init = async () => {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        const unlisten = await listen<string>('console-log', (event) => {
+          if (!cancelled) setLogs((prev) => [...prev, event.payload]);
+        });
+        return unlisten;
+      } catch {}
+    };
+    const promise = init();
     return () => {
-      unlisten.then(fn => fn());
+      cancelled = true;
+      promise.then(fn => fn?.());
     };
   }, []);
 

@@ -134,9 +134,16 @@ export const AttendanceManagement: React.FC = () => {
         supabase.from('branches').select('*'),
         supabase.from('devices').select('*'),
       ]);
-      const { data: empData } = await supabase.from('employees').select('id, first_name, last_name, employee_code, biometric_id').eq('status', 'Active');
+      const { data: empData } = await supabase.from('employees').select('*').eq('status', 'Active');
+      const mapped = (empData || []).map((e: any) => ({
+        id: e.id,
+        name: e.first_name ? `${e.first_name} ${e.last_name || ''}`.trim() : (e.name || e.full_name || `Employee #${e.id}`),
+        full_name: e.full_name || `${e.first_name || ''} ${e.last_name || ''}`.trim(),
+        department: e.department || '',
+        branch_id: e.branch_id || 0,
+      }));
       setBranches(branchData.data || []);
-      setEmployees(empData || []);
+      setEmployees(mapped as Employee[]);
       setDevices(deviceData.data || []);
       setGates([]);
       setLocalDefaultId(null);
