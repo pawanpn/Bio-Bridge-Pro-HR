@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+﻿import React, { useEffect, useState, useCallback } from 'react';
+import { supabase } from '@/config/supabase';
 import {
   Check, X as XIcon, Plus, Trash2,
   Clock, AlertCircle, Filter, CalendarDays
@@ -45,12 +45,12 @@ interface LeaveStats {
 }
 
 const leaveTypeIcons: Record<string, string> = {
-  'Sick Leave': '🤒',
-  'Casual Leave': '🏖️',
-  'Paid Leave': '💰',
-  'Maternity Leave': '👶',
-  'Paternity Leave': '👨‍',
-  'Emergency Leave': '🚨',
+  'Sick Leave': 'ðŸ¤’',
+  'Casual Leave': 'ðŸ–ï¸',
+  'Paid Leave': 'ðŸ’°',
+  'Maternity Leave': 'ðŸ‘¶',
+  'Paternity Leave': 'ðŸ‘¨â€',
+  'Emergency Leave': 'ðŸš¨',
 };
 
 export const LeaveManagement: React.FC = () => {
@@ -73,16 +73,16 @@ export const LeaveManagement: React.FC = () => {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [leavesData, statsData, typesData, empsData] = await Promise.all([
-        invoke<LeaveRequest[]>('list_leave_requests', { status: filterStatus }),
-        invoke<LeaveStats>('get_leave_stats'),
-        invoke<string[]>('get_leave_types'),
-        invoke<{ id: number; name: string }[]>('list_employees'),
-      ]);
-      setLeaves(leavesData || []);
+      if (filterStatus !== 'all') leaveQuery = leaveQuery.eq('status', filterStatus);
+      const { data: leavesData } = await leaveQuery;
+      const { data: typesData } = await supabase.from('leave_types').select('name');
+      const { data: empsData } = await supabase.from('employees').select('id, first_name, last_name').eq('status', 'Active');
+      const leaves = leavesData || [];
+      const statsData = { pending: leaves.filter((l: any) => l.status === 'Pending').length, approved: leaves.filter((l: any) => l.status === 'Approved').length, rejected: leaves.filter((l: any) => l.status === 'Rejected').length, total: leaves.length };
+      setLeaves(leaves);
       setStats(statsData);
-      setLeaveTypes(typesData);
-      setEmployees(empsData);
+      setLeaveTypes((typesData || []).map((t: any) => t.name));
+      setEmployees((empsData || []).map((e: any) => ({ id: e.id, name: e.first_name + ' ' + e.last_name })));
     } catch (e) {
       console.error('Failed to load leave data:', e);
     } finally {
@@ -103,7 +103,7 @@ export const LeaveManagement: React.FC = () => {
       return;
     }
     try {
-      await invoke('add_leave_request', {
+      await supabase.from('leave_requests').insert({
         employeeId: parseInt(formData.employeeId),
         leaveType: formData.leaveType,
         startDate: formData.startDate,
@@ -121,7 +121,7 @@ export const LeaveManagement: React.FC = () => {
   const handleStatusUpdate = async (leaveId: number, status: string) => {
     setProcessing(leaveId);
     try {
-      await invoke('update_leave_status', {
+      await supabase.from('leave_requests').update({
         leaveId,
         status,
         approvedBy: status === 'approved' ? 'Admin' : null,
@@ -137,7 +137,7 @@ export const LeaveManagement: React.FC = () => {
   const handleDelete = async (leaveId: number) => {
     if (!confirm('Are you sure you want to delete this leave request?')) return;
     try {
-      await invoke('delete_leave_request', { leaveId });
+      await supabase.from('leave_requests').delete().eq('id', leaveId);
       fetchData();
     } catch (e) {
       alert('Failed to delete: ' + e);
@@ -460,3 +460,6 @@ export const LeaveManagement: React.FC = () => {
     </div>
   );
 };
+
+
+
