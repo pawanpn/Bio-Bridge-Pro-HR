@@ -29,18 +29,22 @@ import {
 type TabType = 'overview' | 'process' | 'history' | 'loans';
 
 interface PayrollRecord {
-  id: number;
-  employee_name: string;
+  id: string;
+  employee_id: number;
+  employee_name?: string;
   basic_salary: number;
+  gross_salary: number;
   total_earnings: number;
   total_deductions: number;
   net_pay: number;
-  pf_employer: number;
-  pf_employee: number;
-  tax_amount: number;
+  ssf_employer: number;
+  ssf_employee: number;
+  income_tax: number;
   overtime_amount: number;
-  days_present: number;
-  status: string;
+  month: number;
+  year: number;
+  is_paid: boolean;
+  organization_id: number;
 }
 
 export const PayrollManagement: React.FC = () => {
@@ -79,18 +83,46 @@ export const PayrollManagement: React.FC = () => {
   const totalEarnings = payrollRecords.reduce((sum, r) => sum + r.total_earnings, 0);
   const totalDeductions = payrollRecords.reduce((sum, r) => sum + r.total_deductions, 0);
   const totalNetPay = payrollRecords.reduce((sum, r) => sum + r.net_pay, 0);
-  const totalPF = payrollRecords.reduce((sum, r) => sum + r.pf_employer + r.pf_employee, 0);
-  const totalTax = payrollRecords.reduce((sum, r) => sum + r.tax_amount, 0);
+  const totalPF = payrollRecords.reduce((sum, r) => sum + r.ssf_employer + r.ssf_employee, 0);
+  const totalTax = payrollRecords.reduce((sum, r) => sum + r.income_tax, 0);
 
   const handleProcessPayroll = async () => {
     setProcessingDialog(true);
     try {
-      // Simulate payroll processing
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      setProcessingDialog(false);
+      // Fetch active employees with salary
+      const { data: employees } = await supabase.from('employees').select('id, first_name, last_name, employee_code').eq('status', 'Active');
+      if (!employees || employees.length === 0) { alert('No active employees found!'); return; }
+      // Nepal SSF rates
+      const SSF_EMPLOYEE = 0.11; // 11%
+      const SSF_EMPLOYER = 0.20; // 20%
+      // Process each employee
+      const payrollData = employees.map((emp: any) => {
+        const basic_salary = 30000; // Default - should come from salary structure
+        const gross_salary = basic_salary * 1.5; // Basic + allowances
+        const ssf_employee = Math.round(basic_salary * SSF_EMPLOYEE);
+        const ssf_employer = Math.round(basic_salary * SSF_EMPLOYER);
+        // Nepal Income Tax calculation (IRD slabs FY 2081/82)
+        const annual_taxable = (gross_salary - ssf_employee) * 12;
+        let income_tax_annual = 0;
+        if (annual_taxable > 600000) income_tax_annual += (Math.min(annual_taxable, 800000) - 600000) * 0.10;
+        if (annual_taxable > 800000) income_tax_annual += (Math.min(annual_taxable, 1100000) - 800000) * 0.20;
+        if (annual_taxable > 1100000) income_tax_annual += (Math.min(annual_taxable, 2000000) - 1100000) * 0.30;
+        if (annual_taxable > 2000000) income_tax_annual += (annual_taxable - 2000000) * 0.36;
+        income_tax_annual += Math.min(annual_taxable, 600000) * 0.01;
+        const income_tax = Math.round(income_tax_annual / 12);
+        const total_deductions = ssf_employee + income_tax;
+        const net_pay = gross_salary - total_deductions;
+        return { employee_id: emp.id, basic_salary, gross_salary, total_earnings: gross_salary, total_deductions, ssf_employee, ssf_employer, income_tax, net_pay, month: selectedMonth, year: selectedYear, is_paid: false, organization_id: 2 };
+      });
+      // Insert payroll records
+      const { error } = await supabase.from('payroll_records').upsert(payrollData, { onConflict: 'employee_id,month,year' });
+      if (error) throw error;
+      alert('Payroll processed successfully for ' + employees.length + ' employees!');
       loadPayrollData();
     } catch (error) {
       console.error('Failed to process payroll:', error);
+      alert('Payroll processing failed: ' + JSON.stringify(error));
+    } finally {
       setProcessingDialog(false);
     }
   };
@@ -109,8 +141,8 @@ export const PayrollManagement: React.FC = () => {
       Total Earnings: Rs. ${record.total_earnings.toLocaleString()}
       
       DEDUCTIONS:
-      PF (Employee): Rs. ${record.pf_employee.toLocaleString()}
-      Tax: Rs. ${record.tax_amount.toLocaleString()}
+      PF (Employee): Rs. ${record.ssf_employee.toLocaleString()}
+      Tax: Rs. ${record.income_tax.toLocaleString()}
       Total Deductions: Rs. ${record.total_deductions.toLocaleString()}
       
       NET PAY: Rs. ${record.net_pay.toLocaleString()}
@@ -298,8 +330,8 @@ export const PayrollManagement: React.FC = () => {
                       <TableCell>Rs. {record.basic_salary.toLocaleString()}</TableCell>
                       <TableCell className="text-green-600">Rs. {record.total_earnings.toLocaleString()}</TableCell>
                       <TableCell className="text-red-600">Rs. {record.total_deductions.toLocaleString()}</TableCell>
-                      <TableCell>Rs. {(record.pf_employer + record.pf_employee).toLocaleString()}</TableCell>
-                      <TableCell>Rs. {record.tax_amount.toLocaleString()}</TableCell>
+                      <TableCell>Rs. {(record.ssf_employer + record.ssf_employee).toLocaleString()}</TableCell>
+                      <TableCell>Rs. {record.income_tax.toLocaleString()}</TableCell>
                       <TableCell className="font-bold text-blue-600">Rs. {record.net_pay.toLocaleString()}</TableCell>
                       <TableCell>
                         <Badge variant={record.status === 'Processed' ? 'default' : 'secondary'}>
@@ -419,11 +451,11 @@ export const PayrollManagement: React.FC = () => {
                   <div className="space-y-2">
                     <div className="flex justify-between">
                       <span>PF (Employee)</span>
-                      <span>Rs. {payslipDialog.record.pf_employee.toLocaleString()}</span>
+                      <span>Rs. {payslipDialog.record.ssf_employee.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Tax</span>
-                      <span>Rs. {payslipDialog.record.tax_amount.toLocaleString()}</span>
+                      <span>Rs. {payslipDialog.record.income_tax.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between font-bold border-t pt-2">
                       <span>Total Deductions</span>
@@ -474,4 +506,5 @@ const TabButton: React.FC<{
     {label}
   </button>
 );
+
 
