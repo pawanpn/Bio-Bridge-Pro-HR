@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '@/config/supabase';
 import {
@@ -49,7 +49,7 @@ interface PayrollRecord {
 
 export const PayrollManagement: React.FC = () => {
   const { user } = useAuth();
-  
+
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>([]);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
@@ -57,8 +57,8 @@ export const PayrollManagement: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [processingDialog, setProcessingDialog] = useState(false);
   const [payslipDialog, setPayslipDialog] = useState({ open: false, record: null as PayrollRecord | null });
+  const [employees, setEmployees] = useState<any[]>([]);
 
-  // Load payroll data
   useEffect(() => {
     loadPayrollData();
   }, [selectedMonth, selectedYear]);
@@ -69,8 +69,26 @@ export const PayrollManagement: React.FC = () => {
       const { data: records } = await supabase
         .from('payroll_records')
         .select('*')
+        .eq('month', selectedMonth)
+        .eq('year', selectedYear)
         .order('created_at', { ascending: false });
-      setPayrollRecords(records || []);
+
+      const { data: emps } = await supabase
+        .from('employees')
+        .select('id, first_name, last_name, employee_code')
+        .eq('status', 'Active');
+
+      setEmployees(emps || []);
+
+      const enriched = (records || []).map((r: any) => {
+        const emp = (emps || []).find((e: any) => e.id === r.employee_id);
+        return {
+          ...r,
+          employee_name: emp ? `${emp.first_name} ${emp.last_name}` : `Employee #${r.employee_id}`,
+        };
+      });
+
+      setPayrollRecords(enriched);
     } catch (error) {
       console.error('Failed to load payroll data:', error);
     } finally {
@@ -78,46 +96,81 @@ export const PayrollManagement: React.FC = () => {
     }
   };
 
-  // Stats calculation
   const totalEmployees = payrollRecords.length;
-  const totalEarnings = payrollRecords.reduce((sum, r) => sum + r.total_earnings, 0);
-  const totalDeductions = payrollRecords.reduce((sum, r) => sum + r.total_deductions, 0);
-  const totalNetPay = payrollRecords.reduce((sum, r) => sum + r.net_pay, 0);
-  const totalPF = payrollRecords.reduce((sum, r) => sum + r.ssf_employer + r.ssf_employee, 0);
-  const totalTax = payrollRecords.reduce((sum, r) => sum + r.income_tax, 0);
+  const totalEarnings = payrollRecords.reduce((sum, r) => sum + (r.total_earnings || 0), 0);
+  const totalDeductions = payrollRecords.reduce((sum, r) => sum + (r.total_deductions || 0), 0);
+  const totalNetPay = payrollRecords.reduce((sum, r) => sum + (r.net_pay || 0), 0);
+  const totalSSF = payrollRecords.reduce((sum, r) => sum + (r.ssf_employer || 0) + (r.ssf_employee || 0), 0);
+  const totalTax = payrollRecords.reduce((sum, r) => sum + (r.income_tax || 0), 0);
 
   const handleProcessPayroll = async () => {
     setProcessingDialog(true);
     try {
-      // Fetch active employees with salary
-      const { data: employees } = await supabase.from('employees').select('id, first_name, last_name, employee_code').eq('status', 'Active');
-      if (!employees || employees.length === 0) { alert('No active employees found!'); return; }
-      // Nepal SSF rates
-      const SSF_EMPLOYEE = 0.11; // 11%
-      const SSF_EMPLOYER = 0.20; // 20%
-      // Process each employee
-      const payrollData = employees.map((emp: any) => {
-        const basic_salary = 30000; // Default - should come from salary structure
-        const gross_salary = basic_salary * 1.5; // Basic + allowances
+      const { data: emps } = await supabase
+        .from('employees')
+        .select('id, first_name, last_name, employee_code')
+        .eq('status', 'Active');
+
+      if (!emps || emps.length === 0) {
+        alert('No active employees found!');
+        setProcessingDialog(false);
+        return;
+      }
+
+      const { data: salaryStructures } = await supabase
+        .from('salary_structures')
+        .select('*');
+
+      const SSF_EMPLOYEE = 0.11;
+      const SSF_EMPLOYER = 0.20;
+
+      const payrollData = emps.map((emp: any) => {
+        const structure = (salaryStructures || []).find((s: any) => s.employee_id === emp.id);
+        const basic_salary = structure?.basic_salary || 30000;
+        const allowances = structure?.allowances || 0;
+        const gross_salary = basic_salary + allowances;
+
         const ssf_employee = Math.round(basic_salary * SSF_EMPLOYEE);
         const ssf_employer = Math.round(basic_salary * SSF_EMPLOYER);
-        // Nepal Income Tax calculation (IRD slabs FY 2081/82)
+
         const annual_taxable = (gross_salary - ssf_employee) * 12;
         let income_tax_annual = 0;
+        income_tax_annual += Math.min(annual_taxable, 600000) * 0.01;
         if (annual_taxable > 600000) income_tax_annual += (Math.min(annual_taxable, 800000) - 600000) * 0.10;
         if (annual_taxable > 800000) income_tax_annual += (Math.min(annual_taxable, 1100000) - 800000) * 0.20;
         if (annual_taxable > 1100000) income_tax_annual += (Math.min(annual_taxable, 2000000) - 1100000) * 0.30;
         if (annual_taxable > 2000000) income_tax_annual += (annual_taxable - 2000000) * 0.36;
-        income_tax_annual += Math.min(annual_taxable, 600000) * 0.01;
+
         const income_tax = Math.round(income_tax_annual / 12);
         const total_deductions = ssf_employee + income_tax;
+        const total_earnings = gross_salary;
         const net_pay = gross_salary - total_deductions;
-        return { employee_id: emp.id, basic_salary, gross_salary, total_earnings: gross_salary, total_deductions, ssf_employee, ssf_employer, income_tax, net_pay, month: selectedMonth, year: selectedYear, is_paid: false, organization_id: 2 };
+
+        return {
+          employee_id: emp.id,
+          basic_salary,
+          gross_salary,
+          total_earnings,
+          total_deductions,
+          ssf_employee,
+          ssf_employer,
+          income_tax,
+          overtime_amount: 0,
+          net_pay,
+          month: selectedMonth,
+          year: selectedYear,
+          is_paid: false,
+          organization_id: 2,
+        };
       });
-      // Insert payroll records
-      const { error } = await supabase.from('payroll_records').upsert(payrollData, { onConflict: 'employee_id,month,year' });
+
+      const { error } = await supabase
+        .from('payroll_records')
+        .upsert(payrollData, { onConflict: 'employee_id,month,year' });
+
       if (error) throw error;
-      alert('Payroll processed successfully for ' + employees.length + ' employees!');
+
+      alert('Payroll processed successfully for ' + emps.length + ' employees!');
       loadPayrollData();
     } catch (error) {
       console.error('Failed to process payroll:', error);
@@ -128,42 +181,60 @@ export const PayrollManagement: React.FC = () => {
   };
 
   const generatePayslip = (record: PayrollRecord) => {
-    // Generate PDF payslip
+    const empName = record.employee_name || 'Employee';
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const monthName = monthNames[record.month - 1];
+
     const payslipContent = `
-      PAYSLIP - ${selectedMonth}/${selectedYear}
-      ================================
-      Employee: ${record.employee_name}
-      Basic Salary: Rs. ${record.basic_salary.toLocaleString()}
-      
-      EARNINGS:
-      Basic Salary: Rs. ${record.basic_salary.toLocaleString()}
-      Overtime: Rs. ${record.overtime_amount.toLocaleString()}
-      Total Earnings: Rs. ${record.total_earnings.toLocaleString()}
-      
-      DEDUCTIONS:
-      PF (Employee): Rs. ${record.ssf_employee.toLocaleString()}
-      Tax: Rs. ${record.income_tax.toLocaleString()}
-      Total Deductions: Rs. ${record.total_deductions.toLocaleString()}
-      
-      NET PAY: Rs. ${record.net_pay.toLocaleString()}
+=====================================
+        BIO BRIDGE PRO HR
+           PAYSLIP
+=====================================
+Employee : ${empName}
+Period   : ${monthName} ${record.year}
+-------------------------------------
+EARNINGS
+  Basic Salary      : Rs. ${(record.basic_salary || 0).toLocaleString()}
+  Gross Salary      : Rs. ${(record.gross_salary || 0).toLocaleString()}
+  Total Earnings    : Rs. ${(record.total_earnings || 0).toLocaleString()}
+
+DEDUCTIONS
+  SSF (Employee 11%): Rs. ${(record.ssf_employee || 0).toLocaleString()}
+  Income Tax (TDS)  : Rs. ${(record.income_tax || 0).toLocaleString()}
+  Total Deductions  : Rs. ${(record.total_deductions || 0).toLocaleString()}
+
+EMPLOYER CONTRIBUTION
+  SSF (Employer 20%): Rs. ${(record.ssf_employer || 0).toLocaleString()}
+
+-------------------------------------
+NET PAY             : Rs. ${(record.net_pay || 0).toLocaleString()}
+=====================================
+Status: ${record.is_paid ? 'PAID' : 'PENDING'}
     `;
-    
+
     const blob = new Blob([payslipContent], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `payslip_${record.employee_name}_${selectedMonth}_${selectedYear}.txt`;
+    a.download = `payslip_${empName}_${monthName}_${record.year}.txt`;
     a.click();
+    URL.revokeObjectURL(url);
   };
+
+  const formatCurrency = (amount: number) => {
+    if (!amount && amount !== 0) return 'Rs. 0';
+    if (amount >= 100000) return `Rs. ${(amount / 1000).toFixed(1)}K`;
+    return `Rs. ${amount.toLocaleString()}`;
+  };
+
+  const MONTHS = ['January','February','March','April','May','June',
+    'July','August','September','October','November','December'];
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      {/* Header */}
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-foreground mb-2">Payroll Management</h1>
-        <p className="text-muted-foreground">
-          Process payroll, manage salary structures, and generate payslips
-        </p>
+        <p className="text-muted-foreground">Process payroll, manage salary structures, and generate payslips</p>
       </div>
 
       {/* Month/Year Selector */}
@@ -174,13 +245,11 @@ export const PayrollManagement: React.FC = () => {
               <Label>Month</Label>
               <select
                 value={selectedMonth}
-                onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                className="w-40 h-10 px-3 rounded-md border border-input bg-background text-sm mt-1"
+                onChange={e => setSelectedMonth(Number(e.target.value))}
+                className="h-9 px-3 text-sm rounded-lg border border-slate-200 bg-white ml-2"
               >
-                {Array.from({ length: 12 }, (_, i) => (
-                  <option key={i + 1} value={i + 1}>
-                    {new Date(2000, i, 1).toLocaleString('default', { month: 'long' })}
-                  </option>
+                {MONTHS.map((m, i) => (
+                  <option key={i} value={i + 1}>{m}</option>
                 ))}
               </select>
             </div>
@@ -189,322 +258,160 @@ export const PayrollManagement: React.FC = () => {
               <Input
                 type="number"
                 value={selectedYear}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
-                className="w-32 mt-1"
+                onChange={e => setSelectedYear(Number(e.target.value))}
+                className="w-24 ml-2"
               />
             </div>
-            <Button onClick={handleProcessPayroll} disabled={processingDialog}>
-              <Calculator className="w-4 h-4 mr-2" />
+            <Button onClick={handleProcessPayroll} disabled={processingDialog} className="ml-4">
               {processingDialog ? 'Processing...' : 'Process Payroll'}
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+      {/* Stats */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Employees</p>
-                <p className="text-2xl font-bold">{totalEmployees}</p>
-              </div>
-              <Users className="w-8 h-8 text-primary" />
-            </div>
+            <p className="text-sm text-muted-foreground">Employees</p>
+            <p className="text-2xl font-bold">{totalEmployees}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Earnings</p>
-                <p className="text-2xl font-bold text-green-600">Rs. {(totalEarnings / 1000).toFixed(1)}K</p>
-              </div>
-              <TrendingUp className="w-8 h-8 text-green-600" />
-            </div>
+            <p className="text-sm text-muted-foreground">Total Earnings</p>
+            <p className="text-2xl font-bold text-green-600">{formatCurrency(totalEarnings)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Deductions</p>
-                <p className="text-2xl font-bold text-red-600">Rs. {(totalDeductions / 1000).toFixed(1)}K</p>
-              </div>
-              <DollarSign className="w-8 h-8 text-red-600" />
-            </div>
+            <p className="text-sm text-muted-foreground">Total Deductions</p>
+            <p className="text-2xl font-bold text-red-500">{formatCurrency(totalDeductions)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Net Pay</p>
-                <p className="text-2xl font-bold text-blue-600">Rs. {(totalNetPay / 1000).toFixed(1)}K</p>
-              </div>
-              <DollarSign className="w-8 h-8 text-blue-600" />
-            </div>
+            <p className="text-sm text-muted-foreground">Net Pay</p>
+            <p className="text-2xl font-bold text-blue-600">{formatCurrency(totalNetPay)}</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">PF + Tax</p>
-                <p className="text-2xl font-bold text-orange-600">Rs. {((totalPF + totalTax) / 1000).toFixed(1)}K</p>
-              </div>
-              <AlertCircle className="w-8 h-8 text-orange-600" />
-            </div>
+            <p className="text-sm text-muted-foreground">SSF + Tax</p>
+            <p className="text-2xl font-bold text-orange-500">{formatCurrency(totalSSF + totalTax)}</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Tab Navigation */}
-      <div className="flex gap-2 mb-6 border-b border-border">
-        <TabButton
-          icon={<FileText className="w-4 h-4" />}
-          label="Payroll Records"
-          active={activeTab === 'overview'}
-          onClick={() => setActiveTab('overview')}
-        />
-        <TabButton
-          icon={<Users className="w-4 h-4" />}
-          label="Salary Structure"
-          active={activeTab === 'process'}
-          onClick={() => setActiveTab('process')}
-        />
-        <TabButton
-          icon={<Clock className="w-4 h-4" />}
-          label="History"
-          active={activeTab === 'history'}
-          onClick={() => setActiveTab('history')}
-        />
-        <TabButton
-          icon={<DollarSign className="w-4 h-4" />}
-          label="Loans & Advances"
-          active={activeTab === 'loans'}
-          onClick={() => setActiveTab('loans')}
-        />
-      </div>
-
-      {/* Payroll Records Tab */}
-      {activeTab === 'overview' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Payroll - {new Date(selectedYear, selectedMonth - 1).toLocaleString('default', { month: 'long' })} {selectedYear}</span>
-              <Badge variant="secondary">{payrollRecords.length} employees</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
+      {/* Payroll Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex justify-between items-center">
+            <span>Payroll - {MONTHS[selectedMonth - 1]} {selectedYear}</span>
+            <Badge variant="outline">{totalEmployees} employees</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <p className="text-center text-muted-foreground py-8">Loading...</p>
+          ) : payrollRecords.length === 0 ? (
+            <p className="text-center text-muted-foreground py-8">
+              No payroll records found. Process payroll to generate records.
+            </p>
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
                   <TableHead>Basic Salary</TableHead>
-                  <TableHead>Earnings</TableHead>
-                  <TableHead>Deductions</TableHead>
-                  <TableHead>PF</TableHead>
+                  <TableHead>Gross</TableHead>
+                  <TableHead>SSF (Emp)</TableHead>
                   <TableHead>Tax</TableHead>
+                  <TableHead>Deductions</TableHead>
                   <TableHead>Net Pay</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8">Loading...</TableCell>
-                  </TableRow>
-                ) : payrollRecords.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
-                      No payroll records found. Process payroll to generate records.
+                {payrollRecords.map(record => (
+                  <TableRow key={record.id}>
+                    <TableCell className="font-medium">{record.employee_name}</TableCell>
+                    <TableCell>Rs. {(record.basic_salary || 0).toLocaleString()}</TableCell>
+                    <TableCell className="text-green-600">Rs. {(record.gross_salary || 0).toLocaleString()}</TableCell>
+                    <TableCell>Rs. {(record.ssf_employee || 0).toLocaleString()}</TableCell>
+                    <TableCell>Rs. {(record.income_tax || 0).toLocaleString()}</TableCell>
+                    <TableCell className="text-red-500">Rs. {(record.total_deductions || 0).toLocaleString()}</TableCell>
+                    <TableCell className="text-blue-600 font-bold">Rs. {(record.net_pay || 0).toLocaleString()}</TableCell>
+                    <TableCell>
+                      <Badge variant={record.is_paid ? 'default' : 'secondary'}>
+                        {record.is_paid ? 'Paid' : 'Pending'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setPayslipDialog({ open: true, record })}
+                        >
+                          <Eye className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => generatePayslip(record)}
+                        >
+                          <Download className="h-3 w-3" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
-                ) : (
-                  payrollRecords.map(record => (
-                    <TableRow key={record.id}>
-                      <TableCell className="font-medium">{record.employee_name}</TableCell>
-                      <TableCell>Rs. {record.basic_salary.toLocaleString()}</TableCell>
-                      <TableCell className="text-green-600">Rs. {record.total_earnings.toLocaleString()}</TableCell>
-                      <TableCell className="text-red-600">Rs. {record.total_deductions.toLocaleString()}</TableCell>
-                      <TableCell>Rs. {(record.ssf_employer + record.ssf_employee).toLocaleString()}</TableCell>
-                      <TableCell>Rs. {record.income_tax.toLocaleString()}</TableCell>
-                      <TableCell className="font-bold text-blue-600">Rs. {record.net_pay.toLocaleString()}</TableCell>
-                      <TableCell>
-                        <Badge variant={record.status === 'Processed' ? 'default' : 'secondary'}>
-                          {record.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setPayslipDialog({ open: true, record })}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => generatePayslip(record)}
-                          >
-                            <Download className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
+                ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Salary Structure Tab */}
-      {activeTab === 'process' && (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Calculator className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-lg font-medium">Salary Structure Configuration</p>
-            <p className="text-sm text-muted-foreground mt-2">
-              Configure salary components, allowances, and deductions for employees.
-            </p>
-            <Button className="mt-4">
-              <Plus className="w-4 h-4 mr-2" />
-              Add Salary Structure
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* History Tab */}
-      {activeTab === 'history' && (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Clock className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-lg font-medium">Payroll History</p>
-            <p className="text-sm text-muted-foreground mt-2">
-              View and compare payroll records from previous months.
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Loans Tab */}
-      {activeTab === 'loans' && (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <DollarSign className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-            <p className="text-lg font-medium">Loans & Advances</p>
-            <p className="text-sm text-muted-foreground mt-2">
-              Manage employee loans, advances, and EMI tracking.
-            </p>
-            <Button className="mt-4">
-              <Plus className="w-4 h-4 mr-2" />
-              Add Loan
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
       {/* Payslip Dialog */}
-      <Dialog open={payslipDialog.open} onOpenChange={(open) => !open && setPayslipDialog({ open: false, record: null })}>
-        <DialogContent className="max-w-2xl">
+      <Dialog open={payslipDialog.open} onOpenChange={o => setPayslipDialog({ open: o, record: null })}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Payslip Details</DialogTitle>
+            <DialogTitle>Payslip - {payslipDialog.record?.employee_name}</DialogTitle>
           </DialogHeader>
           {payslipDialog.record && (
-            <div className="space-y-4">
-              <div className="border-b pb-4">
-                <h3 className="text-xl font-bold">{payslipDialog.record.employee_name}</h3>
-                <p className="text-muted-foreground">
-                  Payslip for {new Date(selectedYear, selectedMonth - 1).toLocaleString('default', { month: 'long' })} {selectedYear}
-                </p>
+            <div className="space-y-3 text-sm">
+              <div className="bg-slate-50 p-3 rounded-lg">
+                <p className="font-semibold mb-2">Earnings</p>
+                <div className="flex justify-between"><span>Basic Salary</span><span>Rs. {(payslipDialog.record.basic_salary || 0).toLocaleString()}</span></div>
+                <div className="flex justify-between"><span>Allowances</span><span>Rs. {((payslipDialog.record.gross_salary || 0) - (payslipDialog.record.basic_salary || 0)).toLocaleString()}</span></div>
+                <div className="flex justify-between font-bold border-t mt-1 pt-1"><span>Gross</span><span className="text-green-600">Rs. {(payslipDialog.record.gross_salary || 0).toLocaleString()}</span></div>
               </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground mb-2 font-semibold">EARNINGS</p>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span>Basic Salary</span>
-                      <span>Rs. {payslipDialog.record.basic_salary.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Overtime</span>
-                      <span>Rs. {payslipDialog.record.overtime_amount.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between font-bold border-t pt-2">
-                      <span>Total Earnings</span>
-                      <span className="text-green-600">Rs. {payslipDialog.record.total_earnings.toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
-                
-                <div>
-                  <p className="text-sm text-muted-foreground mb-2 font-semibold">DEDUCTIONS</p>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span>PF (Employee)</span>
-                      <span>Rs. {payslipDialog.record.ssf_employee.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>Tax</span>
-                      <span>Rs. {payslipDialog.record.income_tax.toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between font-bold border-t pt-2">
-                      <span>Total Deductions</span>
-                      <span className="text-red-600">Rs. {payslipDialog.record.total_deductions.toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
+              <div className="bg-red-50 p-3 rounded-lg">
+                <p className="font-semibold mb-2">Deductions</p>
+                <div className="flex justify-between"><span>SSF (11%)</span><span>Rs. {(payslipDialog.record.ssf_employee || 0).toLocaleString()}</span></div>
+                <div className="flex justify-between"><span>Income Tax</span><span>Rs. {(payslipDialog.record.income_tax || 0).toLocaleString()}</span></div>
+                <div className="flex justify-between font-bold border-t mt-1 pt-1"><span>Total</span><span className="text-red-600">Rs. {(payslipDialog.record.total_deductions || 0).toLocaleString()}</span></div>
               </div>
-              
-              <div className="bg-primary/10 p-4 rounded-lg">
-                <div className="flex justify-between items-center">
-                  <span className="text-lg font-bold">NET PAY</span>
-                  <span className="text-2xl font-bold text-primary">
-                    Rs. {payslipDialog.record.net_pay.toLocaleString()}
-                  </span>
-                </div>
+              <div className="bg-blue-50 p-3 rounded-lg">
+                <p className="font-semibold mb-2">Employer Contribution</p>
+                <div className="flex justify-between"><span>SSF (20%)</span><span>Rs. {(payslipDialog.record.ssf_employer || 0).toLocaleString()}</span></div>
+              </div>
+              <div className="bg-green-50 p-4 rounded-lg text-center">
+                <p className="text-sm text-muted-foreground">Net Pay</p>
+                <p className="text-2xl font-bold text-green-600">Rs. {(payslipDialog.record.net_pay || 0).toLocaleString()}</p>
               </div>
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPayslipDialog({ open: false, record: null })}>Close</Button>
-            <Button onClick={() => payslipDialog.record && generatePayslip(payslipDialog.record)}>
-              <Download className="w-4 h-4 mr-2" />
-              Download Payslip
+            <Button variant="outline" onClick={() => payslipDialog.record && generatePayslip(payslipDialog.record)}>
+              <Download className="h-4 w-4 mr-2" /> Download
             </Button>
+            <Button onClick={() => setPayslipDialog({ open: false, record: null })}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
 };
-
-const TabButton: React.FC<{
-  icon: React.ReactNode;
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}> = ({ icon, label, active, onClick }) => (
-  <button
-    onClick={onClick}
-    className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-      active
-        ? 'border-primary text-primary'
-        : 'border-transparent text-muted-foreground hover:text-foreground'
-    }`}
-  >
-    {icon}
-    {label}
-  </button>
-);
-
-
