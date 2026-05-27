@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+﻿import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/config/supabase';
 import branchService from '../services/branchService';
 import { Wifi, WifiOff, FileText, Plus } from 'lucide-react';
 
@@ -76,10 +76,11 @@ export const DeviceSettings: React.FC = () => {
 
   const loadDevices = useCallback(async () => {
     try {
-      const data = await branchService.listAllDevices();
-      setDevices(data || []);
-      const bs = await branchService.listBranches();
-      setBranches(bs || []);
+      const { data: devData } = await supabase.from('devices').select('*').order('id');
+      const { data: bsData } = await supabase.from('branches').select('*');
+      const data = (devData || []).map((d: any) => ({ ...d, ip: d.ip_address }));
+      setDevices(data);
+      setBranches(bsData || []);
 
       // DYNAMIC STATUS CHECK
       if (data && data.length > 0) {
@@ -110,7 +111,7 @@ export const DeviceSettings: React.FC = () => {
   const loadGates = async (branch_id: number) => {
     if(!branch_id) return;
     try {
-      const gs = await invoke<Gate[]>('list_gates', { branchId: branch_id });
+      const { data: gs } = await supabase.from('gates').select('*').eq('branch_id', branch_id);
       setGates(gs || []);
     } catch(e) { console.error('Failed to load gates', e); }
   };
@@ -203,9 +204,9 @@ export const DeviceSettings: React.FC = () => {
         machineNumber: Number(form.machine_number),
         brand: form.brand 
       });
-      setTestStatus({ type: 'success', message: '✅ Device Reachable' });
+      setTestStatus({ type: 'success', message: 'âœ… Device Reachable' });
     } catch (e) {
-      setTestStatus({ type: 'error', message: `❌ Failed: ${e}` });
+      setTestStatus({ type: 'error', message: `âŒ Failed: ${e}` });
     }
   };
 
@@ -242,11 +243,11 @@ export const DeviceSettings: React.FC = () => {
           }
         });
       }
-      setSaveStatus('✅ Saved!');
+      setSaveStatus('âœ… Saved!');
       await loadDevices();
       setTimeout(closeModal, 800);
     } catch (e) {
-      setSaveStatus(`❌ ${e}`);
+      setSaveStatus(`âŒ ${e}`);
     }
   };
 
@@ -278,16 +279,16 @@ export const DeviceSettings: React.FC = () => {
       });
       setPreviewLogs(logs);
       setPreviewModalOpen(true);
-      setSyncStatus(prev => ({ ...prev, [dev.id]: `✅ Pulled ${logs.length} logs` }));
+      setSyncStatus(prev => ({ ...prev, [dev.id]: `âœ… Pulled ${logs.length} logs` }));
     } catch (e) {
-      setSyncStatus(prev => ({ ...prev, [dev.id]: `❌ ${e}` }));
+      setSyncStatus(prev => ({ ...prev, [dev.id]: `âŒ ${e}` }));
     }
     setTimeout(() => setSyncStatus(prev => ({ ...prev, [dev.id]: '' })), 6000);
   };
 
   const handlePullAllLogs = async (dev: Device) => {
     if (!confirm(`Pull ALL attendance logs from "${dev.name}"?\n\nThis will fetch every log from day one to now.\nDuplicate logs will be auto-skipped.`)) return;
-    setSyncStatus(prev => ({ ...prev, [dev.id]: '🔄 Pulling ALL logs...' }));
+    setSyncStatus(prev => ({ ...prev, [dev.id]: 'ðŸ”„ Pulling ALL logs...' }));
     try {
       const logs = await invoke<any[]>('pull_all_logs', {
         ip: dev.ip,
@@ -297,9 +298,9 @@ export const DeviceSettings: React.FC = () => {
       });
       setPreviewLogs(logs);
       setPreviewModalOpen(true);
-      setSyncStatus(prev => ({ ...prev, [dev.id]: `✅ Pulled ${logs.length} logs` }));
+      setSyncStatus(prev => ({ ...prev, [dev.id]: `âœ… Pulled ${logs.length} logs` }));
     } catch (e) {
-      setSyncStatus(prev => ({ ...prev, [dev.id]: `❌ ${e}` }));
+      setSyncStatus(prev => ({ ...prev, [dev.id]: `âŒ ${e}` }));
     }
     setTimeout(() => setSyncStatus(prev => ({ ...prev, [dev.id]: '' })), 10000);
   };
@@ -312,7 +313,7 @@ export const DeviceSettings: React.FC = () => {
     setForm(f => ({ ...f, ip: d.ip, brand: d.brand, port: d.brand === 'ZKTeco' ? 4370 : 8000 }));
   };
 
-  // ── Offline Mode Functions ────────────────────────────────────────────
+  // â”€â”€ Offline Mode Functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   const loadOfflineEmployees = async () => {
     try {
@@ -331,23 +332,23 @@ export const DeviceSettings: React.FC = () => {
         timestamp,
         punchMethod: manualForm.method,
       });
-      setManualStatus('✅ Saved!');
+      setManualStatus('âœ… Saved!');
       setManualForm({ ...manualForm, employeeId: '' });
     } catch (e) {
-      setManualStatus(`❌ ${e}`);
+      setManualStatus(`âŒ ${e}`);
     }
     setTimeout(() => setManualStatus(''), 3000);
   };
 
   const handleCSVImport = async () => {
-    if (!csvContent.trim()) { setCsvStatus('❌ Paste CSV data first'); return; }
+    if (!csvContent.trim()) { setCsvStatus('âŒ Paste CSV data first'); return; }
     setCsvStatus('Importing...');
     try {
       const result = await invoke<any>('import_csv_attendance', { csvContent });
-      setCsvStatus(`✅ Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? `, Errors: ${result.errors.length}` : ''}`);
+      setCsvStatus(`âœ… Imported: ${result.imported}, Skipped: ${result.skipped}${result.errors.length ? `, Errors: ${result.errors.length}` : ''}`);
       setCsvContent('');
     } catch (e) {
-      setCsvStatus(`❌ ${e}`);
+      setCsvStatus(`âŒ ${e}`);
     }
     setTimeout(() => setCsvStatus(''), 5000);
   };
@@ -388,7 +389,7 @@ export const DeviceSettings: React.FC = () => {
           background: 'linear-gradient(135deg, rgba(245,158,11,0.03), rgba(245,158,11,0.08))'
         }}>
           <h3 style={{ margin: '0 0 20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <WifiOff size={20} color="var(--warning)" /> Offline Mode — Manual Entry & CSV Import
+            <WifiOff size={20} color="var(--warning)" /> Offline Mode â€” Manual Entry & CSV Import
           </h3>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
@@ -434,7 +435,7 @@ export const DeviceSettings: React.FC = () => {
                 </select>
                 <button onClick={handleManualEntry} style={{ width: '100%' }}>Save Entry</button>
                 {manualStatus && (
-                  <div style={{ fontSize: '12px', textAlign: 'center', color: manualStatus.startsWith('✅') ? 'var(--success)' : 'var(--error)' }}>
+                  <div style={{ fontSize: '12px', textAlign: 'center', color: manualStatus.startsWith('âœ…') ? 'var(--success)' : 'var(--error)' }}>
                     {manualStatus}
                   </div>
                 )}
@@ -458,7 +459,7 @@ export const DeviceSettings: React.FC = () => {
               />
               <button onClick={handleCSVImport} style={{ width: '100%' }}>Import Data</button>
               {csvStatus && (
-                <div style={{ fontSize: '12px', textAlign: 'center', color: csvStatus.startsWith('✅') ? 'var(--success)' : csvStatus.startsWith('❌') ? 'var(--error)' : 'var(--text-muted)', marginTop: '8px' }}>
+                <div style={{ fontSize: '12px', textAlign: 'center', color: csvStatus.startsWith('âœ…') ? 'var(--success)' : csvStatus.startsWith('âŒ') ? 'var(--error)' : 'var(--text-muted)', marginTop: '8px' }}>
                   {csvStatus}
                 </div>
               )}
@@ -471,7 +472,7 @@ export const DeviceSettings: React.FC = () => {
       <div style={cardStyle}>
         {devices.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-muted)' }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>📡</div>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>ðŸ“¡</div>
             <div style={{ fontSize: 15, fontWeight: 600 }}>No devices configured yet</div>
             <div style={{ fontSize: 13, marginTop: 6 }}>Click "Add Device" to register your first biometric device.</div>
           </div>
@@ -511,23 +512,23 @@ export const DeviceSettings: React.FC = () => {
                     <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         {!dev.is_default && (
-                            <ActionBtn label="⭐ Set Default" onClick={() => handleSetDefault(dev.id)} color="var(--accent-color)" />
+                            <ActionBtn label="â­ Set Default" onClick={() => handleSetDefault(dev.id)} color="var(--accent-color)" />
                         )}
-                        <ActionBtn label="✏️ Edit" onClick={() => openEditModal(dev)} color="var(--primary-color)" />
+                        <ActionBtn label="âœï¸ Edit" onClick={() => openEditModal(dev)} color="var(--primary-color)" />
                         <ActionBtn
-                          label="⬇️ Sync Logs"
+                          label="â¬‡ï¸ Sync Logs"
                           onClick={() => handleSyncLogs(dev)}
                           color="#7c3aed"
                           disabled={!!syncStatus[dev.id]}
                         />
                         <ActionBtn
-                          label="📥 Pull ALL Logs"
+                          label="ðŸ“¥ Pull ALL Logs"
                           onClick={() => handlePullAllLogs(dev)}
                           color="#059669"
                           disabled={!!syncStatus[dev.id]}
                         />
                         <ActionBtn
-                          label="🗑️ Delete"
+                          label="ðŸ—‘ï¸ Delete"
                           onClick={() => setDeleteConfirm(dev.id)}
                           color="#ef4444"
                         />
@@ -536,7 +537,7 @@ export const DeviceSettings: React.FC = () => {
                   </tr>
                   {syncStatus[dev.id] && (
                     <tr>
-                      <td colSpan={5} style={{ padding: '6px 16px', fontSize: 12, color: syncStatus[dev.id].startsWith('✅') ? 'var(--success)' : '#ef4444', backgroundColor: 'var(--bg-color)' }}>
+                      <td colSpan={5} style={{ padding: '6px 16px', fontSize: 12, color: syncStatus[dev.id].startsWith('âœ…') ? 'var(--success)' : '#ef4444', backgroundColor: 'var(--bg-color)' }}>
                         {syncStatus[dev.id]}
                       </td>
                     </tr>
@@ -552,7 +553,7 @@ export const DeviceSettings: React.FC = () => {
       {deleteConfirm !== null && (
         <div style={overlayStyle}>
           <div style={{ ...cardStyle, maxWidth: 360, textAlign: 'center', padding: 32 }}>
-            <div style={{ fontSize: 36, marginBottom: 12 }}>⚠️</div>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>âš ï¸</div>
             <h3 style={{ margin: '0 0 8px' }}>Delete Device?</h3>
             <p style={{ color: 'var(--text-muted)', fontSize: 14, marginBottom: 24 }}>
               This will permanently remove the device configuration.
@@ -569,7 +570,7 @@ export const DeviceSettings: React.FC = () => {
       {modalOpen && (
         <div style={overlayStyle}>
           <div style={{ ...cardStyle, width: '100%', maxWidth: 780, position: 'relative', maxHeight: '90vh', overflowY: 'auto', padding: '32px' }}>
-            <button onClick={closeModal} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+            <button onClick={closeModal} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>âœ•</button>
             <h3 style={{ marginTop: 0, marginBottom: 24 }}>{editingDevice ? 'Edit Device' : 'Add New Device'}</h3>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'minmax(350px, 1.2fr) 280px', gap: 32, alignItems: 'start' }}>
@@ -688,7 +689,7 @@ export const DeviceSettings: React.FC = () => {
                   </div>
                 )}
                 {saveStatus && (
-                  <div style={{ marginTop: 8, fontSize: 13, color: saveStatus.startsWith('✅') ? 'var(--success)' : '#ef4444' }}>
+                  <div style={{ marginTop: 8, fontSize: 13, color: saveStatus.startsWith('âœ…') ? 'var(--success)' : '#ef4444' }}>
                     {saveStatus}
                   </div>
                 )}
@@ -735,7 +736,7 @@ export const DeviceSettings: React.FC = () => {
       {previewModalOpen && (
         <div style={overlayStyle}>
           <div style={{ ...cardStyle, width: '100%', maxWidth: 600, padding: 32, position: 'relative' }}>
-            <button onClick={() => setPreviewModalOpen(false)} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>✕</button>
+            <button onClick={() => setPreviewModalOpen(false)} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--text-muted)' }}>âœ•</button>
             <h3 style={{ marginTop: 0, marginBottom: 20 }}>Data Pull Preview</h3>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>
               The following logs were successfully pulled and saved to the database.
@@ -810,3 +811,7 @@ const secondaryBtnStyle: React.CSSProperties = { padding: '9px 18px', borderRadi
 const cancelBtnStyle: React.CSSProperties = { padding: '9px 20px', borderRadius: 6, backgroundColor: 'transparent', color: 'var(--text-color)', border: '1px solid var(--border-color)', fontWeight: 600, fontSize: 14, cursor: 'pointer' };
 const sectionHeaderStyle: React.CSSProperties = { fontSize: 13, fontWeight: 700, margin: '24px 0 16px', color: 'var(--primary-color)', borderBottom: '1px solid var(--border-color)', paddingBottom: 6 };
 const helpTextStyle: React.CSSProperties = { fontSize: 10, color: 'var(--text-muted)', marginTop: 4, marginBottom: 0 };
+
+
+
+
