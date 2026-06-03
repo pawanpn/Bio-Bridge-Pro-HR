@@ -269,8 +269,12 @@ export const AttendanceManagement: React.FC = () => {
         const logs = (result.data || []).map((l: any) => ({
           ...l,
           id: l.id,
+          name: l.employee_name || 'Unknown',
           employee_id: l.employee_id,
           employee_name: l.employee_name || 'Unknown',
+          employee_code: l.employee_id,
+          branch_name: l.branch_name || '-',
+          all_punches: l.timestamp,
           timestamp: l.timestamp,
           punch_method: l.punch_method || 'Device',
           is_synced: l.is_synced || false,
@@ -281,6 +285,8 @@ export const AttendanceManagement: React.FC = () => {
         const histResult = await invoke<any>('get_attendance_logs', {});
         const histLogs = (histResult.data || []).map((l: any) => ({
           ...l,
+          id: l.id,
+          name: l.employee_name || 'Unknown',
           employee_id: l.employee_id,
           employee_name: l.employee_name || 'Unknown',
           timestamp: l.timestamp,
@@ -762,24 +768,24 @@ export const AttendanceManagement: React.FC = () => {
                     <div className="bg-green-50 border border-green-100 rounded-xl p-4 text-center">
                       <p className="text-3xl font-black text-green-600">
                         {attendanceSummary.isRange 
-                          ? attendanceSummary.summary.filter((s: any) => s.days_present > 0).length
-                          : attendanceSummary.present.filter((e: any) => !empFilter || String(e.id) === empFilter).length}
+                          ? (attendanceSummary.summary || []).filter((s: any) => s.days_present > 0).length
+                          : (attendanceSummary.present || []).filter((e: any) => !empFilter || String(e.id) === empFilter).length}
                       </p>
                       <p className="text-xs font-bold text-green-500 mt-1">{attendanceSummary.isRange ? 'Ever Present' : 'On Time'}</p>
                     </div>
                     <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-center">
                       <p className="text-3xl font-black text-amber-600">
                         {attendanceSummary.isRange
-                          ? attendanceSummary.summary.reduce((acc: number, s: any) => acc + s.days_late, 0)
-                          : attendanceSummary.late.filter((e: any) => !empFilter || String(e.id) === empFilter).length}
+                          ? (attendanceSummary.summary || []).reduce((acc: number, s: any) => acc + (s.days_late || 0), 0)
+                          : (attendanceSummary.late || []).filter((e: any) => !empFilter || String(e.id) === empFilter).length}
                       </p>
                       <p className="text-xs font-bold text-amber-500 mt-1"> {attendanceSummary.isRange ? 'Total Late Days' : 'Late'}</p>
                     </div>
                     <div className="bg-red-50 border border-red-100 rounded-xl p-4 text-center">
                       <p className="text-3xl font-black text-red-600">
                         {attendanceSummary.isRange
-                          ? attendanceSummary.summary.filter((s: any) => s.days_present === 0).length
-                          : attendanceSummary.absent.filter((e: any) => !empFilter || String(e.id) === empFilter).length}
+                          ? (attendanceSummary.summary || []).filter((s: any) => s.days_present === 0).length
+                          : (attendanceSummary.absent || []).filter((e: any) => !empFilter || String(e.id) === empFilter).length}
                       </p>
                       <p className="text-xs font-bold text-red-500 mt-1"> {attendanceSummary.isRange ? 'Always Absent' : 'Absent'}</p>
                     </div>
@@ -828,11 +834,11 @@ export const AttendanceManagement: React.FC = () => {
                       <Card className="border-green-100">
                         <CardHeader className="pb-2 pt-3 px-4">
                           <CardTitle className="text-sm text-green-700 flex items-center gap-2">
-                            <CheckCircle className="w-4 h-4" /> On Time ({attendanceSummary.present.filter((e: any) => !empFilter || String(e.id) === empFilter).length})
+                            <CheckCircle className="w-4 h-4" /> On Time ({(attendanceSummary.present || []).filter((e: any) => !empFilter || String(e.id) === empFilter).length})
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="p-0 max-h-72 overflow-y-auto">
-                          {attendanceSummary.present
+                          {(attendanceSummary.present || [])
                             .filter((e: any) => !empFilter || String(e.id) === empFilter)
                             .map((emp: any) => (
                             <div key={emp.id} className="flex items-center justify-between px-4 py-2 border-b border-green-50 hover:bg-green-50/50">
@@ -853,11 +859,11 @@ export const AttendanceManagement: React.FC = () => {
                       <Card className="border-amber-100">
                         <CardHeader className="pb-2 pt-3 px-4">
                           <CardTitle className="text-sm text-amber-700 flex items-center gap-2">
-                            <Clock className="w-4 h-4" /> Late ({attendanceSummary.late.filter((e: any) => !empFilter || String(e.id) === empFilter).length})
+                            <Clock className="w-4 h-4" /> Late ({(attendanceSummary.late || []).filter((e: any) => !empFilter || String(e.id) === empFilter).length})
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="p-0 max-h-72 overflow-y-auto">
-                          {attendanceSummary.late
+                          {(attendanceSummary.late || [])
                             .filter((e: any) => !empFilter || String(e.id) === empFilter)
                             .map((emp: any) => (
                             <div key={emp.id} className="flex items-center justify-between px-4 py-2 border-b border-amber-50 hover:bg-amber-50/50">
@@ -878,11 +884,11 @@ export const AttendanceManagement: React.FC = () => {
                       <Card className="border-red-100">
                         <CardHeader className="pb-2 pt-3 px-4">
                           <CardTitle className="text-sm text-red-700 flex items-center gap-2">
-                            <AlertCircle className="w-4 h-4" /> Absent ({attendanceSummary.absent.filter((e: any) => !empFilter || String(e.id) === empFilter).length})
+                            <AlertCircle className="w-4 h-4" /> Absent ({(attendanceSummary.absent || []).filter((e: any) => !empFilter || String(e.id) === empFilter).length})
                           </CardTitle>
                         </CardHeader>
                         <CardContent className="p-0 max-h-72 overflow-y-auto">
-                          {attendanceSummary.absent
+                          {(attendanceSummary.absent || [])
                             .filter((e: any) => !empFilter || String(e.id) === empFilter)
                             .map((emp: any) => (
                             <div key={emp.id} className="flex items-center justify-between px-4 py-2 border-b border-red-50 hover:bg-red-50/50">
