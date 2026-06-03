@@ -201,6 +201,8 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     )?;
 
+    let _ = conn.execute("ALTER TABLE Devices ADD COLUMN last_sync TEXT", []);
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS AttendanceLogs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

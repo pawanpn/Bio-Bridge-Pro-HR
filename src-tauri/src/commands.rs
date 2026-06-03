@@ -228,7 +228,29 @@ pub async fn sync_device_logs(
         ip, brand, target_branch_id
     );
 
-    let (device_users, logs) = sync_device(&ip, port, 0, device_id, 1, dev_brand, None).await?;
+    // Look up the last synced timestamp for this device for incremental sync
+    let last_ts: Option<String> = {
+        let db_guard = state
+            .db
+            .lock()
+            .map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard
+            .as_ref()
+            .ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+
+        conn.query_row(
+            "SELECT MAX(timestamp) FROM AttendanceLogs WHERE device_id = ?1",
+            params![device_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .unwrap_or(None)
+    };
+
+    if let Some(ref ts) = last_ts {
+        println!("Incremental sync: pulling logs after {}", ts);
+    }
+
+    let (device_users, logs) = sync_device(&ip, port, 0, device_id, 1, dev_brand, last_ts).await?;
 
     println!(
         "Backend Preview: Pulled {} users, {} logs",
@@ -355,6 +377,18 @@ pub async fn sync_device_logs(
         b_ts.cmp(a_ts)
     });
 
+    // Update device last_sync timestamp (if new logs were pulled)
+    if !logs.is_empty() {
+        if let Some(latest) = logs.iter().map(|l| l.timestamp.as_str()).max() {
+            let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+            let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+            let _ = conn.execute(
+                "UPDATE Devices SET last_sync = ?1, status = 'online' WHERE id = ?2",
+                params![latest.to_string(), device_id],
+            );
+        }
+    }
+
     Ok(serde_json::json!(ui_logs))
 }
 
@@ -368,6 +402,12 @@ pub async fn pull_all_logs(
     target_gate_id: i64,
     state: tauri::State<'_, AppState>,
 ) -> Result<serde_json::Value, AppError> {
+    // Clear last_sync to force a full pull of all logs
+    {
+        let db_guard = state.db.lock().map_err(|_| AppError::Unknown("Lock error".into()))?;
+        let conn = db_guard.as_ref().ok_or_else(|| AppError::DatabaseError("DB not initialized".into()))?;
+        let _ = conn.execute("UPDATE Devices SET last_sync = NULL WHERE id = ?1", params![device_id]);
+    }
     sync_device_logs(
         ip,
         port,

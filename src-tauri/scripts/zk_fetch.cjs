@@ -36,6 +36,7 @@ async function main() {
   const ip = process.argv[3] || '192.168.1.201';
   const port = parseInt(process.argv[4]) || 4370;
   const timeout = parseInt(process.argv[5]) || 10000;
+  const lastTimestamp = process.argv[6] || null;
 
   const zkInstance = new ZKLib(ip, port, timeout, 4000);
 
@@ -46,9 +47,22 @@ async function main() {
       const logs = await zkInstance.getAttendances();
       const users = await zkInstance.getUsers();
 
+      // Filter only new logs since last sync timestamp (incremental sync)
+      let filteredLogs = logs;
+      if (lastTimestamp && logs && logs.data) {
+        const since = new Date(lastTimestamp).getTime();
+        filteredLogs = {
+          ...logs,
+          data: logs.data.filter(entry => {
+            const recordTime = new Date(entry.recordTime).getTime();
+            return recordTime > since;
+          })
+        };
+      }
+
       process.stdout.write(JSON.stringify({
         status: 'success',
-        attendances: logs,
+        attendances: filteredLogs,
         users: users
       }));
       await zkInstance.disconnect();
