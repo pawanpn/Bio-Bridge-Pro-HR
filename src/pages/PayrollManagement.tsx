@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 
-// ─── Types ────────────────────────────────────────────────────
+// --- Types ----------------------------------------------------
 interface PayrollRecord {
   id: string;
   employee_id: number;
@@ -282,14 +282,14 @@ EARNINGS (AAMDANI)
   Overtime Amount             : ${f(r.overtime_amount || 0)}
   Lunch Allowance             : ${f(r.lunch_amount || 0)}
   Other Payment               : ${f(r.other_payment || 0)}
-                               ─────────────────
+                               -----------------
   GROSS SALARY (Kul Talab)   : ${f(r.gross_salary)}
 ----------------------------------------------------------------
 DEDUCTIONS (KATTI)
   Reserve Fund (10%)          : ${f(r.reserve_fund || 0)}
   CIT (${r.cit_percent || 0}%)                   : ${f(r.cit_amount || 0)}
   TDS / Income Tax            : ${f(r.tds || 0)}
-                               ─────────────────
+                               -----------------
   TOTAL DEDUCTIONS            : ${f((r.reserve_fund||0)+(r.cit_amount||0)+(r.tds||0))}
 ----------------------------------------------------------------
 EMPLOYER CONTRIBUTION
@@ -382,7 +382,7 @@ Annual TDS        : ${f((r.tds || 0) * 12)}
         ))}
       </div>
 
-      {/* ── Payroll Records ── */}
+      {/* -- Payroll Records -- */}
       {tab === 'records' && (
         <Card>
           <CardHeader>
@@ -442,7 +442,7 @@ Annual TDS        : ${f((r.tds || 0) * 12)}
         </Card>
       )}
 
-      {/* ── Salary Structures ── */}
+      {/* -- Salary Structures -- */}
       {tab === 'salary' && (
         <Card>
           <CardHeader>
@@ -496,7 +496,7 @@ Annual TDS        : ${f((r.tds || 0) * 12)}
         </Card>
       )}
 
-      {/* ── Summary Report ── */}
+      {/* -- Summary Report -- */}
       {tab === 'report' && (
         <Card>
           <CardHeader>
@@ -577,7 +577,7 @@ Annual TDS        : ${f((r.tds || 0) * 12)}
         </Card>
       )}
 
-      {/* ── Payslip Dialog ── */}
+      {/* -- Payslip Dialog -- */}
       <Dialog open={payslipDialog.open} onOpenChange={o => setPayslipDialog({ open: o, record: null })}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Payslip - {payslipDialog.record?.employee_name}</DialogTitle></DialogHeader>
@@ -629,7 +629,7 @@ Annual TDS        : ${f((r.tds || 0) * 12)}
         </DialogContent>
       </Dialog>
 
-      {/* ── Salary Structure Dialog ── */}
+      {/* -- Salary Structure Dialog -- */}
       <Dialog open={salaryDialog.open} onOpenChange={o => setSalaryDialog({ open: o, data: null })}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{salaryDialog.data?.id ? 'Edit' : 'Add'} Salary Structure</DialogTitle></DialogHeader>
@@ -735,7 +735,7 @@ Annual TDS        : ${f((r.tds || 0) * 12)}
         </DialogContent>
       </Dialog>
 
-      {/* ── Delete Dialog ── */}
+      {/* -- Delete Dialog -- */}
       <Dialog open={deleteDialog.open} onOpenChange={o => setDeleteDialog({ open: o, id: null })}>
         <DialogContent>
           <DialogHeader><DialogTitle>Delete Payroll Record?</DialogTitle></DialogHeader>

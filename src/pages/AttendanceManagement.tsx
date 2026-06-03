@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/config/supabase';
 import branchService from '../services/branchService';
 import { useAuth } from '../context/AuthContext';
@@ -20,7 +20,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 
-// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Types
 
 interface AttendanceLog {
   id: number;
@@ -74,7 +74,7 @@ interface Device {
 type TabType = 'daily' | 'manual' | 'import' | 'history';
 type DailyViewMode = 'logs' | 'summary';
 
-// â”€â”€ Main Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Main Component
 
 export const AttendanceManagement: React.FC = () => {
   const { user } = useAuth();
@@ -242,23 +242,31 @@ export const AttendanceManagement: React.FC = () => {
   const handleSyncFromDevice = async (device: Device) => {
     setSyncing(true);
     setSyncedLogs([]);
-    setSyncStatus(`ðŸ”„ Syncing logs from ${device.name}...`);
+    setSyncStatus(`Syncing logs from ${device.name}...`);
     try {
-      const { data: syncData } = await supabase.from('attendance_logs').select('*').eq('sync_status', 'pending').limit(100);
-      const logs = syncData || [];
+      // Pull logs directly from the biometric device via Tauri
+      const { invoke } = await import('@tauri-apps/api/core');
+      const logs = await invoke<any[]>('sync_device_logs', {
+        ip: device.ip,
+        port: device.port,
+        deviceId: device.id,
+        brand: device.brand,
+        targetBranchId: device.branch_id || 1,
+        targetGateId: device.gate_id || 1,
+      });
       
       if (logs && logs.length > 0) {
         setSyncedLogs(logs);
         setShowPreview(true);
-        setSyncStatus(`âœ… Successfully pulled ${logs.length} logs from ${device.name}!`);
+        setSyncStatus(`Pulled ${logs.length} logs from ${device.name}`);
       } else {
-        setSyncStatus(`â„¹ï¸ No new logs found on ${device.name}.`);
+        setSyncStatus(`No new logs found on ${device.name}`);
       }
       loadDailyLogs();
       window.dispatchEvent(new CustomEvent('data-synced', { detail: { table: 'employees' } }));
     } catch (error) {
       console.error('Sync failed:', error);
-      setSyncStatus(`âŒ Sync failed: ${error}`);
+      setSyncStatus(`Sync failed: ${error}`);
     } finally {
       setSyncing(false);
       setTimeout(() => setSyncStatus(''), 8000);
@@ -267,7 +275,7 @@ export const AttendanceManagement: React.FC = () => {
 
   const handleManualEntry = async () => {
     if (!manualForm.employeeId || !manualForm.date || !manualForm.time) {
-      setManualStatus('âŒ Please fill all fields');
+      setManualStatus('Error: Please fill all fields');
       return;
     }
     setManualStatus('');
@@ -277,7 +285,7 @@ export const AttendanceManagement: React.FC = () => {
         timestamp: `${manualForm.date} ${manualForm.time}:00`,
         punchMethod: manualForm.method,
       });
-      setManualStatus('âœ… Attendance recorded successfully!');
+      setManualStatus('Attendance recorded successfully!');
       setManualForm({
         employeeId: '',
         date: new Date().toLocaleDateString('en-CA'),
@@ -287,7 +295,7 @@ export const AttendanceManagement: React.FC = () => {
       loadDailyLogs();
       setTimeout(() => setManualStatus(''), 3000);
     } catch (error) {
-      setManualStatus('âŒ Failed: ' + error);
+      setManualStatus('Failed: ' + error);
     }
   };
 
@@ -303,21 +311,21 @@ export const AttendanceManagement: React.FC = () => {
 
   const handleImportCsv = async () => {
     if (!csvContent) {
-      setCsvStatus('âŒ Please select a CSV file');
+      setCsvStatus('Error: Please select a CSV file');
       return;
     }
     setCsvStatus('');
     try {
       // CSV import - process locally
       console.log('CSV import:', csvContent);
-      setCsvStatus('âœ… CSV imported successfully!');
+      setCsvStatus('CSV imported successfully!');
       loadDailyLogs();
       setTimeout(() => {
         setCsvStatus('');
         setCsvContent('');
       }, 2000);
     } catch (error) {
-      setCsvStatus('âŒ Import failed: ' + error);
+      setCsvStatus('Import failed: ' + error);
     }
   };
 
@@ -355,16 +363,17 @@ export const AttendanceManagement: React.FC = () => {
         </div>
       </div>
 
-      {selectedBranch && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {devices.length === 0 ? (
             <Card className="md:col-span-3 border-dashed bg-muted/20">
               <CardContent className="h-20 flex items-center justify-center text-sm text-muted-foreground italic">
-                No attendance devices found for this branch.
+                No attendance devices found. Add a device in Device Settings first.
               </CardContent>
             </Card>
           ) : (
-            devices.map(device => (
+            devices
+              .filter(device => !selectedBranch || device.branch_id === selectedBranch)
+              .map(device => (
               <Card key={device.id} className="shadow-sm border-muted/60">
                 <CardContent className="p-4 py-3">
                   <div className="flex items-center justify-between mb-3">
@@ -405,7 +414,6 @@ export const AttendanceManagement: React.FC = () => {
             )
           ))}
         </div>
-      )}
       <Card className="border-none shadow-sm bg-slate-50 dark:bg-black/20 my-6">
         <CardContent className="p-4">
           <div className="flex flex-wrap items-end gap-4">
@@ -565,13 +573,13 @@ export const AttendanceManagement: React.FC = () => {
                 className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
                   dailyViewMode === 'logs' ? 'bg-white shadow text-primary' : 'text-slate-500 hover:text-slate-700'
                 }`}
-              >ðŸ“‹ Logs View</button>
+              >Logs View</button>
               <button
                 onClick={() => { setDailyViewMode('summary'); loadSummary(); }}
                 className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
                   dailyViewMode === 'summary' ? 'bg-white shadow text-primary' : 'text-slate-500 hover:text-slate-700'
                 }`}
-              >ðŸ“Š Present / Absent / Late</button>
+              >Present / Absent / Late</button>
             </div>
 
             {/* Employee + Date Range filter (Common) */}
@@ -626,7 +634,7 @@ export const AttendanceManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* â”€â”€ SUMMARY VIEW â”€â”€ */}
+          {/* SUMMARY VIEW */}
           {dailyViewMode === 'summary' && (
             <div className="space-y-4">
               {summaryLoading ? (
@@ -643,7 +651,7 @@ export const AttendanceManagement: React.FC = () => {
                           ? attendanceSummary.summary.filter((s: any) => s.days_present > 0).length
                           : attendanceSummary.present.filter((e: any) => !empFilter || String(e.id) === empFilter).length}
                       </p>
-                      <p className="text-xs font-bold text-green-500 mt-1">âœ“ {attendanceSummary.isRange ? 'Ever Present' : 'On Time'}</p>
+                      <p className="text-xs font-bold text-green-500 mt-1">{attendanceSummary.isRange ? 'Ever Present' : 'On Time'}</p>
                     </div>
                     <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-center">
                       <p className="text-3xl font-black text-amber-600">
@@ -651,7 +659,7 @@ export const AttendanceManagement: React.FC = () => {
                           ? attendanceSummary.summary.reduce((acc: number, s: any) => acc + s.days_late, 0)
                           : attendanceSummary.late.filter((e: any) => !empFilter || String(e.id) === empFilter).length}
                       </p>
-                      <p className="text-xs font-bold text-amber-500 mt-1">â° {attendanceSummary.isRange ? 'Total Late Days' : 'Late'}</p>
+                      <p className="text-xs font-bold text-amber-500 mt-1"> {attendanceSummary.isRange ? 'Total Late Days' : 'Late'}</p>
                     </div>
                     <div className="bg-red-50 border border-red-100 rounded-xl p-4 text-center">
                       <p className="text-3xl font-black text-red-600">
@@ -659,7 +667,7 @@ export const AttendanceManagement: React.FC = () => {
                           ? attendanceSummary.summary.filter((s: any) => s.days_present === 0).length
                           : attendanceSummary.absent.filter((e: any) => !empFilter || String(e.id) === empFilter).length}
                       </p>
-                      <p className="text-xs font-bold text-red-500 mt-1">âœ— {attendanceSummary.isRange ? 'Always Absent' : 'Absent'}</p>
+                      <p className="text-xs font-bold text-red-500 mt-1"> {attendanceSummary.isRange ? 'Always Absent' : 'Absent'}</p>
                     </div>
                   </div>
 
@@ -716,7 +724,7 @@ export const AttendanceManagement: React.FC = () => {
                             <div key={emp.id} className="flex items-center justify-between px-4 py-2 border-b border-green-50 hover:bg-green-50/50">
                               <div>
                                 <p className="text-sm font-semibold text-slate-700">{emp.name}</p>
-                                <p className="text-[10px] text-slate-400">{emp.department || 'â€”'}</p>
+                                <p className="text-[10px] text-slate-400">{emp.department || '-'}</p>
                               </div>
                               <div className="text-right">
                                 <Badge className="bg-green-100 text-green-700 border-0 text-[10px] font-mono">{emp.first_punch}</Badge>
@@ -741,7 +749,7 @@ export const AttendanceManagement: React.FC = () => {
                             <div key={emp.id} className="flex items-center justify-between px-4 py-2 border-b border-amber-50 hover:bg-amber-50/50">
                               <div>
                                 <p className="text-sm font-semibold text-slate-700">{emp.name}</p>
-                                <p className="text-[10px] text-slate-400">{emp.department || 'â€”'}</p>
+                                <p className="text-[10px] text-slate-400">{emp.department || '-'}</p>
                               </div>
                               <div className="text-right">
                                 <Badge className="bg-amber-100 text-amber-700 border-0 text-[10px] font-mono">{emp.first_punch}</Badge>
@@ -766,9 +774,9 @@ export const AttendanceManagement: React.FC = () => {
                             <div key={emp.id} className="flex items-center justify-between px-4 py-2 border-b border-red-50 hover:bg-red-50/50">
                               <div>
                                 <p className="text-sm font-semibold text-slate-700">{emp.name}</p>
-                                <p className="text-[10px] text-slate-400">{emp.department || 'â€”'}</p>
+                                <p className="text-[10px] text-slate-400">{emp.department || '-'}</p>
                               </div>
-                              <Badge className="bg-red-100 text-red-700 border-0 text-[10px]">â€”</Badge>
+                              <Badge className="bg-red-100 text-red-700 border-0 text-[10px]">-"</Badge>
                             </div>
                           ))}
                         </CardContent>
@@ -782,12 +790,12 @@ export const AttendanceManagement: React.FC = () => {
             </div>
           )}
 
-          {/* â”€â”€ LOGS VIEW â”€â”€ */}
+          // LOGS VIEW
           {dailyViewMode === 'logs' && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center justify-between">
-                  <span>Attendance Logs â€” {rangeMode ? `${dateFrom} â†’ ${dateTo}` : selectedDate}</span>
+                  <span>Attendance Logs - {rangeMode ? `${dateFrom} -> ${dateTo}` : selectedDate}</span>
                   <Badge variant="secondary">{dailyLogs.length} records</Badge>
                 </CardTitle>
               </CardHeader>
@@ -796,10 +804,10 @@ export const AttendanceManagement: React.FC = () => {
                   <TableHeader>
                     <TableRow className="bg-slate-50/50">
                       <TableHead className="cursor-pointer hover:text-primary transition-colors" onClick={() => setSortConfig({key: 'name', direction: sortConfig?.key === 'name' && sortConfig.direction === 'asc' ? 'desc' : 'asc'})}>
-                        Member Name {sortConfig?.key === 'name' && (sortConfig.direction === 'asc' ? 'â†‘' : 'â†“')}
+                        Member Name {sortConfig?.key === 'name' && (sortConfig.direction === 'asc' ? '^' : 'v')}
                       </TableHead>
                       <TableHead className="cursor-pointer hover:text-primary transition-colors" onClick={() => setSortConfig({key: 'branch_name', direction: sortConfig?.key === 'branch_name' && sortConfig.direction === 'asc' ? 'desc' : 'asc'})}>
-                        Branch {sortConfig?.key === 'branch_name' && (sortConfig.direction === 'asc' ? 'â†‘' : 'â†“')}
+                        Branch {sortConfig?.key === 'branch_name' && (sortConfig.direction === 'asc' ? '^' : 'v')}
                       </TableHead>
                       <TableHead>Timestamps (In/Out History)</TableHead>
                       <TableHead>Method</TableHead>
@@ -832,7 +840,7 @@ export const AttendanceManagement: React.FC = () => {
                               {log.name || 'Unknown'}
                               <span className="ml-2 px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-[10px] font-mono">#{log.employee_code || log.id}</span>
                             </TableCell>
-                            <TableCell className="text-slate-500 text-sm">{log.branch_name || 'â€”'}</TableCell>
+                            <TableCell className="text-slate-500 text-sm">{log.branch_name || '-'}</TableCell>
                             <TableCell>
                               <div className="flex flex-wrap gap-1">
                                 {log.all_punches?.split(' | ').map((p_str: string, i: number) => {
@@ -849,7 +857,7 @@ export const AttendanceManagement: React.FC = () => {
                               <Badge variant="outline" className="capitalize text-[10px]">{log.punch_method || 'Device'}</Badge>
                             </TableCell>
                             <TableCell>
-                              <Badge variant="default" className="bg-green-50 text-green-700 border-green-100 text-[10px]">âœ“ Saved Log</Badge>
+                              <Badge variant="default" className="bg-green-50 text-green-700 border-green-100 text-[10px]"> Saved Log</Badge>
                             </TableCell>
                           </TableRow>
                         ))
@@ -984,7 +992,7 @@ export const AttendanceManagement: React.FC = () => {
 
             {manualStatus && (
               <div className={`mt-4 p-3 rounded-md ${
-                manualStatus.includes('âŒ') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+                manualStatus.includes('Error') || manualStatus.includes('Failed') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
               }`}>
                 {manualStatus}
               </div>
@@ -1033,7 +1041,7 @@ export const AttendanceManagement: React.FC = () => {
 
               {csvStatus && (
                 <div className={`mb-4 p-3 rounded-md ${
-                  csvStatus.includes('âŒ') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+                  csvStatus.includes('Error') || csvStatus.includes('Failed') || csvStatus.includes('failed') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
                 }`}>
                   {csvStatus}
                 </div>
@@ -1059,7 +1067,7 @@ export const AttendanceManagement: React.FC = () => {
                     Showing logs pulled from the biometric device. These have been automatically mapped to employees.
                   </p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => setShowPreview(false)}>âœ•</Button>
+                <Button variant="ghost" size="sm" onClick={() => setShowPreview(false)}>X</Button>
               </div>
             </CardHeader>
             <CardContent className="flex-1 overflow-auto p-0">
@@ -1105,7 +1113,7 @@ export const AttendanceManagement: React.FC = () => {
   );
 };
 
-// â”€â”€ Tab Button Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Tab Button Component
 
 const TabButton: React.FC<{
   icon: React.ReactNode;

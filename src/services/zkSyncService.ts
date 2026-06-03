@@ -15,8 +15,12 @@ import { supabase } from '@/config/supabase';
 
 interface SyncConfig {
   deviceId: number;
+  ip: string;
+  port: number;
   intervalSeconds: number;
   branchId: number;
+  gateId?: number;
+  brand?: string;
   onSync?: (count: number) => void;
   onError?: (err: string) => void;
 }
@@ -79,12 +83,12 @@ class ZKTecoSyncService {
         // Use Tauri invoke to pull from ZKTeco device
         const { invoke } = await import('@tauri-apps/api/core');
         const logs = await invoke<any[]>('sync_device_logs', {
-          ip: '', // from device config
-          port: 4370,
+          ip: this.config.ip,
+          port: this.config.port,
           deviceId: this.config.deviceId,
-          brand: 'ZKTeco',
+          brand: this.config.brand || 'ZKTeco',
           targetBranchId: this.config.branchId,
-          targetGateId: null,
+          targetGateId: this.config.gateId || 1,
         });
 
         if (logs && logs.length > 0) {

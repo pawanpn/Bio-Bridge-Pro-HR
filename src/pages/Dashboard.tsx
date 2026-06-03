@@ -245,7 +245,7 @@ export const Dashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    // Initial data load — runs ONCE on mount
+    // Initial data load - runs ONCE on mount
     invoke<Stats>('get_dashboard_stats').then(s => { 
       // Cast Stats to ERPStats
       setStats(s as unknown as ERPStats); 
@@ -254,7 +254,7 @@ export const Dashboard: React.FC = () => {
     invoke<CloudConfig>('get_cloud_config').then(setCloud);
     loadAndTestDevice();
 
-    // Auto-Sync Timer (QuickSync) — uses refs to avoid re-creating interval
+    // Auto-Sync Timer (QuickSync) - uses refs to avoid re-creating interval
     const syncTimer = setInterval(() => {
       if (isQuickSyncRef.current && deviceRef.current && isDeviceOnlineRef.current && !isSyncingRef.current) {
         setSecondsUntilSync(prev => {
@@ -267,7 +267,7 @@ export const Dashboard: React.FC = () => {
       }
     }, 1000);
 
-    // Subscribe to Real-Time Pulses — runs ONCE on mount
+    // Subscribe to Real-Time Pulses - runs ONCE on mount
     let unlisten: () => void = () => { };
     const setupEvents = async () => {
       const { listen } = await import('@tauri-apps/api/event');
@@ -321,7 +321,8 @@ export const Dashboard: React.FC = () => {
           await invoke('test_device_connection', {
             ip: activeDevice.ip,
             port: activeDevice.port,
-            commKey: 0, // Default 0 for quick check, backend will use DB key anyway
+            commKey: 0,
+            machineNumber: 1,
             brand: activeDevice.brand
           });
           setIsDeviceOnline(true);
@@ -381,6 +382,8 @@ export const Dashboard: React.FC = () => {
         port: device.port,
         deviceId: device.id,
         brand: device.brand,
+        targetBranchId: 1,
+        targetGateId: 1,
       });
       setSyncProgress(null);
       invoke<Stats>('get_dashboard_stats').then(s => { 
@@ -569,7 +572,7 @@ export const Dashboard: React.FC = () => {
         <Card className="border-red-500 bg-red-50 dark:bg-red-950/20">
           <CardContent className="p-4">
             <div className="flex items-center gap-2.5 text-red-600 dark:text-red-400">
-              <span className="text-lg">⚠️</span>
+              <span className="text-lg">️</span>
               <span className="text-sm font-semibold flex-1">{syncError}</span>
               <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-red-600 dark:text-red-400" onClick={() => setSyncError(null)}>
                 <X className="w-4 h-4" />
@@ -870,7 +873,7 @@ export const Dashboard: React.FC = () => {
       ) : (
         <Card className="border-dashed">
           <CardContent className="p-10 text-center">
-            <div className="text-4xl mb-3">📊</div>
+            <div className="text-4xl mb-3">��</div>
             <h3 className="text-lg font-semibold mb-2">No Data Available</h3>
             <p className="text-sm text-muted-foreground">Sync your device to see real-time workforce statistics.</p>
           </CardContent>
