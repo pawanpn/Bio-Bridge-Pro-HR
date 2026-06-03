@@ -130,23 +130,54 @@ export const AttendanceManagement: React.FC = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [branchData, deviceData] = await Promise.all([
-        supabase.from('branches').select('*'),
-        supabase.from('devices').select('*'),
-      ]);
-      const { data: empData } = await supabase.from('employees').select('*').eq('status', 'Active');
-      const mapped = (empData || []).map((e: any) => ({
-        id: e.id,
-        name: e.first_name ? `${e.first_name} ${e.last_name || ''}`.trim() : (e.name || e.full_name || `Employee #${e.id}`),
-        full_name: e.full_name || `${e.first_name || ''} ${e.last_name || ''}`.trim(),
-        department: e.department || '',
-        branch_id: e.branch_id || 0,
-      }));
-      setBranches(branchData.data || []);
-      setEmployees(mapped as Employee[]);
-      setDevices(deviceData.data || []);
-      setGates([]);
-      setLocalDefaultId(null);
+      // Detect desktop (Tauri) vs web (browser) mode
+      const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window;
+
+      if (isDesktop) {
+        // Desktop mode: query local SQLite via Tauri invoke
+        const { invoke } = await import('@tauri-apps/api/core');
+        const [branchList, deviceList, empList] = await Promise.all([
+          invoke<any[]>('list_branches'),
+          invoke<any[]>('list_all_devices'),
+          invoke<any[]>('list_employees_for_select'),
+        ]);
+        setBranches(branchList.map((b: any) => ({ id: b.id, name: b.name })));
+        setDevices(deviceList.map((d: any) => ({
+          id: d.id, name: d.name, brand: d.brand, ip: d.ip,
+          port: d.port, comm_key: d.comm_key, machine_number: d.machine_number,
+          branch_id: d.branch_id, branch_name: d.branch_name,
+          gate_id: d.gate_id, gate_name: d.gate_name,
+          status: d.status, is_default: d.is_default,
+        })));
+        setEmployees(empList.map((e: any) => ({
+          id: e.id,
+          name: e.name || `Employee #${e.id}`,
+          full_name: e.name,
+          department: e.department || '',
+          branch_id: e.branch_id || 0,
+        })));
+        setGates([]);
+        setLocalDefaultId(null);
+      } else {
+        // Web mode: query Supabase
+        const [branchData, deviceData] = await Promise.all([
+          supabase.from('branches').select('*'),
+          supabase.from('devices').select('*'),
+        ]);
+        const { data: empData } = await supabase.from('employees').select('*').eq('status', 'Active');
+        const mapped = (empData || []).map((e: any) => ({
+          id: e.id,
+          name: e.first_name ? `${e.first_name} ${e.last_name || ''}`.trim() : (e.name || e.full_name || `Employee #${e.id}`),
+          full_name: e.full_name || `${e.first_name || ''} ${e.last_name || ''}`.trim(),
+          department: e.department || '',
+          branch_id: e.branch_id || 0,
+        }));
+        setBranches(branchData.data || []);
+        setEmployees(mapped as Employee[]);
+        setDevices(deviceData.data || []);
+        setGates([]);
+        setLocalDefaultId(null);
+      }
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -185,14 +216,34 @@ export const AttendanceManagement: React.FC = () => {
   const loadSummary = async () => {
     setSummaryLoading(true);
     try {
-      if (rangeMode) {
-        const { data: attData } = await supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code)').gte('date', dateFrom).lte('date', dateTo);
-        const result = { data: attData || [], isRange: true, total: attData?.length || 0 };
-        setAttendanceSummary({ ...result, isRange: true });
+      const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window;
+
+      if (isDesktop) {
+        // Desktop mode: use Tauri invoke to get summary from local DB
+        const { invoke } = await import('@tauri-apps/api/core');
+        const result = await invoke<any>('get_attendance_summary', {
+          date: selectedDate,
+          branchId: selectedBranch || null,
+        });
+        setAttendanceSummary({
+          data: result.data || [],
+          present: result.present || [],
+          late: result.late || [],
+          absent: result.absent || [],
+          isRange: false,
+          total: (result.data || []).length,
+        });
       } else {
-        const { data: attData } = await supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code)').eq('date', selectedDate);
-        const result = { data: attData || [], isRange: false, total: attData?.length || 0 };
-        setAttendanceSummary({ ...result, isRange: false });
+        // Web mode: query Supabase
+        if (rangeMode) {
+          const { data: attData } = await supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code)').gte('date', dateFrom).lte('date', dateTo);
+          const result = { data: attData || [], isRange: true, total: attData?.length || 0 };
+          setAttendanceSummary({ ...result, isRange: true });
+        } else {
+          const { data: attData } = await supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code)').eq('date', selectedDate);
+          const result = { data: attData || [], isRange: false, total: attData?.length || 0 };
+          setAttendanceSummary({ ...result, isRange: false });
+        }
       }
     } catch (err) {
       console.error('Summary load failed:', err);
@@ -202,29 +253,50 @@ export const AttendanceManagement: React.FC = () => {
   };
 
   const loadDailyLogs = async () => {
-    const loadHistory = async () => {
-      try {
-        const { data: histData } = await supabase.from('attendance_logs').select('*, employees(first_name, last_name, employee_code)').order('timestamp', { ascending: false }).limit(500);
-        const logs = histData || [];
-        const filtered = selectedBranch 
-          ? logs.filter((l: any) => l.branch_id === selectedBranch)
-          : logs;
-        setAllHistoryLogs(filtered);
-      } catch (err) {
-        console.error(err);
-      }
-    };
-
     setLoading(true);
     try {
-                    const { data: dailyData } = await supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code, biometric_id)').eq('date', selectedDate).order('date', { ascending: false });
-                    setDailyLogs(dailyData || []);
-      const logs = dailyData || [];
-      setDailyLogs(logs || []);
-      
-                if (activeTab === 'history') {
-                  supabase.from('attendance_logs').select('*, employees(first_name, last_name, employee_code)').order('timestamp', { ascending: false }).limit(500).then(({ data }) => setAllHistoryLogs(data || []));
-                }
+      const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window;
+
+      if (isDesktop) {
+        // Desktop mode: use Tauri invoke to get logs from local SQLite
+        const { invoke } = await import('@tauri-apps/api/core');
+        const start = `${selectedDate}T00:00:00`;
+        const end = `${selectedDate}T23:59:59`;
+        const result = await invoke<any>('get_attendance_logs', {
+          startDate: start,
+          endDate: end,
+        });
+        const logs = (result.data || []).map((l: any) => ({
+          ...l,
+          id: l.id,
+          employee_id: l.employee_id,
+          employee_name: l.employee_name || 'Unknown',
+          timestamp: l.timestamp,
+          punch_method: l.punch_method || 'Device',
+          is_synced: l.is_synced || false,
+        }));
+        setDailyLogs(logs);
+
+        // Also load history from local DB
+        const histResult = await invoke<any>('get_attendance_logs', {});
+        const histLogs = (histResult.data || []).map((l: any) => ({
+          ...l,
+          employee_id: l.employee_id,
+          employee_name: l.employee_name || 'Unknown',
+          timestamp: l.timestamp,
+          punch_method: l.punch_method || 'Device',
+          is_synced: l.is_synced || false,
+        }));
+        setAllHistoryLogs(histLogs);
+      } else {
+        // Web mode: query Supabase
+        const { data: dailyData } = await supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code, biometric_id)').eq('date', selectedDate).order('date', { ascending: false });
+        setDailyLogs(dailyData || []);
+
+        if (activeTab === 'history') {
+          supabase.from('attendance_logs').select('*, employees(first_name, last_name, employee_code)').order('timestamp', { ascending: false }).limit(500).then(({ data }) => setAllHistoryLogs(data || []));
+        }
+      }
     } catch (error) {
       console.error('Failed to load daily logs:', error);
     } finally {
@@ -280,11 +352,23 @@ export const AttendanceManagement: React.FC = () => {
     }
     setManualStatus('');
     try {
-      await supabase.from('attendance_logs').insert({
-        employeeId: Number(manualForm.employeeId),
-        timestamp: `${manualForm.date} ${manualForm.time}:00`,
-        punchMethod: manualForm.method,
-      });
+      const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window;
+      const timestamp = `${manualForm.date}T${manualForm.time}:00`;
+
+      if (isDesktop) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        await invoke('add_manual_attendance', {
+          employeeId: Number(manualForm.employeeId),
+          timestamp,
+          punchMethod: manualForm.method,
+        });
+      } else {
+        await supabase.from('attendance_logs').insert({
+          employeeId: Number(manualForm.employeeId),
+          timestamp: `${manualForm.date} ${manualForm.time}:00`,
+          punchMethod: manualForm.method,
+        });
+      }
       setManualStatus('Attendance recorded successfully!');
       setManualForm({
         employeeId: '',
@@ -316,14 +400,44 @@ export const AttendanceManagement: React.FC = () => {
     }
     setCsvStatus('');
     try {
-      // CSV import - process locally
-      console.log('CSV import:', csvContent);
-      setCsvStatus('CSV imported successfully!');
+      const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window;
+
+      if (isDesktop) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const result = await invoke<any>('import_csv_attendance', { csvContent });
+        setCsvStatus(`Imported ${result.imported}, Skipped ${result.skipped}`);
+      } else {
+        // Web mode: process CSV rows and insert via Supabase
+        const lines = csvContent.trim().split('\n');
+        let imported = 0;
+        let skipped = 0;
+        for (const line of lines) {
+          const parts = line.split(',');
+          if (parts.length >= 3) {
+            const empId = parseInt(parts[0].trim());
+            const date = parts[1].trim();
+            const time = parts[2].trim();
+            const method = parts[3]?.trim() || 'CSV';
+            if (!isNaN(empId) && date && time) {
+              const { error } = await supabase.from('attendance_logs').insert({
+                employeeId: empId,
+                timestamp: `${date} ${time}`,
+                punchMethod: method,
+              });
+              if (error) skipped++;
+              else imported++;
+            } else {
+              skipped++;
+            }
+          }
+        }
+        setCsvStatus(`Imported ${imported}, Skipped ${skipped}`);
+      }
       loadDailyLogs();
       setTimeout(() => {
         setCsvStatus('');
         setCsvContent('');
-      }, 2000);
+      }, 3000);
     } catch (error) {
       setCsvStatus('Import failed: ' + error);
     }

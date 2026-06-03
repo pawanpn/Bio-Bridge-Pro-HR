@@ -222,6 +222,13 @@ pub fn init_db(app_dir: &Path) -> Result<Connection> {
         [],
     )?;
 
+    // Prevent duplicate attendance logs at DB level
+    let _ = conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_unique 
+         ON AttendanceLogs(employee_id, timestamp, device_id)",
+        [],
+    );
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS Holidays (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
