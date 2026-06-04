@@ -24,6 +24,20 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 export const initializeSupabase = () => supabase;
 export const getServiceKey = () => SUPABASE_SERVICE_KEY;
+
+// Admin client for provider portal — uses service_role key to bypass RLS.
+// Only use in provider pages where cross-org access is required.
+export const supabaseAdmin = SUPABASE_SERVICE_KEY
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+      db: { schema: PUBLIC_SCHEMA },
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        detectSessionInUrl: false,
+      },
+    })
+  : supabase;
+
 export const PUBLIC_SCHEMA_EXPORT = PUBLIC_SCHEMA;
 
 export type SyncStatus = 'idle' | 'syncing' | 'success' | 'error' | 'conflict';

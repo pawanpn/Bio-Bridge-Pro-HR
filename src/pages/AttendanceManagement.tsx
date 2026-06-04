@@ -290,90 +290,112 @@ export const AttendanceManagement: React.FC = () => {
       const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window;
 
       if (isDesktop) {
-        // Desktop mode: use Tauri invoke to get logs from local SQLite
+        // Desktop mode: use get_daily_reports (proven working, groups by employee+date)
         const { invoke } = await import('@tauri-apps/api/core');
-        const start = `${selectedDate}T00:00:00`;
-        const end = `${selectedDate}T23:59:59`;
-        const result = await invoke<any>('get_attendance_logs', {
-          startDate: start,
-          endDate: end,
+        const data = await invoke<any[]>('get_daily_reports', {
+          fromDate: selectedDate,
+          toDate: selectedDate,
+          dept: 'All',
+          search: '',
+          employeeId: null,
+          branchId: selectedBranch || null,
+          gateId: null,
         });
-        const logs = (result.data || []).map((l: any) => ({
-          ...l,
-          id: l.id,
-          name: l.employee_name || 'Unknown',
-          employee_id: l.employee_id,
-          employee_name: l.employee_name || 'Unknown',
-          employee_code: l.employee_id,
-          branch_name: l.branch_name || '-',
-          all_punches: l.timestamp,
-          timestamp: l.timestamp,
-          punch_method: l.punch_method || 'Device',
-          is_synced: l.is_synced || false,
+        const logs = (data || []).map((d: any) => ({
+          id: d.id,
+          name: d.name || 'Unknown',
+          employee_id: d.id,
+          employee_name: d.name || 'Unknown',
+          employee_code: d.employee_code || d.id,
+          branch_id: selectedBranch || 0,
+          branch_name: d.branch_name || '-',
+          gate_id: 0,
+          gate_name: '-',
+          device_id: 0,
+          all_punches: d.all_punches || '',
+          timestamp: d.date,
+          punch_method: d.method || 'Device',
+          is_synced: true,
         }));
-        setDailyLogs(logs);
+        setDailyLogs(logs as any);
 
         // Also load history from local DB
-        const histResult = await invoke<any>('get_attendance_logs', {});
-        const histLogs = (histResult.data || []).map((l: any) => ({
-          ...l,
-          id: l.id,
-          name: l.employee_name || 'Unknown',
-          employee_id: l.employee_id,
-          employee_name: l.employee_name || 'Unknown',
-          timestamp: l.timestamp,
-          punch_method: l.punch_method || 'Device',
-          is_synced: l.is_synced || false,
+        const histData = await invoke<any[]>('get_daily_reports', {
+          fromDate: '2000-01-01',
+          toDate: new Date().toISOString().split('T')[0],
+          dept: 'All',
+          search: '',
+          employeeId: null,
+          branchId: null,
+          gateId: null,
+        });
+        const histLogs = (histData || []).map((d: any) => ({
+          ...d,
+          id: d.id,
+          name: d.name || 'Unknown',
+          employee_id: d.id,
+          employee_name: d.name || 'Unknown',
+          timestamp: d.first_in || d.date,
+          punch_method: d.method || 'Device',
+          is_synced: true,
         }));
-        setAllHistoryLogs(histLogs);
+        setAllHistoryLogs(histLogs as any);
       } else {
-        // Web mode: query Supabase attendance_logs (raw punches)
-        const startTime = `${selectedDate}T00:00:00`;
-        const endTime = `${selectedDate}T23:59:59`;
-        const { data } = await supabase
-          .from('attendance_logs')
-          .select('*, employees(first_name, last_name, employee_code, biometric_id), branches(name)')
-          .gte('punch_time', startTime)
-          .lte('punch_time', endTime)
-          .order('punch_time', { ascending: false });
-        const mapped = (data || []).map((l: any) => ({
-          id: l.id,
-          name: l.employees?.first_name ? `${l.employees.first_name} ${l.employees.last_name || ''}`.trim() : (l.employee_name || 'Unknown'),
-          employee_id: l.employee_id,
-          employee_name: l.employees?.first_name ? `${l.employees.first_name} ${l.employees.last_name || ''}`.trim() : 'Unknown',
-          employee_code: l.employees?.employee_code || l.employee_id,
-          branch_id: l.branch_id || 0,
-          branch_name: l.branches?.name || l.branch_name || '-',
-          gate_id: l.gate_id || 0,
-          gate_name: l.gate_name || '-',
-          device_id: l.device_id || 0,
-          all_punches: l.punch_time ? new Date(l.punch_time).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }) + '::' + (l.punch_method || 'Device') : '',
-          timestamp: l.punch_time,
-          punch_method: l.punch_method || 'Device',
-          is_synced: l.is_synced || false,
-        }));
+        // Web mode: query Supabase attendance_daily (aggregated daily records)
+        let query = supabase
+          .from('attendance_daily')
+          .select('*, employees(first_name, last_name, employee_code, biometric_id, department), branches(name)')
+          .eq('date', selectedDate)
+          .order('date', { ascending: false });
+        if (selectedBranch) query = query.eq('branch_id', selectedBranch);
+        const { data } = await query;
+        const mapped = (data || []).map((d: any) => {
+          const emp = d.employees || {};
+          const firstName = emp.first_name || '';
+          const lastName = emp.last_name || '';
+          const fullName = firstName ? `${firstName} ${lastName}`.trim() : (d.employee_name || 'Unknown');
+          const firstIn = d.first_in ? new Date(d.first_in).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }) : '';
+          const lastOut = d.last_out ? new Date(d.last_out).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }) : '';
+          const allPunches = [firstIn, lastOut].filter(Boolean).join('::Device | ') + (firstIn || lastOut ? '::Device' : '');
+          return {
+            id: d.id,
+            name: fullName,
+            employee_id: d.employee_id,
+            employee_name: fullName,
+            employee_code: emp.employee_code || d.employee_id,
+            branch_id: d.branch_id || 0,
+            branch_name: d.branches?.name || d.branch_name || '-',
+            gate_id: d.gate_id || 0,
+            gate_name: d.gate_name || '-',
+            device_id: d.device_id || 0,
+            all_punches: allPunches,
+            timestamp: d.date,
+            punch_method: 'Device',
+            is_synced: true,
+          };
+        });
         setDailyLogs(mapped as any);
 
         if (activeTab === 'history') {
           supabase
-            .from('attendance_logs')
+            .from('attendance_daily')
             .select('*, employees(first_name, last_name, employee_code), branches(name)')
-            .order('punch_time', { ascending: false })
+            .order('date', { ascending: false })
             .limit(500)
             .then(({ data }) => {
-              const histMapped = (data || []).map((l: any) => ({
-                id: l.id,
-                name: l.employees?.first_name ? `${l.employees.first_name} ${l.employees.last_name || ''}`.trim() : 'Unknown',
-                employee_id: l.employee_id,
-                employee_name: l.employees?.first_name ? `${l.employees.first_name} ${l.employees.last_name || ''}`.trim() : 'Unknown',
-                branch_id: l.branch_id || 0,
-                branch_name: l.branches?.name || l.branch_name || '-',
-                gate_id: l.gate_id || 0,
-                gate_name: l.gate_name || '-',
-                device_id: l.device_id || 0,
-                timestamp: l.punch_time,
-                punch_method: l.punch_method || 'Device',
-                is_synced: l.is_synced || false,
+              const histMapped = (data || []).map((d: any) => ({
+                id: d.id,
+                name: d.employees?.first_name ? `${d.employees.first_name} ${d.employees.last_name || ''}`.trim() : 'Unknown',
+                employee_id: d.employee_id,
+                employee_name: d.employees?.first_name ? `${d.employees.first_name} ${d.employees.last_name || ''}`.trim() : 'Unknown',
+                branch_id: d.branch_id || 0,
+                branch_name: d.branches?.name || d.branch_name || '-',
+                gate_id: d.gate_id || 0,
+                gate_name: d.gate_name || '-',
+                device_id: d.device_id || 0,
+                timestamp: d.date,
+                punch_method: 'Device',
+                is_synced: true,
               }));
               setAllHistoryLogs(histMapped as any);
             });
