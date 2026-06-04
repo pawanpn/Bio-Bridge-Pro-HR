@@ -4,13 +4,18 @@ import branchService from '../services/branchService';
 import { useAuth } from '../context/AuthContext';
 import {
   Calendar, Upload, UserPlus,
-  Clock, CheckCircle, AlertCircle, RefreshCw, Fingerprint, Database
+  Clock, CheckCircle, AlertCircle, RefreshCw, Fingerprint, Database,
+  Search, Download, Play, FolderOpen, ChevronRight
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { jsPDF } from 'jspdf';
+import 'jspdf-autotable';
+import * as XLSX from 'xlsx';
+import { AppConfig } from '../config/appConfig';
 import {
   Table,
   TableBody,
@@ -72,7 +77,7 @@ interface Device {
 }
 
 type TabType = 'daily' | 'manual' | 'import' | 'history';
-type DailyViewMode = 'logs' | 'summary';
+type DailyViewMode = 'logs' | 'summary' | 'report';
 
 // Main Component
 
@@ -112,6 +117,18 @@ export const AttendanceManagement: React.FC = () => {
   const [dateFrom, setDateFrom] = useState(new Date().toISOString().split('T')[0]);
   const [dateTo, setDateTo] = useState(new Date().toISOString().split('T')[0]);
   const [rangeMode, setRangeMode] = useState(false);
+
+  // Daily Report state
+  const [reportFromDate, setReportFromDate] = useState(new Date().toISOString().split('T')[0]);
+  const [reportToDate, setReportToDate] = useState(new Date().toISOString().split('T')[0]);
+  const [reportDept, setReportDept] = useState('All');
+  const [reportBranch, setReportBranch] = useState<number | null>(null);
+  const [reportSearch, setReportSearch] = useState('');
+  const [reportEmployeeId, setReportEmployeeId] = useState<string>('');
+  const [reportData, setReportData] = useState<any[]>([]);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportGenerated, setReportGenerated] = useState(false);
+  const [departments, setDepartments] = useState<string[]>(['All']);
 
   // Manual entry
   const [manualForm, setManualForm] = useState({
@@ -449,6 +466,103 @@ export const AttendanceManagement: React.FC = () => {
     }
   };
 
+  const loadDepartments = async () => {
+    try {
+      const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window;
+      if (isDesktop) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const depts = await invoke<any[]>('list_departments');
+        setDepartments(['All', ...depts.map((d: any) => d.name)]);
+      } else {
+        const { data } = await supabase.from('employees').select('department');
+        const uniqueDepts = [...new Set((data || []).map((e: any) => e.department).filter(Boolean))];
+        setDepartments(['All', ...uniqueDepts]);
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const handleGenerateReport = async () => {
+    setReportLoading(true);
+    setReportGenerated(true);
+    try {
+      const isDesktop = typeof window !== 'undefined' && '__TAURI__' in window;
+      if (isDesktop) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const data = await invoke<any[]>('get_daily_reports', {
+          fromDate: reportFromDate,
+          toDate: reportToDate,
+          dept: reportDept,
+          search: reportSearch,
+          employeeId: reportEmployeeId ? Number(reportEmployeeId) : null,
+          branchId: reportBranch,
+          gateId: null,
+        });
+        setReportData(data);
+      } else {
+        let query = supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code, department)').order('date', { ascending: false }).order('employee_id');
+        if (reportFromDate) query = query.gte('date', reportFromDate);
+        if (reportToDate) query = query.lte('date', reportToDate);
+        if (reportEmployeeId) query = query.eq('employee_id', Number(reportEmployeeId));
+        if (reportBranch) query = query.eq('branch_id', reportBranch);
+        const { data } = await query;
+        let mapped = (data || []).map((d: any) => ({
+          id: d.id,
+          name: d.employees?.first_name ? `${d.employees.first_name} ${d.employees.last_name || ''}`.trim() : (d.employee_name || 'Unknown'),
+          employee_code: d.employees?.employee_code || d.employee_id,
+          department: d.employees?.department || d.department || '-',
+          branch_name: d.branch_name || '-',
+          date: d.date,
+          all_punches: d.all_punches || d.first_in || '',
+          method: d.punch_method || 'Device',
+        }));
+        if (reportDept !== 'All') mapped = mapped.filter((d: any) => d.department === reportDept);
+        if (reportSearch) {
+          const s = reportSearch.toLowerCase();
+          mapped = mapped.filter((d: any) => d.name.toLowerCase().includes(s) || String(d.employee_code).includes(s));
+        }
+        setReportData(mapped);
+      }
+    } catch (e) { console.error(e); }
+    setReportLoading(false);
+  };
+
+  const exportReportPDF = () => {
+    const doc = new jsPDF('l', 'mm', 'a4') as any;
+    doc.setFontSize(16);
+    doc.setTextColor(44, 62, 80);
+    doc.text(AppConfig.appName.toUpperCase(), 14, 15);
+    doc.setFontSize(9);
+    doc.setTextColor(100);
+    doc.text('Daily Attendance Report', 14, 20);
+    doc.line(14, 22, 280, 22);
+    doc.setFontSize(11);
+    doc.text(`Period: ${reportFromDate} to ${reportToDate}`, 14, 28);
+    doc.autoTable({
+      head: [['Device ID', 'User', 'Dept', 'Date', 'All Punches', 'Method', 'Branch']],
+      body: reportData.map((d: any) => [d.employee_code || d.id, d.name, d.department, d.date, (d.all_punches || '').replace(/::/g, ' ').replace(/ \| /g, ', '), d.method, d.branch_name]),
+      startY: 33,
+      styles: { fontSize: 7 },
+      headStyles: { fillColor: [79, 70, 229] },
+    });
+    doc.save(`BioBridge_DailyReport_${Date.now()}.pdf`);
+  };
+
+  const exportReportExcel = () => {
+    const wsData = reportData.map((d: any) => ({
+      'Device ID': d.employee_code || d.id,
+      'User': d.name,
+      'Department': d.department,
+      'Date': d.date,
+      'All Punches': (d.all_punches || '').replace(/::/g, ' ').replace(/ \| /g, ', '),
+      'Method': d.method,
+      'Branch': d.branch_name,
+    }));
+    const ws = XLSX.utils.json_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Daily Report');
+    XLSX.writeFile(wb, `BioBridge_DailyReport_${Date.now()}.xlsx`);
+  };
+
   const todayStats = {
     totalPunches: dailyLogs.length,
     uniqueEmployees: new Set(dailyLogs.map(l => (l as any).id)).size,
@@ -700,6 +814,12 @@ export const AttendanceManagement: React.FC = () => {
                   dailyViewMode === 'summary' ? 'bg-white shadow text-primary' : 'text-slate-500 hover:text-slate-700'
                 }`}
               >Present / Absent / Late</button>
+              <button
+                onClick={() => setDailyViewMode('report')}
+                className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                  dailyViewMode === 'report' ? 'bg-white shadow text-primary' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >Daily Report</button>
             </div>
 
             {/* Employee + Date Range filter (Common) */}
@@ -986,6 +1106,159 @@ export const AttendanceManagement: React.FC = () => {
                 </Table>
               </CardContent>
             </Card>
+           )}
+          {/* REPORT VIEW */}
+          {dailyViewMode === 'report' && (
+            <div className="space-y-4">
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="min-w-[130px]">
+                      <Label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Branch</Label>
+                      <select
+                        value={reportBranch?.toString() || ''}
+                        onChange={e => setReportBranch(e.target.value ? Number(e.target.value) : null)}
+                        className="h-9 px-3 text-xs rounded-lg border border-slate-200 bg-white w-full"
+                      >
+                        <option value="">All Branches</option>
+                        {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="min-w-[130px]">
+                      <Label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Department</Label>
+                      <select
+                        value={reportDept}
+                        onChange={e => setReportDept(e.target.value)}
+                        className="h-9 px-3 text-xs rounded-lg border border-slate-200 bg-white w-full"
+                        onFocus={() => { if (departments.length <= 1) loadDepartments(); }}
+                      >
+                        {departments.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    </div>
+                    <div className="min-w-[140px]">
+                      <Label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">From</Label>
+                      <Input type="date" value={reportFromDate} onChange={e => setReportFromDate(e.target.value)} className="h-9 font-mono text-xs" />
+                    </div>
+                    <div className="min-w-[140px]">
+                      <Label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">To</Label>
+                      <Input type="date" value={reportToDate} onChange={e => setReportToDate(e.target.value)} className="h-9 font-mono text-xs" />
+                    </div>
+                    <div className="flex-1 min-w-[160px]">
+                      <Label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Employee</Label>
+                      <select
+                        value={reportEmployeeId}
+                        onChange={e => { const v = e.target.value; setReportEmployeeId(v); if (v) setReportSearch(''); }}
+                        className="h-9 px-3 text-xs rounded-lg border border-slate-200 bg-white w-full"
+                      >
+                        <option value="">All Employees</option>
+                        {employees.map(emp => (
+                          <option key={emp.id} value={emp.id}>{emp.name || emp.full_name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex-1 min-w-[160px]">
+                      <Label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Search</Label>
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                        <Input
+                          placeholder="Name or Bio-ID..."
+                          value={reportSearch}
+                          onChange={e => { setReportSearch(e.target.value); if (reportEmployeeId) setReportEmployeeId(''); }}
+                          className="pl-8 h-9 text-xs"
+                        />
+                      </div>
+                    </div>
+                    <Button
+                      onClick={handleGenerateReport}
+                      disabled={reportLoading}
+                      className="h-9 bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-md shadow-primary/10 rounded-lg px-6 flex items-center gap-2"
+                    >
+                      {reportLoading ? (
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <><Play className="h-4 w-4" /> GENERATE</>
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {!reportGenerated ? (
+                <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+                  <FolderOpen className="h-16 w-16 text-slate-200" />
+                  <p className="text-slate-400 text-sm italic">Configure filters above and click GENERATE to fetch the attendance report.</p>
+                </div>
+              ) : reportLoading ? (
+                <div className="flex items-center justify-center py-20">
+                  <RefreshCw className="h-8 w-8 animate-spin text-primary opacity-30" />
+                </div>
+              ) : (
+                <Card className="border-2 border-slate-100 dark:border-slate-800 overflow-hidden shadow-sm">
+                  <div className="bg-slate-50 dark:bg-slate-900 border-b p-4 flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-5 w-5 text-green-500" />
+                      <span className="font-bold text-sm">Attendance Report Ready</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Badge variant="outline" className="font-mono text-xs">{reportData.length} Records</Badge>
+                      <Button variant="outline" size="sm" onClick={exportReportExcel} className="h-8 text-xs">
+                        <Download className="h-3 w-3 mr-1" /> XLSX
+                      </Button>
+                      <Button variant="default" size="sm" onClick={exportReportPDF} className="h-8 text-xs bg-slate-900 hover:bg-slate-800">
+                        <Download className="h-3 w-3 mr-1" /> PDF
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader className="bg-slate-100 dark:bg-slate-800">
+                        <TableRow>
+                          <TableHead className="font-bold text-[9px] uppercase">Device ID</TableHead>
+                          <TableHead className="font-bold text-[9px] uppercase">User</TableHead>
+                          <TableHead className="font-bold text-[9px] uppercase">Date</TableHead>
+                          <TableHead className="font-bold text-[9px] uppercase">All Punches</TableHead>
+                          <TableHead className="font-bold text-[9px] uppercase">Method</TableHead>
+                          <TableHead className="font-bold text-[9px] uppercase text-right">Branch</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {reportData.map((d: any, i: number) => (
+                          <TableRow key={i} className="hover:bg-slate-50/80 transition-colors">
+                            <TableCell className="font-mono text-xs text-slate-400 font-bold">#{d.employee_code || d.id}</TableCell>
+                            <TableCell className="py-3">
+                              <div className="font-bold text-slate-900 dark:text-slate-100">{d.name}</div>
+                              <div className="text-[10px] text-slate-400 font-medium uppercase">{d.department}</div>
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{d.date}</TableCell>
+                            <TableCell>
+                              <div className="flex flex-wrap gap-1.5">
+                                {(d.all_punches ? d.all_punches.split(' | ') : []).map((p_str: string, pi: number) => {
+                                  const parts = p_str.split('::');
+                                  const p = parts[0];
+                                  return (
+                                    <div key={pi} className="flex flex-col items-center">
+                                      <Badge variant="outline" className="text-[10px] font-black py-0.5 px-2 border-primary/20 bg-primary/5 text-primary">
+                                        {p}
+                                      </Badge>
+                                      {pi === 0 && <span className="text-[8px] text-slate-400 font-bold uppercase">In</span>}
+                                      {pi === (d.all_punches.split(' | ').length - 1) && pi > 0 && <span className="text-[8px] text-slate-400 font-bold uppercase">Out</span>}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="secondary" className="text-[9px] font-black uppercase px-2">{d.method || 'Device'}</Badge>
+                            </TableCell>
+                            <TableCell className="text-right font-bold text-xs text-slate-500 uppercase">{d.branch_name || 'Main Office'}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </Card>
+              )}
+            </div>
           )}
         </div>
       )}
