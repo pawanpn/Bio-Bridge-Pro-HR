@@ -230,6 +230,23 @@ export const AttendanceManagement: React.FC = () => {
     }
   }, [selectedDate, selectedBranch, dailyViewMode]);
 
+  const buildAttendanceSummary = (raw: any[], isRange: boolean) => {
+    const mapped = raw.map((r: any) => ({
+      id: r.employee_id,
+      name: r.employees?.first_name ? `${r.employees.first_name} ${r.employees.last_name || ''}`.trim() : (r.employee_name || 'Unknown'),
+      department: r.employees?.department || r.department || '-',
+      first_punch: r.first_in ? new Date(r.first_in).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }) : '-',
+      shift_start: r.shifts?.shift_start || r.shift_start || '09:00',
+      status: r.status || 'Absent',
+      days_present: r.days_present || 0,
+      days_late: r.days_late || 0,
+    }));
+    const present = mapped.filter((e: any) => e.status === 'Present' || e.status === 'On-time');
+    const late = mapped.filter((e: any) => e.status === 'Late');
+    const absent = mapped.filter((e: any) => e.status === 'Absent' || e.status === 'On Leave');
+    setAttendanceSummary({ data: mapped, present, late, absent, isRange, total: mapped.length, summary: mapped });
+  };
+
   const loadSummary = async () => {
     setSummaryLoading(true);
     try {
@@ -253,13 +270,11 @@ export const AttendanceManagement: React.FC = () => {
       } else {
         // Web mode: query Supabase
         if (rangeMode) {
-          const { data: attData } = await supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code)').gte('date', dateFrom).lte('date', dateTo);
-          const result = { data: attData || [], isRange: true, total: attData?.length || 0 };
-          setAttendanceSummary({ ...result, isRange: true });
+          const { data: attData } = await supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code, department), shifts(shift_start)').gte('date', dateFrom).lte('date', dateTo);
+          buildAttendanceSummary(attData || [], true);
         } else {
-          const { data: attData } = await supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code)').eq('date', selectedDate);
-          const result = { data: attData || [], isRange: false, total: attData?.length || 0 };
-          setAttendanceSummary({ ...result, isRange: false });
+          const { data: attData } = await supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code, department), shifts(shift_start)').eq('date', selectedDate);
+          buildAttendanceSummary(attData || [], false);
         }
       }
     } catch (err) {
@@ -312,12 +327,56 @@ export const AttendanceManagement: React.FC = () => {
         }));
         setAllHistoryLogs(histLogs);
       } else {
-        // Web mode: query Supabase
-        const { data: dailyData } = await supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code, biometric_id)').eq('date', selectedDate).order('date', { ascending: false });
-        setDailyLogs(dailyData || []);
+        // Web mode: query Supabase attendance_logs (raw punches)
+        const startTime = `${selectedDate}T00:00:00`;
+        const endTime = `${selectedDate}T23:59:59`;
+        const { data } = await supabase
+          .from('attendance_logs')
+          .select('*, employees(first_name, last_name, employee_code, biometric_id), branches(name)')
+          .gte('punch_time', startTime)
+          .lte('punch_time', endTime)
+          .order('punch_time', { ascending: false });
+        const mapped = (data || []).map((l: any) => ({
+          id: l.id,
+          name: l.employees?.first_name ? `${l.employees.first_name} ${l.employees.last_name || ''}`.trim() : (l.employee_name || 'Unknown'),
+          employee_id: l.employee_id,
+          employee_name: l.employees?.first_name ? `${l.employees.first_name} ${l.employees.last_name || ''}`.trim() : 'Unknown',
+          employee_code: l.employees?.employee_code || l.employee_id,
+          branch_id: l.branch_id || 0,
+          branch_name: l.branches?.name || l.branch_name || '-',
+          gate_id: l.gate_id || 0,
+          gate_name: l.gate_name || '-',
+          device_id: l.device_id || 0,
+          all_punches: l.punch_time ? new Date(l.punch_time).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }) + '::' + (l.punch_method || 'Device') : '',
+          timestamp: l.punch_time,
+          punch_method: l.punch_method || 'Device',
+          is_synced: l.is_synced || false,
+        }));
+        setDailyLogs(mapped as any);
 
         if (activeTab === 'history') {
-          supabase.from('attendance_logs').select('*, employees(first_name, last_name, employee_code)').order('timestamp', { ascending: false }).limit(500).then(({ data }) => setAllHistoryLogs(data || []));
+          supabase
+            .from('attendance_logs')
+            .select('*, employees(first_name, last_name, employee_code), branches(name)')
+            .order('punch_time', { ascending: false })
+            .limit(500)
+            .then(({ data }) => {
+              const histMapped = (data || []).map((l: any) => ({
+                id: l.id,
+                name: l.employees?.first_name ? `${l.employees.first_name} ${l.employees.last_name || ''}`.trim() : 'Unknown',
+                employee_id: l.employee_id,
+                employee_name: l.employees?.first_name ? `${l.employees.first_name} ${l.employees.last_name || ''}`.trim() : 'Unknown',
+                branch_id: l.branch_id || 0,
+                branch_name: l.branches?.name || l.branch_name || '-',
+                gate_id: l.gate_id || 0,
+                gate_name: l.gate_name || '-',
+                device_id: l.device_id || 0,
+                timestamp: l.punch_time,
+                punch_method: l.punch_method || 'Device',
+                is_synced: l.is_synced || false,
+              }));
+              setAllHistoryLogs(histMapped as any);
+            });
         }
       }
     } catch (error) {
@@ -565,7 +624,7 @@ export const AttendanceManagement: React.FC = () => {
 
   const todayStats = {
     totalPunches: dailyLogs.length,
-    uniqueEmployees: new Set(dailyLogs.map(l => (l as any).id)).size,
+    uniqueEmployees: new Set(dailyLogs.map(l => l.employee_id)).size,
     syncedCount: dailyLogs.filter(l => (l as any).is_synced).length,
     pendingSync: dailyLogs.filter(l => !(l as any).is_synced).length,
   };
@@ -860,12 +919,8 @@ export const AttendanceManagement: React.FC = () => {
                   </div>
                   <Button size="sm" className="h-9 text-xs" onClick={async () => {
                     if (dailyViewMode === 'logs') {
-                    const { data: dailyData } = await supabase.from('attendance_daily').select('*, employees(first_name, last_name, employee_code, biometric_id)').eq('date', selectedDate).order('date', { ascending: false });
-                    setDailyLogs(dailyData || []);
+                    await loadDailyLogs();
                     } else {
-                      // We'll update the summary for range if we can, 
-                      // for now it will use the range to maybe show multiple days?
-                      // Actually, let's keep it daily for summary but consistent UI.
                       loadSummary();
                     }
                   }}>Apply</Button>
@@ -1493,10 +1548,6 @@ export const AttendanceManagement: React.FC = () => {
               <Button onClick={() => {
                 setShowPreview(false);
                 loadDailyLogs();
-                // If we are on history tab, refresh that as well
-                if (activeTab === 'history') {
-                  supabase.from('attendance_logs').select('*, employees(first_name, last_name, employee_code)').order('timestamp', { ascending: false }).limit(500).then(({ data }) => setAllHistoryLogs(data || []));
-                }
               }}>Save and Close</Button>
             </div>
           </Card>
